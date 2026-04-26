@@ -56,7 +56,6 @@ class ProfileChecker extends StatefulWidget {
   State<ProfileChecker> createState() => _ProfileCheckerState();
 }
 
-//sdfghjkcvbn
 class _ProfileCheckerState extends State<ProfileChecker> {
   @override
   void initState() {
@@ -93,10 +92,13 @@ class _ProfileCheckerState extends State<ProfileChecker> {
 
       if (!mounted) return;
 
+      // ✅ ALWAYS GO TO HOME SCREEN (even on error)
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("Error: $e"),
-          backgroundColor: Colors.red,
+          content: Text("Backend unavailable. Home screen loaded. Error: $e"),
+          backgroundColor: Colors.orange,
           duration: const Duration(seconds: 5),
         ),
       );

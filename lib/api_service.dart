@@ -3,22 +3,23 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 
 class ApiService {
-  static const String baseUrl = "http://10.59.51.131:8000";
+  static const String baseUrl = "https://thoroughpaced-nabobically-mika.ngrok-free.dev";
+  // static const String baseUrl = "http://127.0.0.1:8000";
 
   static Future<String> _getToken() async {
-  final user = FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
 
-  if (user == null) {
-    throw Exception("User not logged in");
+    if (user == null) {
+      throw Exception("User not logged in");
+    }
+
+    final token = await user.getIdToken();
+    if (token == null) {
+      throw Exception("Failed to get token");
+    }
+
+    return token;
   }
-
-  final token = await user.getIdToken();
-  if (token == null) {
-    throw Exception("Failed to get token");
-  }
-
-  return token;
-}
 
   static Future<Map<String, dynamic>> get(String endpoint) async {
     final token = await _getToken();
