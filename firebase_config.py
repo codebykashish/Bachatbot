@@ -20,3 +20,4 @@ def initialize_firebase():
 def get_firestore():
     # Returns Firestore database client
     return firestore.client()
+

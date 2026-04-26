@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from firebase_config import get_firestore
 from auth import get_current_user
 from gemini import process_chat_message
-from utils import get_current_month_key
+from utils import get_current_month_key, serialize_doc
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
-
+from typing import Optional
 router = APIRouter()
 
 
@@ -121,4 +121,70 @@ async def chat(
             "budgetUpdate": None,
             "alerts": []
         }
+    }
+
+@router.get("/messages")
+async def get_messages(
+    monthKey: Optional[str] = Query(None),
+    limit: int = Query(50),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get chat history/messages for current user
+    """
+    uid = current_user["uid"]
+    db = get_firestore()
+    
+    messages_ref = db.collection("users").document(uid).collection("messages")
+    
+    query = messages_ref.order_by("createdAt", direction="DESCENDING").limit(limit)
+    
+    docs = query.stream()
+    
+    messages = []
+    for doc in docs:
+        data = doc.to_dict()
+        data["id"] = doc.id
+        messages.append(serialize_doc(data))
+    
+    return {
+        "success": True,
+        "data": {
+            "messages": messages,
+            "count": len(messages)
+        }
+    }
+
+
+@router.delete("/messages/{message_id}")
+async def delete_message(
+    message_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Delete a message from chat history
+    """
+    uid = current_user["uid"]
+    db = get_firestore()
+    
+    msg_ref = db.collection("users").document(uid).collection("messages").document(message_id)
+    
+    doc = msg_ref.get()
+    if not doc.exists:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "MESSAGE_NOT_FOUND",
+                    "message": "Message not found"
+                }
+            }
+        )
+    
+    msg_ref.delete()
+    
+    return {
+        "success": True,
+        "message": "Message deleted"
     }
