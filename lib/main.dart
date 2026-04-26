@@ -56,6 +56,7 @@ class ProfileChecker extends StatefulWidget {
   State<ProfileChecker> createState() => _ProfileCheckerState();
 }
 
+//sdfghjk
 class _ProfileCheckerState extends State<ProfileChecker> {
   @override
   void initState() {
@@ -84,12 +85,12 @@ class _ProfileCheckerState extends State<ProfileChecker> {
             context, MaterialPageRoute(builder: (_) => const HomeScreen()));
       } else {
         print("Navigating to OnboardingScreen");
-        Navigator.pushReplacement(
-            context, MaterialPageRoute(builder: (_) => const OnboardingScreen()));
+        Navigator.pushReplacement(context,
+            MaterialPageRoute(builder: (_) => const OnboardingScreen()));
       }
     } catch (e) {
       print("=== PROFILE CHECK ERROR: $e ===");
-      
+
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
