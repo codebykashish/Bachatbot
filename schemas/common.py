@@ -1,18 +1,14 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Any
+from enum import Enum
 
+class LanguageEnum(str, Enum):
+    NEPALI = 'ne'
+    ENGLISH = 'en'
 
-class SuccessResponse(BaseModel):
-    success: bool = True
-    message: Optional[str] = None
-    data: Optional[Any] = None
+class CurrencyEnum(str, Enum):
+    NPR = "NPR"
 
-
-class ErrorDetail(BaseModel):
-    code: str
-    message: str
-
-
-class ErrorResponse(BaseModel):
-    success: bool = False
-    error: ErrorDetail
+class TimestampMixin(BaseModel):
+    createdAt: str
+    updatedAt: str

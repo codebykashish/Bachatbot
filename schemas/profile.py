@@ -1,27 +1,40 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
+from enum import Enum
 
+class OccupationEnum(str, Enum):
+    STUDENT = "student"
+    EMPLOYED = "employed"
+    BUSINESS = "business"
+
+class HousingTypeEnum(str, Enum):
+    RENT = "rent"
+    OWN = "own"
 
 class OnboardingData(BaseModel):
-    isCompleted: bool = False
-    occupation: Optional[str] = None        # "student" | "employed" | "business"
-    housingType: Optional[str] = None       # "rent" | "own"
-    estimatedMonthlySpend: Optional[float] = None
-
+    isComplete: bool = False
+    occupation: Optional[OccupationEnum] = None
+    housingType: Optional[HousingTypeEnum] = None
+    estimatedMontlySpend: Optional[float] = None
 
 class PreferencesData(BaseModel):
-    language: str = "ne"                    # "ne" | "en"
+    language: str = "en"
     currency: str = "NPR"
-    alertThreshold: int = 80               # percentage
+    alertThreshold: int = Field(default=80, ge=0, le=100)
 
+class UserProfileCreate(BaseModel):
+    firstName: str = Field(..., min_length=1)
+    lastName: str = Field(..., min_length=1)
+    email: EmailStr
+    phone: str
 
-class SignupRequest(BaseModel):
+class UserProfileResponse(BaseModel):
+    uid: str
     firstName: str
     lastName: str
     email: str
-    phone: Optional[str] = None
-
-
-class ProfileUpdateRequest(BaseModel):
-    onboarding: Optional[OnboardingData] = None
-    preferences: Optional[PreferencesData] = None
+    phone: str
+    onboarding: OnboardingData
+    preferences: PreferencesData
+    createdAt: str
+    updatedAt: str

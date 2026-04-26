@@ -1,9 +1,32 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
+from enum import Enum
 
+class MessageRoleEnum(str, Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+   
+class IntentEnum(str, Enum):
+    GENERAL_CHAT = "general_chat"
+    EXPENSE_LOG = "expense_log"
+    BUDGET_SET = "budget_set"
+    UNDO_REQUEST = "undo_request"
+    GREETING = "greeting"
+    QUERY_REPORT = "query_report"
+    CONFIRMATION_RESPONSE = "confirmation_response"
 
-class ChatRequest(BaseModel):
-    message: str
-    source: str = "chat"                    # "chat" | "notification"
-    sourceApp: Optional[str] = None         # "eSewa" | "Khalti" etc
-    originalMessageId: Optional[str] = None
+class ChatMessage(BaseModel):
+    content: str = Field(..., min_length=1)
+
+class ChatResponse(BaseModel):
+    reply: str
+    intent: IntentEnum
+    needsConfirmation: bool = False
+    transaction: Optional[dict] = None
+
+class MessageResponse(BaseModel):
+    id: str
+    role: MessageRoleEnum
+    content: str
+    intent: IntentEnum
+    createdAt: str   

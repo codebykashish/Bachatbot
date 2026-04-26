@@ -110,3 +110,65 @@ async def update_profile(
         "success": True,
         "message": "Profile updated."
     }
+
+
+@router.post("/profile")
+async def create_profile(
+    body: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Create initial user profile (for new users after signup)
+    """
+    uid = current_user["uid"]
+    db = get_firestore()
+    
+    firstName = body.get("firstName", "")
+    lastName = body.get("lastName", "")
+    email = body.get("email", "")
+    phone = body.get("phone", "")
+    
+    if not all([firstName, lastName, email]):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "MISSING_FIELDS",
+                    "message": "firstName, lastName, and email are required"
+                }
+            }
+        )
+    
+    user_ref = db.collection("users").document(uid)
+    
+    user_ref.set({
+        "firstName": firstName,
+        "lastName": lastName,
+        "email": email,
+        "phone": phone,
+        "onboarding": {
+            "isCompleted": False,
+            "occupation": None,
+            "housingType": None,
+            "estimatedMonthlySpend": None
+        },
+        "preferences": {
+            "language": "en",
+            "currency": "NPR",
+            "alertThreshold": 80
+        },
+        "createdAt": SERVER_TIMESTAMP,
+        "updatedAt": SERVER_TIMESTAMP
+    })
+    
+    return {
+        "success": True,
+        "message": "Profile created",
+        "data": {
+            "uid": uid,
+            "firstName": firstName,
+            "lastName": lastName,
+            "email": email
+        }
+    }
