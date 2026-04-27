@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 
 class ApiService {
-  static const String baseUrl = "https://thoroughpaced-nabobically-mika.ngrok-free.dev";
+  static const String baseUrl = "https://undying-direness-bagpipe.ngrok-free.dev";
   // static const String baseUrl = "http://127.0.0.1:8000";
 
   static Future<String> _getToken() async {
