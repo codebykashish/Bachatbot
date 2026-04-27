@@ -1,12 +1,40 @@
 import google.generativeai as genai
 import os
 from dotenv import load_dotenv
+from pathlib import Path
+import json
+import re
 
-load_dotenv()
+print("\n" + "="*50)
+print("[GEMINI] Starting initialization...")
+print("="*50)
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+print(f"[DEBUG] Current working directory: {os.getcwd()}")
+
+# Load .env
+env_path = Path(__file__).parent / ".env"
+print(f"[DEBUG] Looking for .env at: {env_path}")
+print(f"[DEBUG] .env exists: {env_path.exists()}")
+
+load_dotenv(override= True)  # Load .env file to get GEMINI_API_KEY
+
+# genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+api_key = os.getenv("GEMINI_API_KEY")
+print(f"[DEBUG] GEMINI_API_KEY loaded: {api_key is not None}")
+if api_key:
+    print(f"[DEBUG] API Key (first 20 chars): {api_key[:20]}...")
+else:
+    print("[DEBUG] ❌ API Key is NONE!")
+
+if api_key:
+    genai.configure(api_key=api_key)
+    print("[DEBUG] ✅ Gemini configured successfully")
+else:
+    print("[DEBUG] ❌ Cannot configure Gemini - no API key")
 
 model = genai.GenerativeModel("gemini-2.5-flash")
+print("[DEBUG] ✅ Model initialized")
+print("="*50 + "\n")
 
 SYSTEM_PROMPT = """
 You are BachatBot, a smart expense tracking assistant for Nepal.
@@ -103,7 +131,11 @@ async def process_chat_message(user_message: str) -> dict:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             print("❌ ERROR: GEMINI_API_KEY is missing from .env file!")
-            return {"reply": "API Key missing", "intent": "error"}
+            return {
+                "reply": "API Key missing", "intent": "error","amount": None,
+                "category": None,
+                "type": None,
+                "description": user_message }
 
         full_prompt = f"{SYSTEM_PROMPT}\n\nUser: {user_message}"
         response = model.generate_content(full_prompt)

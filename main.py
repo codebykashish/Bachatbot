@@ -28,23 +28,23 @@ app.add_middleware(
 # Import and include all routes
 from routes.signup import router as signup_router
 from routes.profile import router as profile_router
-# from routes.chat import router as chat_router
-# from routes.transactions import router as transactions_router
-# from routes.confirm import router as confirm_router
-# from routes.budgets import router as budgets_router
-# from routes.reports import router as reports_router
-# from routes.alerts import router as alerts_router
-# from routes.messages import router as messages_router
+from routes.chat import router as chat_router
+from routes.transactions import router as transactions_router
+from routes.confirm import router as confirm_router
+from routes.budgets import router as budgets_router
+from routes.reports import router as reports_router
+from routes.alerts import router as alerts_router
+from routes.messages import router as messages_router
 
 app.include_router(signup_router)
 app.include_router(profile_router)
-# app.include_router(chat_router)
-# app.include_router(transactions_router)
-# app.include_router(confirm_router)
-# app.include_router(budgets_router)
-# app.include_router(reports_router)
-# app.include_router(alerts_router)
-# app.include_router(messages_router)
+app.include_router(chat_router)
+app.include_router(transactions_router)
+app.include_router(confirm_router)
+app.include_router(budgets_router)
+app.include_router(reports_router)
+app.include_router(alerts_router)
+app.include_router(messages_router)
 
 
 # Health check - test if server is running
