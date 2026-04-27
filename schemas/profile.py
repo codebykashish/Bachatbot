@@ -38,3 +38,11 @@ class UserProfileResponse(BaseModel):
     preferences: PreferencesData
     createdAt: str
     updatedAt: str
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+
+class ProfileUpdateRequest(BaseModel):
+    onboarding: Optional[OnboardingData] = None
+    preferences: Optional[PreferencesData] = None
