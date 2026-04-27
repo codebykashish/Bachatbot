@@ -3,8 +3,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'screens/login_screen.dart';
-import 'screens/home_screen.dart';
+import 'screens/signup_screen.dart';
 import 'screens/onboarding_screen.dart';
+import 'screens/home_screen.dart';
 import 'api_service.dart';
 
 void main() async {
@@ -12,17 +13,28 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // TEMP: Force login screen for testing (remove later)
+  await FirebaseAuth.instance.signOut();
+
   runApp(const MyApp());
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
+    return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: AuthWrapper(),
+      routes: {
+        '/login': (context) => const LoginScreen(),
+        '/signup': (context) => const SignupScreen(),
+        '/onboarding': (context) => const OnboardingScreen(),
+        '/home': (context) => const HomeScreen(),
+      },
+      home: const AuthWrapper(),
     );
   }
 }
@@ -64,44 +76,27 @@ class _ProfileCheckerState extends State<ProfileChecker> {
   }
 
   Future<void> checkProfile() async {
-    print("=== PROFILE CHECK STARTED ===");
-
     try {
-      print("Calling GET /profile...");
+      print("GET /profile...");
       final response = await ApiService.get("/profile");
-      print("PROFILE RESPONSE SUCCESS: $response");
+      print("Profile response: $response");
 
       final onboarding = response['data']['onboarding'] ?? {};
       final isCompleted = onboarding['isCompleted'] ?? false;
 
-      print("ONBOARDING COMPLETED: $isCompleted");
+      print("Onboarding completed: $isCompleted");
 
       if (!mounted) return;
 
       if (isCompleted) {
-        print("Navigating to HomeScreen");
-        Navigator.pushReplacement(
-            context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+        Navigator.pushReplacementNamed(context, '/home');
       } else {
-        print("Navigating to OnboardingScreen");
-        Navigator.pushReplacement(context,
-            MaterialPageRoute(builder: (_) => const OnboardingScreen()));
+        Navigator.pushReplacementNamed(context, '/onboarding');
       }
     } catch (e) {
-      print("=== PROFILE CHECK ERROR: $e ===");
-
-      if (!mounted) return;
-
-      // ✅ ALWAYS GO TO HOME SCREEN (even on error)
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Backend unavailable. Home screen loaded. Error: $e"),
-          backgroundColor: Colors.orange,
-          duration: const Duration(seconds: 5),
-        ),
-      );
+      print("Profile error: $e");
+      // Fallback to home
+      if (mounted) Navigator.pushReplacementNamed(context, '/home');
     }
   }
 
@@ -113,8 +108,8 @@ class _ProfileCheckerState extends State<ProfileChecker> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             CircularProgressIndicator(),
-            SizedBox(height: 20),
-            Text("Loading profile..."),
+            SizedBox(height: 16),
+            Text("Loading..."),
           ],
         ),
       ),

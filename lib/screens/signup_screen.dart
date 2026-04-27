@@ -16,7 +16,17 @@ class _SignupScreenState extends State<SignupScreen> {
   final pass = TextEditingController();
   bool isLoading = false;
 
+  @override
+  void dispose() {
+    first.dispose();
+    last.dispose();
+    email.dispose();
+    pass.dispose();
+    super.dispose();
+  }
+
   Future<void> signup() async {
+    if (!mounted) return;
     setState(() => isLoading = true);
 
     try {
@@ -29,38 +39,33 @@ class _SignupScreenState extends State<SignupScreen> {
         "firstName": first.text.trim(),
         "lastName": last.text.trim(),
         "email": email.text.trim(),
-        "phone": ""
+        "phone": "",
       });
 
       print("SIGNUP SUCCESS");
 
-      if (mounted) Navigator.pop(context);
+      // ✅ FIXED: Use routes instead of pop
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
 
     } on FirebaseAuthException catch (e) {
       print("SIGNUP ERROR: ${e.code}");
-
-      String msg = "Signup failed";
-
-      if (e.code == "email-already-in-use") {
-        msg = "Account already exists. Please login.";
-      } else if (e.code == "weak-password") {
-        msg = "Password too weak (min 6 chars)";
-      } else if (e.code == "invalid-email") {
-        msg = "Invalid email";
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message ?? "Signup failed"), backgroundColor: Colors.red),
+        );
       }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.red),
-      );
     } catch (e) {
       print("SIGNUP ERROR: $e");
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+        );
+      }
     }
 
-    setState(() => isLoading = false);
+    if (mounted) setState(() => isLoading = false);
   }
 
   @override
