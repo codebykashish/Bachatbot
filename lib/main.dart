@@ -9,9 +9,7 @@ import 'api_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const MyApp());
 }
 
@@ -20,9 +18,14 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
+    return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: AuthWrapper(),
+      title: 'BachatBot',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2E7D32)),
+        useMaterial3: true,
+      ),
+      home: const AuthWrapper(),
     );
   }
 }
@@ -36,15 +39,36 @@ class AuthWrapper extends StatelessWidget {
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+          return const _SplashScreen();
         }
         if (!snapshot.hasData || snapshot.data == null) {
           return const LoginScreen();
         }
         return const ProfileChecker();
       },
+    );
+  }
+}
+
+class _SplashScreen extends StatelessWidget {
+  const _SplashScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Color(0xFF2E7D32),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.savings, size: 80, color: Colors.white),
+            SizedBox(height: 16),
+            Text('BachatBot', style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white)),
+            SizedBox(height: 32),
+            CircularProgressIndicator(color: Colors.white),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -57,64 +81,80 @@ class ProfileChecker extends StatefulWidget {
 }
 
 class _ProfileCheckerState extends State<ProfileChecker> {
+  String _status = "Authenticating...";
+
   @override
   void initState() {
     super.initState();
-    checkProfile();
+    _checkProfileSafely();
   }
 
-  Future<void> checkProfile() async {
-    print("=== PROFILE CHECK STARTED ===");
-
+  Future<void> _checkProfileSafely() async {
     try {
-      print("Calling GET /profile...");
+      setState(() => _status = "Getting fresh token...");
+      await Future.delayed(const Duration(milliseconds: 600));
+
       final response = await ApiService.get("/profile");
-      print("PROFILE RESPONSE SUCCESS: $response");
-
-      final onboarding = response['data']['onboarding'] ?? {};
-      final isCompleted = onboarding['isCompleted'] ?? false;
-
-      print("ONBOARDING COMPLETED: $isCompleted");
+      print("📡 PROFILE RESPONSE: $response");
 
       if (!mounted) return;
 
-      if (isCompleted) {
-        print("Navigating to HomeScreen");
-        Navigator.pushReplacement(
-            context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+      if (response['success'] == true) {
+        final onboarding = response['data']?['onboarding'] ?? {};
+        final isCompleted = onboarding['isCompleted'] ?? false;
+
+        if (isCompleted) {
+          setState(() => _status = "Going to Home Screen...");
+          _navigateTo(const HomeScreen());
+        } else {
+          setState(() => _status = "Going to Onboarding...");
+          _navigateTo(const OnboardingScreen());
+        }
       } else {
-        print("Navigating to OnboardingScreen");
-        Navigator.pushReplacement(context,
-            MaterialPageRoute(builder: (_) => const OnboardingScreen()));
+        setState(() => _status = "No profile found → Onboarding");
+        _navigateTo(const OnboardingScreen());
       }
     } catch (e) {
-      print("=== PROFILE CHECK ERROR: $e ===");
-
+      print("❌ PROFILE CHECKER ERROR: $e");
       if (!mounted) return;
 
-      // ✅ ALWAYS GO TO HOME SCREEN (even on error)
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+      setState(() => _status = "Connection error.\nGoing to Home Screen...");
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Backend unavailable. Home screen loaded. Error: $e"),
-          backgroundColor: Colors.orange,
-          duration: const Duration(seconds: 5),
-        ),
-      );
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) _navigateTo(const HomeScreen());
     }
+  }
+
+  void _navigateTo(Widget screen) {
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => screen),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
+      backgroundColor: const Color(0xFF2E7D32),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 20),
-            Text("Loading profile..."),
+            const Icon(Icons.savings, size: 80, color: Colors.white),
+            const SizedBox(height: 24),
+            const Text('BachatBot', style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white)),
+            const SizedBox(height: 40),
+            const CircularProgressIndicator(color: Colors.white),
+            const SizedBox(height: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: Text(
+                _status,
+                style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+            ),
           ],
         ),
       ),
