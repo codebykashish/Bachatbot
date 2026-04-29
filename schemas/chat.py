@@ -14,6 +14,7 @@ class IntentEnum(str, Enum):
     GREETING = "greeting"
     QUERY_REPORT = "query_report"
     CONFIRMATION_RESPONSE = "confirmation_response"
+    SAVING_LOG = "saving_log"
 
 class ChatMessage(BaseModel):
     content: str = Field(..., min_length=1)

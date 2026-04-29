@@ -4,9 +4,13 @@ from auth import get_current_user
 from schemas.profile import ProfileUpdateRequest
 from utils import serialize_doc
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
+from firebase_admin import auth as firebase_auth
+import logging
+from datetime import datetime
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
 
 @router.get("/profile")
 async def get_profile(
@@ -172,3 +176,60 @@ async def create_profile(
             "email": email
         }
     }
+
+@router.post("/logout")
+async def logout(current_user: dict = Depends(get_current_user)):
+    """
+    Logs out the user by revoking their Firebase token.
+    Frontend should call this on logout to invalidate the token.
+    """
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    uid = current_user.get("uid")
+    email = current_user.get("email")
+    
+    logger.info(f"[{timestamp}] 🔄 [LOGOUT] Starting logout for user: {email} (UID: {uid})")
+    
+    try:
+        logger.info(f"[{timestamp}] 🔑 [LOGOUT] Revoking refresh tokens for user: {uid}")
+        firebase_auth.revoke_refresh_tokens(uid)
+        
+        logger.info(f"[{timestamp}] ✅ [LOGOUT] Successfully revoked tokens for user: {uid}")
+        
+        return {
+            "success": True,
+            "message": "User logged out successfully.",
+            "user_uid": uid,
+            "user_email": email
+        }
+        
+    except Exception as e:
+        logger.error(f"[{timestamp}] ❌ [LOGOUT] Error revoking tokens for {uid}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "LOGOUT_FAILED",
+                    "message": f"Failed to log out user: {str(e)}"
+                }
+            }
+        )
+
+    
+    # try:
+    #     firebase_auth.revoke_refresh_tokens(uid)
+    #     return {
+    #         "success": True,
+    #         "message": "User logged out successfully."
+    #     }
+    # except Exception as e:
+    #     raise HTTPException(
+    #         status_code=500,
+    #         detail={
+    #             "success": False,
+    #             "error": {
+    #                 "code": "LOGOUT_FAILED",
+    #                 "message": f"Failed to log out user: {str(e)}"
+    #             }
+    #         }
+    #     )

@@ -1,6 +1,11 @@
 from firebase_admin import auth
 from fastapi import Request, HTTPException
+import logging
+from datetime import datetime
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 async def get_current_user(request: Request):
     """
@@ -10,12 +15,15 @@ async def get_current_user(request: Request):
     It returns the user info (including uid).
     If token is missing or invalid, it returns 401 error.
     """
-    
+    timestamp = datetime.now().strftime("%H:%M:%S")
+
     # Step 1: Get the Authorization header
     auth_header = request.headers.get("Authorization")
-    
+    logger.info(f"[{timestamp}] 🔄 [AUTH] Authorization header present: {bool(auth_header)}")
+
     # Step 2: Check if header exists and has correct format
     if not auth_header:
+        logger.warning(f"[{timestamp}] ❌ [AUTH] Missing Authorization header")
         raise HTTPException(
             status_code=401,
             detail={
@@ -28,6 +36,7 @@ async def get_current_user(request: Request):
         )
     
     if not auth_header.startswith("Bearer "):
+        logger.warning(f"[{timestamp}] ❌ [AUTH] Invalid token format: {auth_header[:20]}...")
         raise HTTPException(
             status_code=401,
             detail={
@@ -41,8 +50,10 @@ async def get_current_user(request: Request):
     
     # Step 3: Extract just the token part (remove "Bearer ")
     token = auth_header.split("Bearer ")[1].strip()
-    
+    logger.info(f"[{timestamp}] 🔑 [AUTH] Token extracted (length: {len(token)})")
+
     if not token:
+        logger.warning(f"[{timestamp}] ❌ [AUTH] Token is empty")
         raise HTTPException(
             status_code=401,
             detail={
@@ -56,11 +67,16 @@ async def get_current_user(request: Request):
     
     # Step 4: Verify token with Firebase
     try:
-        decoded_token = auth.verify_id_token(token)
+        logger.info(f"[{timestamp}] 🔄 [AUTH] Verifying token with Firebase (check_revoked=True)...")
+        decoded_token = auth.verify_id_token(token, check_revoked = False) # check_revoked=True makes sure logged-out tokens are instantly rejected!
         # decoded_token contains: uid, email, name, etc.
+        uid = decoded_token.get("uid")
+        email = decoded_token.get("email")
+        logger.info(f"[{timestamp}] ✅ [AUTH] Token verified successfully - UID: {uid}, Email: {email}")
         return decoded_token
         
-    except auth.ExpiredIdTokenError:
+    except auth.ExpiredIdTokenError as e:
+        logger.warning(f"[{timestamp}] ⏱️ [AUTH] Token expired: {str(e)}")
         raise HTTPException(
             status_code=401,
             detail={
@@ -72,7 +88,8 @@ async def get_current_user(request: Request):
             }
         )
     
-    except auth.InvalidIdTokenError:
+    except auth.InvalidIdTokenError as e:
+        logger.warning(f"[{timestamp}] ❌ [AUTH] Invalid token: {str(e)}")
         raise HTTPException(
             status_code=401,
             detail={
@@ -84,7 +101,8 @@ async def get_current_user(request: Request):
             }
         )
     
-    except auth.RevokedIdTokenError:
+    except auth.RevokedIdTokenError as e:
+        logger.warning(f"[{timestamp}] 🚫 [AUTH] Token revoked: {str(e)}")
         raise HTTPException(
             status_code=401,
             detail={
@@ -97,6 +115,7 @@ async def get_current_user(request: Request):
         )
     
     except Exception as e:
+        logger.error(f"[{timestamp}] ❌ [AUTH] Unexpected error: {type(e).__name__} - {str(e)}")
         raise HTTPException(
             status_code=401,
             detail={

@@ -36,6 +36,19 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 print("[DEBUG] ✅ Model initialized")
 print("="*50 + "\n")
 
+from schemas.categories import(
+    EXPENSE_CATEGORIES,
+    INCOME_SOURCES,
+    SAVING_METHODS,
+    normalize_expense_category,
+    normalize_income_source,
+    normalize_saving_method
+)
+
+EXPENSE_CATEGORY_OPTIONS = " | ".join(f'"{c}"' for c in EXPENSE_CATEGORIES)
+INCOME_SOURCE_OPTIONS = " | ".join(f'"{s}"' for s in INCOME_SOURCES)
+SAVING_METHOD_OPTIONS = " | ".join(f'"{m}"' for m in SAVING_METHODS)
+
 SYSTEM_PROMPT = """
 You are BachatBot, a smart expense tracking assistant for Nepal.
 You understand Nepali and English mixed language (Nepali romanized).
@@ -97,6 +110,8 @@ def parse_gemini_response(response_text: str) -> dict:
             "intent": "general_chat",
             "amount": None,
             "category": None,
+            "source": None,
+            "savingMethod": None,
             "type": None,
             "description": ""
         }
@@ -104,12 +119,25 @@ def parse_gemini_response(response_text: str) -> dict:
     try:
         json_str = "{" + match.group(1) + "}"
         data = json.loads(json_str)
+
+                # Normalize based on type
+        if data.get("type") == "expense" and data.get("category"):
+            data["category"] = normalize_expense_category(data["category"])
+
+        if data.get("type") == "income" and data.get("source"):
+            data["source"] = normalize_income_source(data["source"])
+
+        if data.get("type") == "saving" and data.get("savingMethod"):
+            data["savingMethod"] = normalize_saving_method(data["savingMethod"])
+
         return data
     except json.JSONDecodeError:
         return {
             "intent": "general_chat",
             "amount": None,
             "category": None,
+            "source": None,
+            "savingMethod": None,
             "type": None,
             "description": ""
         }
@@ -134,6 +162,8 @@ async def process_chat_message(user_message: str) -> dict:
             return {
                 "reply": "API Key missing", "intent": "error","amount": None,
                 "category": None,
+                "source": None,
+                "savingMethod": None,
                 "type": None,
                 "description": user_message }
 
@@ -149,6 +179,8 @@ async def process_chat_message(user_message: str) -> dict:
             "intent": parsed_data.get("intent", "general_chat"),
             "amount": parsed_data.get("amount"),
             "category": parsed_data.get("category"),
+            "source": parsed_data.get("source"),
+            "savingMethod": parsed_data.get("savingMethod"),
             "type": parsed_data.get("type"),
             "description": parsed_data.get("description", user_message)
         }
@@ -162,6 +194,8 @@ async def process_chat_message(user_message: str) -> dict:
             "intent": "general_chat",
             "amount": None,
             "category": None,
+            "source": None,
+            "savingMethod": None,
             "type": None,
             "description": user_message
         }

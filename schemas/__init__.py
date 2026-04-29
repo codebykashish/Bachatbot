@@ -3,7 +3,23 @@ from .chat import ChatResponse, IntentEnum, ChatMessage, MessageResponse
 from .profile import OccupationEnum, HousingTypeEnum, OnboardingData, UserProfileCreate, UserProfileResponse
 from .transaction import TransactionTypeEnum, TransactionStatusEnum, TransactionResponse, TransactionsResponse
 from .common import LanguageEnum, CurrencyEnum
-
+from .categories import(
+    ExpenseCategoryEnum,
+    IncomeSourceEnum,
+    SavingMethodEnum,
+    EXPENSE_CATEGORIES,
+    INCOME_SOURCES,
+    SAVING_METHODS,
+    DEFAULT_EXPENSE_CATEGORY,
+    DEFAULT_INCOME_SOURCE,
+    DEFAULT_SAVING_METHOD,
+    is_valid_expense_category,
+    is_valid_income_source,
+    is_valid_saving_method,
+    normalize_expense_category,
+    normalize_income_source,
+    normalize_saving_method,
+)
 __all__ = [
     "ChatResponse",
     "IntentEnum",
@@ -20,4 +36,19 @@ __all__ = [
     "TransactionsResponse",
     "LanguageEnum",
     "CurrencyEnum",
+    "ExpenseCategoryEnum",
+    "IncomeSourceEnum",
+    "SavingMethodEnum",
+    "EXPENSE_CATEGORIES",
+    "INCOME_SOURCES",
+    "SAVING_METHODS",
+    "DEFAULT_EXPENSE_CATEGORY",
+    "DEFAULT_INCOME_SOURCE",
+    "DEFAULT_SAVING_METHOD",
+    "is_valid_expense_category",
+    "is_valid_income_source",
+    "is_valid_saving_method",
+    "normalize_expense_category",
+    "normalize_income_source",
+    "normalize_saving_method",
 ]

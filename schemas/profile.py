@@ -12,7 +12,7 @@ class HousingTypeEnum(str, Enum):
     OWN = "own"
 
 class OnboardingData(BaseModel):
-    isComplete: bool = False
+    isCompleted: bool = False
     occupation: Optional[OccupationEnum] = None
     housingType: Optional[HousingTypeEnum] = None
     estimatedMontlySpend: Optional[float] = None
