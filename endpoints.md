@@ -128,6 +128,7 @@ async def get_current_user(request: Request):
 | 12 | GET | `/alerts` | Get alerts | ✅ | `users/{uid}/alerts` |
 | 13 | PATCH | `/alerts/{id}/read` | Mark alert read | ✅ | `users/{uid}/alerts/{id}` |
 | 14 | GET | `/messages` | Get chat history | ✅ | `users/{uid}/messages` |
+| 15 | GET | `/notifications` | List SMS notification history (with filters) | ✅ | `users/{uid}/notifications` |
 
 ---
 
@@ -1217,6 +1218,106 @@ Summary card:
   }
 }
 ```
+---
+
+### Endpoint 15: `GET /notifications`
+
+**Purpose:** Fetch SMS/notification history for **Notifications Page** (Architecture section 8).  
+Lists raw SMS + parsed data + confirmation status.
+
+**Firestore reads from:** `users/{uid}/notifications`
+
+**Query Parameters:**
+
+| Param | Type | Required | Default | Example |
+|-------|------|----------|---------|---------|
+| `monthKey` | string | No | current month | `2026-04` |
+| `category` | string | No | all | `Food` |
+| `week` | string | No | all | `2026-W15` (ISO week) |
+| `status` | string | No | all | `pending` |
+| `limit` | int | No | 20 | `50` |
+
+**Example Calls:**
+GET /notifications
+GET /notifications?monthKey=2026-04
+GET /notifications?monthKey=2026-04&category=Food
+GET /notifications?week=2026-W15&status=pending
+GET /notifications?status=pending&limit=50
+
+
+**What backend does:**
+
+1. Verify token → get uid
+2. Query users/{uid}/notifications ordered by createdAt DESC
+3. Apply filters:
+monthKey (exact match)
+category (match parsedCategory field)
+week: compute ISO week-of-year from createdAt (e.g., "2026-W15")
+status (exact: pending/confirmed/rejected)
+4. Apply limit
+5. Count unreadCount (status == "pending" OR isRead == false)
+6. Return array + metadata
+
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "notifications": [
+      {
+        "id": "notif_xyz789",
+        "rawText": "eSewa: Payment of Rs 250 successful to Bhatbhateni",
+        "parsedAmount": 250,
+        "parsedCategory": "Food",
+        "parsedType": "expense",
+        "sourceApp": "eSewa",
+        "status": "confirmed",
+        "transactionId": "txn_abc123",
+        "isRead": true,
+        "createdAt": "2026-04-10T12:30:00Z"
+      },
+      {
+        "id": "notif_abc123",
+        "rawText": "Khalti: Rs 1500 debited for momo shop",
+        "parsedAmount": 1500,
+        "parsedCategory": "Food",
+        "parsedType": "expense",
+        "sourceApp": "Khalti",
+        "status": "pending",
+        "transactionId": "txn_pending_456",
+        "isRead": false,
+        "createdAt": "2026-04-12T18:00:00Z"
+      }
+    ],
+    "unreadCount": 1,
+    "hasMore": false
+  }
+}
+
+Empty Response:
+
+JSON
+
+{
+  "success": true,
+  "data": {
+    "notifications": [],
+    "unreadCount": 0,
+    "hasMore": false
+  }
+}
+
+Frontend uses this for:
+
+text
+
+Notifications Page (Settings → Notifications):
+  - Filter by Week/Month/Category
+  - Show rawText + parsed amount/category
+  - Show status badge (pending = yellow, confirmed = green, rejected = red)
+  - Tap notification → show confirm/reject buttons (call /confirm-transaction or /reject-transaction)
+  - Unread badge count on hamburger menu
 
 ---
 
@@ -1283,6 +1384,7 @@ backend/
 │   ├── reports.py             # GET /monthly-report
 │   ├── alerts.py              # GET /alerts, PATCH /alerts/{id}/read
 │   └── messages.py            # GET /messages
+│   └── notifications.py       # GET /notifications (NEW)
 ├── services/
 │   ├── transaction_service.py # Transaction CRUD logic
 │   ├── budget_service.py      # Budget CRUD + spent update
@@ -1339,4 +1441,5 @@ Income categories: Salary, Freelance, Gift, Other
 | 12 | `GET /alerts` | Alert display |
 | 13 | `PATCH /alerts/{id}/read` | UX polish |
 | 14 | `DELETE /transactions/{id}` | Edit/delete feature |
+| 15 | `GET /notifications` | Notifications Page (SMS history + filters) |
 
