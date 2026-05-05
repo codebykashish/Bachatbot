@@ -24,9 +24,6 @@ No matter where the user is in the app, these navigation elements are always acc
     3.  Reports
 *   **💬 Floating Action Button (FAB):** A Chat icon hovering at the bottom right (above the footer). Clicking this opens the **Chatbot Interface** from anywhere.
 *   **🍔 Hamburger Menu (Top Left):** Opens a side drawer containing:
-    *   🏠 Home
-    *   🗂️ Categories
-    *   📊 Reports
     *   ⚙️ Settings *(Placeholder/Empty for now)*
     *   ℹ️ About Us *(Routes to a static About Us page)*
     *   🚪 Logout *(Clears session and routes back to Login)*
@@ -41,7 +38,7 @@ The central hub for the user's financial overview.
     *   *Interaction:* When clicked, they play a **flip animation** to reveal the total amount.
     *   *Logic:* Income amount visually reflects the "Available Balance" (Total Income - Total Expenses).
 *   **🏷️ Categories Preview:** A mini-list of top spending categories with a "See All" button.
-*   **📉 Report Preview:** A mini bar graph showing a quick visual insight into spending.
+*   **📉 Report Preview:** A mini bar graph showing a quick visual insight into spending. *Clicking the graph navigates to the full Reports page.*
 
 ---
 
@@ -60,7 +57,7 @@ Accessed via the Bottom Nav or "See All" on the Home Page.
 
 ## 5. 📊 Reports & Analytics
 
-Accessed via the Bottom Nav or the Hamburger menu.
+Accessed via the Bottom Nav or the Home page Report Preview graph.
 
 *   **📈 Visuals:** A detailed Bar Graph providing month-wise insights (Amount vs. Category).
 *   **🔍 Budget Breakdown:** Below the graph, a notification-style list of categories showing exact utilization limits (e.g., `Food: 5,000 / 10,000`).
