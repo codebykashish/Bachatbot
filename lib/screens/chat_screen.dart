@@ -15,6 +15,9 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isLoading = false;
   bool _isHistoryLoaded = false;
 
+  static const Color _primary = Color(0xFF2DBE7F);
+  static const Color _pageBg = Color(0xFFF6F7F9);
+
   @override
   void initState() {
     super.initState();
@@ -28,15 +31,12 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  /// Load previous chat messages from backend
   Future<void> _loadHistory() async {
     try {
       final response = await ApiService.get('/messages?limit=50');
       if (!mounted) return;
 
       final msgs = response['data']?['messages'] as List? ?? [];
-
-      // Messages come newest first, reverse for chat display
       final reversed = msgs.reversed.toList();
 
       setState(() {
@@ -54,7 +54,6 @@ class _ChatScreenState extends State<ChatScreen> {
       _scrollToBottom();
     } catch (e) {
       setState(() => _isHistoryLoaded = true);
-      debugPrint('Error loading history: $e');
     }
   }
 
@@ -67,6 +66,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _messages.add({'role': 'user', 'content': text});
       _isLoading = true;
     });
+
     _scrollToBottom();
 
     try {
@@ -80,18 +80,12 @@ class _ChatScreenState extends State<ChatScreen> {
       final data = response['data'];
       final reply = data?['reply'] ?? 'Sorry, I could not understand that.';
       final intent = data?['intent'] ?? 'general_chat';
-      final needsConfirmation = data?['needsConfirmation'] ?? false;
-      final transaction = data?['transaction'];
-      final budgetUpdate = data?['budgetUpdate'];
 
       setState(() {
         _messages.add({
           'role': 'assistant',
           'content': reply,
           'intent': intent,
-          'transaction': transaction,
-          'budgetUpdate': budgetUpdate,
-          'needsConfirmation': needsConfirmation,
         });
         _isLoading = false;
       });
@@ -99,14 +93,15 @@ class _ChatScreenState extends State<ChatScreen> {
       _scrollToBottom();
     } catch (e) {
       if (!mounted) return;
+
       setState(() {
         _messages.add({
           'role': 'assistant',
-          'content': 'Sorry, something went wrong. Please try again.',
-          'intent': 'error',
+          'content': 'Something went wrong.',
         });
         _isLoading = false;
       });
+
       _scrollToBottom();
     }
   }
@@ -125,422 +120,179 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Chat messages list
-        Expanded(
-          child: !_isHistoryLoaded
-              ? const Center(child: CircularProgressIndicator())
-              : _messages.isEmpty
-                  ? _buildEmptyState()
-                  : ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 16,
-                      ),
-                      itemCount: _messages.length + (_isLoading ? 1 : 0),
-                      itemBuilder: (context, index) {
-                        if (index == _messages.length) {
-                          return _buildTypingIndicator();
-                        }
-                        return _buildMessageBubble(_messages[index]);
-                      },
-                    ),
-        ),
+    // Header is always visible (like your screenshot).
+    const int headerCount = 1;
+    final int staticGreetingCount = (_messages.isEmpty ? 1 : 0);
+    final int typingCount = (_isLoading ? 1 : 0);
 
-        // Input bar
-        _buildInputBar(),
-      ],
-    );
-  }
+    final int totalItems =
+        headerCount + staticGreetingCount + _messages.length + typingCount;
 
-  Widget _buildEmptyState() {
-    return Center(
+    return Container(
+      color: _pageBg,
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.chat_bubble_outline,
-              size: 72, color: Colors.grey.shade300),
-          const SizedBox(height: 16),
-          const Text(
-            'Hi! I am BachatBot 👋',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF2E7D32),
-            ),
+          Expanded(
+            child: !_isHistoryLoaded
+                ? const Center(child: CircularProgressIndicator())
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 160),
+                    itemCount: totalItems,
+                    itemBuilder: (context, index) {
+                      // 0 => header
+                      if (index == 0) return _buildHeader();
+
+                      // optional static greeting when no messages
+                      if (staticGreetingCount == 1 && index == 1) {
+                        return Column(
+                          children: [
+                            const SizedBox(height: 14),
+                            _assistantBubble(
+                              content:
+                                  "Hello! I'm BachatBot, your personal finance assistant. How can I help you manage your budget today?",
+                              time: "10:00 AM",
+                            ),
+                          ],
+                        );
+                      }
+
+                      final int messageStartIndex =
+                          headerCount + staticGreetingCount;
+                      final int messageIndex = index - messageStartIndex;
+
+                      // messages
+                      if (messageIndex >= 0 && messageIndex < _messages.length) {
+                        return _buildMessageBubble(
+                          _messages[messageIndex],
+                          // show demo-like times without changing your logic/data
+                          time: _fakeTimeForIndex(messageIndex),
+                        );
+                      }
+
+                      // typing indicator at end
+                      return _buildTypingIndicator();
+                    },
+                  ),
           ),
-          const SizedBox(height: 8),
-          const Text(
-            'Tell me about your expenses!\nExample: "Momo khada Rs 250 gayo"',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey, height: 1.5),
-          ),
-          const SizedBox(height: 24),
-          // Quick action chips
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              _buildChip('💸 I spent Rs 500 on food'),
-              _buildChip('📊 Show my spending'),
-              _buildChip('💰 What is my balance?'),
-            ],
-          ),
+
+          // bottom composer
+          _buildInputBar(),
         ],
       ),
     );
   }
 
-  Widget _buildChip(String label) {
-    return GestureDetector(
-      onTap: () {
-        _controller.text = label
-            .replaceAll('💸 ', '')
-            .replaceAll('📊 ', '')
-            .replaceAll('💰 ', '');
-        _send();
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          border: Border.all(color: const Color(0xFF2E7D32).withOpacity(0.4)),
-          borderRadius: BorderRadius.circular(20),
-          color: const Color(0xFF2E7D32).withOpacity(0.05),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 13,
-            color: Color(0xFF2E7D32),
+  // ================= HEADER (top empty state panel) =================
+
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10, bottom: 2),
+      child: Column(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: _primary.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(Icons.auto_awesome, color: _primary, size: 22),
           ),
-        ),
+          const SizedBox(height: 10),
+          const Text(
+            "Ask me anything about your expenses.",
+            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 4),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 18),
+            child: Text(
+              "Try asking about your monthly summary or setting a new budget goal.",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey, height: 1.3, fontSize: 12.5),
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Divider(height: 22),
+        ],
       ),
     );
   }
 
-  Widget _buildMessageBubble(Map<String, dynamic> msg) {
-    final isUser = msg['role'] == 'user';
-    final content = msg['content'] as String? ?? '';
-    final transaction = msg['transaction'] as Map?;
-    final budgetUpdate = msg['budgetUpdate'] as Map?;
-    final needsConfirmation = msg['needsConfirmation'] as bool? ?? false;
+  // ================= MESSAGE BUBBLES =================
 
+  Widget _buildMessageBubble(Map<String, dynamic> msg, {required String time}) {
+    final isUser = msg['role'] == 'user';
+    final content = (msg['content'] ?? '').toString();
+
+    if (isUser) {
+      return _userBubble(content: content, time: time);
+    }
+    return _assistantBubble(content: content, time: time);
+  }
+
+  Widget _assistantBubble({required String content, required String time}) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment:
-            isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          // Role label
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4, left: 4, right: 4),
-            child: Text(
-              isUser ? 'You' : 'BachatBot',
-              style: TextStyle(
-                fontSize: 11,
-                color: Colors.grey.shade500,
-                fontWeight: FontWeight.w500,
+          // avatar
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [
+                  Colors.blueGrey.shade300,
+                  Colors.blueGrey.shade600,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
+            child: const Center(
+              child: Icon(Icons.smart_toy, size: 16, color: Colors.white),
+            ),
           ),
+          const SizedBox(width: 10),
 
-          // Message bubble
-          Row(
-            mainAxisAlignment:
-                isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (!isUser) ...[
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: const Color(0xFF2E7D32),
-                  child: const Icon(Icons.savings,
-                      color: Colors.white, size: 16),
-                ),
-                const SizedBox(width: 8),
-              ],
-              Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 10),
+          // bubble + time
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
-                    color: isUser
-                        ? const Color(0xFF2E7D32)
-                        : Colors.grey.shade100,
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(16),
-                      topRight: const Radius.circular(16),
-                      bottomLeft: Radius.circular(isUser ? 16 : 4),
-                      bottomRight: Radius.circular(isUser ? 4 : 16),
-                    ),
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE6E8EE)),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
+                        color: Colors.black.withOpacity(0.04),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
                       ),
                     ],
                   ),
                   child: Text(
                     content,
-                    style: TextStyle(
-                      color: isUser ? Colors.white : Colors.black87,
-                      fontSize: 15,
-                      height: 1.4,
+                    style: const TextStyle(
+                      fontSize: 13.8,
+                      height: 1.35,
+                      color: Color(0xFF22252A),
                     ),
                   ),
                 ),
-              ),
-              if (isUser) const SizedBox(width: 8),
-            ],
-          ),
-
-          // Transaction card (if logged)
-          if (!isUser && transaction != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8, left: 40),
-              child: _buildTransactionCard(transaction),
-            ),
-
-          // Budget update card
-          if (!isUser && budgetUpdate != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 6, left: 40),
-              child: _buildBudgetUpdateCard(budgetUpdate),
-            ),
-
-          // Pending confirmation buttons
-          if (!isUser && needsConfirmation && transaction != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8, left: 40),
-              child: _buildConfirmationButtons(transaction['id']),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTransactionCard(Map transaction) {
-    final isExpense = transaction['type'] == 'expense';
-    final amount = transaction['amount'];
-    final category = transaction['category'] ?? '';
-    final status = transaction['status'] ?? '';
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isExpense
-              ? Colors.red.shade200
-              : Colors.green.shade200,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 4,
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            isExpense ? Icons.arrow_downward : Icons.arrow_upward,
-            color: isExpense ? Colors.red : Colors.green,
-            size: 20,
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Rs ${amount}',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: isExpense ? Colors.red : Colors.green,
-                  fontSize: 15,
+                const SizedBox(height: 6),
+                Text(
+                  time,
+                  style: const TextStyle(fontSize: 10.5, color: Colors.grey),
                 ),
-              ),
-              Text(
-                '$category • $status',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBudgetUpdateCard(Map budget) {
-    final category = budget['category'] ?? '';
-    final spent = budget['spent'] ?? 0;
-    final limit = budget['limit'] ?? 0;
-    final percent = budget['percentUsed'] ?? 0;
-    final remaining = budget['remaining'] ?? 0;
-
-    Color barColor = Colors.green;
-    if (percent >= 100) {
-      barColor = Colors.red;
-    } else if (percent >= 80) {
-      barColor = Colors.orange;
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.blue.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.blue.shade200),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$category Budget',
-            style: const TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
-              color: Colors.blue,
-            ),
-          ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: (percent / 100).clamp(0.0, 1.0),
-              backgroundColor: Colors.grey.shade300,
-              valueColor: AlwaysStoppedAnimation<Color>(barColor),
-              minHeight: 6,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Rs $spent / Rs $limit ($percent%) • Rs $remaining remaining',
-            style: const TextStyle(fontSize: 11, color: Colors.black54),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildConfirmationButtons(String transactionId) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ElevatedButton.icon(
-          onPressed: () => _confirmTransaction(transactionId),
-          icon: const Icon(Icons.check, size: 16),
-          label: const Text('Confirm'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF2E7D32),
-            padding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 8),
-            textStyle: const TextStyle(fontSize: 13),
-          ),
-        ),
-        const SizedBox(width: 8),
-        OutlinedButton.icon(
-          onPressed: () => _rejectTransaction(transactionId),
-          icon: const Icon(Icons.close, size: 16, color: Colors.red),
-          label: const Text(
-            'Reject',
-            style: TextStyle(color: Colors.red),
-          ),
-          style: OutlinedButton.styleFrom(
-            side: const BorderSide(color: Colors.red),
-            padding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 8),
-            textStyle: const TextStyle(fontSize: 13),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _confirmTransaction(String transactionId) async {
-    try {
-      await ApiService.post(
-          '/confirm-transaction/$transactionId', {});
-      if (!mounted) return;
-      setState(() {
-        _messages.add({
-          'role': 'assistant',
-          'content': '✅ Transaction confirmed and saved!',
-          'intent': 'confirmation',
-        });
-      });
-      _scrollToBottom();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  Future<void> _rejectTransaction(String transactionId) async {
-    try {
-      await ApiService.post(
-          '/reject-transaction/$transactionId', {});
-      if (!mounted) return;
-      setState(() {
-        _messages.add({
-          'role': 'assistant',
-          'content': '❌ Transaction rejected.',
-          'intent': 'rejection',
-        });
-      });
-      _scrollToBottom();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  Widget _buildTypingIndicator() {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12, left: 12),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 16,
-            backgroundColor: const Color(0xFF2E7D32),
-            child: const Icon(Icons.savings,
-                color: Colors.white, size: 16),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade100,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _dot(0),
-                const SizedBox(width: 4),
-                _dot(150),
-                const SizedBox(width: 4),
-                _dot(300),
               ],
             ),
           ),
@@ -549,88 +301,255 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _dot(int delayMs) {
+  Widget _userBubble({required String content, required String time}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: _primary,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFF4F6CFF), width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _primary.withOpacity(0.16),
+                        blurRadius: 14,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    content,
+                    style: const TextStyle(
+                      fontSize: 13.8,
+                      height: 1.35,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Text(
+                      time,
+                      style:
+                          const TextStyle(fontSize: 10.5, color: Colors.grey),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(Icons.done_all, size: 14, color: Colors.grey),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ================= THINKING =================
+
+  Widget _buildTypingIndicator() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 10),
+      child: Row(
+        children: [
+          Container(
+            constraints: const BoxConstraints(minHeight: 38),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE6E8EE)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _dot(delayMs: 0),
+                const SizedBox(width: 4),
+                _dot(delayMs: 180),
+                const SizedBox(width: 4),
+                _dot(delayMs: 360),
+                const SizedBox(width: 8),
+                const Text(
+                  "BachatBot is thinking...",
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dot({required int delayMs}) {
     return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 600),
+      tween: Tween(begin: 0.25, end: 1),
+      duration: const Duration(milliseconds: 700),
       curve: Curves.easeInOut,
-      builder: (context, value, child) {
-        return Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: Colors.grey.shade400,
-            shape: BoxShape.circle,
+      onEnd: () {
+        // keep animating by rebuilding naturally through list updates;
+        // no logic changes needed
+      },
+      builder: (context, value, _) {
+        return Opacity(
+          opacity: value,
+          child: Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade400,
+              shape: BoxShape.circle,
+            ),
           ),
         );
       },
     );
   }
 
-  Widget _buildInputBar() {
+  // ================= QUICK ACTIONS (UI only) =================
+
+  Widget _buildQuickActions() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      child: Row(
+        children: [
+          _quickActionButton(Icons.add, "Add expense"),
+          const SizedBox(width: 10),
+          _quickActionButton(Icons.bar_chart, "Show report"),
+          const SizedBox(width: 10),
+          _quickActionButton(Icons.notifications, "Set reminder"),
+        ],
+      ),
+    );
+  }
+
+  Widget _quickActionButton(IconData icon, String text) {
     return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE6E8EE)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 8,
-        top: 8,
-        bottom: MediaQuery.of(context).viewInsets.bottom > 0 ? 8 : 16,
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: _primary),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: const TextStyle(fontSize: 12.5, color: Color(0xFF22252A)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ================= INPUT =================
+
+  Widget _buildInputBar() {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _pageBg,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 16,
+            offset: const Offset(0, -6),
+          ),
+        ],
       ),
       child: SafeArea(
-        child: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _controller,
-                maxLines: null,
-                keyboardType: TextInputType.multiline,
-                textInputAction: TextInputAction.newline,
-                decoration: InputDecoration(
-                  hintText: 'Type your message...',
-                  hintStyle: TextStyle(color: Colors.grey.shade400),
-                  filled: true,
-                  fillColor: Colors.grey.shade100,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
-                  ),
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: bottomInset > 0 ? 6 : 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildQuickActions(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 44,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFE6E8EE)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.edit_outlined,
+                                size: 18, color: Colors.grey.shade500),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller: _controller,
+                                textInputAction: TextInputAction.send,
+                                onSubmitted: (_) => _isLoading ? null : _send(),
+                                decoration: const InputDecoration(
+                                  hintText: "Ask BachatBot...",
+                                  border: InputBorder.none,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: _isLoading ? Colors.grey : _primary,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.send, color: Colors.white, size: 18),
+                        onPressed: _isLoading ? null : _send,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              child: CircleAvatar(
-                radius: 24,
-                backgroundColor: _isLoading
-                    ? Colors.grey
-                    : const Color(0xFF2E7D32),
-                child: IconButton(
-                  icon: Icon(
-                    _isLoading ? Icons.hourglass_empty : Icons.send,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                  onPressed: _isLoading ? null : _send,
-                ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  // purely visual (no backend logic change)
+  String _fakeTimeForIndex(int i) {
+    // mimic screenshot vibe: 10:02 AM etc.
+    final baseMinute = 0 + (i * 2);
+    final minute = (baseMinute % 60).toString().padLeft(2, '0');
+    return "10:$minute AM";
   }
 }

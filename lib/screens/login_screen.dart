@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'signup_screen.dart';
-import '../main.dart';   // Only this is needed for ProfileChecker
+import 'main_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -31,27 +31,20 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      print("🔐 Attempting login...");
-
       await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
-      print("✅ Firebase Login Successful");
-
       if (mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const ProfileChecker()),
+          MaterialPageRoute(builder: (_) => const MainScreen()),
         );
       }
     } on FirebaseAuthException catch (e) {
-      print("❌ FirebaseAuth Error: ${e.code}");
       if (!mounted) return;
-
       String msg = 'Login failed. Please try again.';
-
       switch (e.code) {
         case 'user-not-found':
           msg = 'No account found with this email.';
@@ -67,10 +60,8 @@ class _LoginScreenState extends State<LoginScreen> {
           msg = 'Too many failed attempts. Try again later.';
           break;
       }
-
       _showError(msg);
     } catch (e) {
-      print("❌ Unexpected Error: $e");
       if (!mounted) return;
       _showError('An unexpected error occurred.');
     } finally {
@@ -83,8 +74,6 @@ class _LoginScreenState extends State<LoginScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: Colors.red.shade700,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -102,16 +91,12 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 40),
-                const Icon(Icons.savings, size: 72, color: Color(0xFF2E7D32)),
+                const Icon(Icons.savings, size: 72, color: Color(0xFF2DBE7F)),
                 const SizedBox(height: 16),
                 const Text(
                   'BachatBot',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF2E7D32),
-                  ),
+                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFF2DBE7F)),
                 ),
                 const Text(
                   'Your AI expense tracker',
@@ -126,9 +111,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   decoration: const InputDecoration(
                     labelText: 'Email',
                     prefixIcon: Icon(Icons.email_outlined),
+                    border: OutlineInputBorder(),
                   ),
-                  validator: (value) =>
-                      (value == null || value.trim().isEmpty) ? 'Please enter your email' : null,
+                  validator: (value) => (value == null || value.trim().isEmpty) ? 'Please enter your email' : null,
                 ),
                 const SizedBox(height: 16),
 
@@ -138,15 +123,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   decoration: InputDecoration(
                     labelText: 'Password',
                     prefixIcon: const Icon(Icons.lock_outlined),
+                    border: const OutlineInputBorder(),
                     suffixIcon: IconButton(
-                      icon: Icon(_showPassword
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined),
+                      icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined),
                       onPressed: () => setState(() => _showPassword = !_showPassword),
                     ),
                   ),
-                  validator: (value) =>
-                      (value == null || value.isEmpty) ? 'Please enter your password' : null,
+                  validator: (value) => (value == null || value.isEmpty) ? 'Please enter your password' : null,
                 ),
                 const SizedBox(height: 28),
 
@@ -154,16 +137,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   height: 52,
                   child: ElevatedButton(
                     onPressed: _isLoading ? null : _login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2DBE7F),
+                      foregroundColor: Colors.white,
+                    ),
                     child: _isLoading
-                        ? const SizedBox(
-                            height: 22,
-                            width: 22,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2.5,
-                            ),
-                          )
-                        : const Text('Login'),
+                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                        : const Text('Login', style: TextStyle(fontSize: 16)),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -181,10 +161,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       },
                       child: const Text(
                         'Create Account',
-                        style: TextStyle(
-                          color: Color(0xFF2E7D32),
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: TextStyle(color: Color(0xFF2DBE7F), fontWeight: FontWeight.bold),
                       ),
                     ),
                   ],
