@@ -58,6 +58,7 @@ async def chat(
 
     # Initialize
     transaction_data = None
+    budget_update = None
     month_key = get_current_month_key()
 
     # If expense or income detected, save transaction
@@ -96,6 +97,42 @@ async def chat(
             "originalMessageId": None
         }
 
+        # ── Budget spent increment (only for expenses) ──────────────────────
+        if intent == "expense_log":
+            budgets_ref = (
+                db.collection("users")
+                .document(uid)
+                .collection("budgets")
+            )
+            matching_docs = list(
+                budgets_ref
+                .where("category", "==", category)
+                .where("monthKey", "==", month_key)
+                .limit(1)
+                .stream()
+            )
+            if matching_docs:
+                budget_doc = matching_docs[0]
+                budget_ref = budget_doc.reference
+                # Atomic increment — safe under concurrent writes
+                from google.cloud.firestore_v1 import Increment
+                budget_ref.update({
+                    "spent": Increment(float(amount)),
+                    "updatedAt": SERVER_TIMESTAMP,
+                })
+                updated_budget = budget_ref.get().to_dict()
+                new_spent = updated_budget.get("spent", 0.0)
+                budget_limit = updated_budget.get("limit", 0.0)
+                percent_used = round((new_spent / budget_limit) * 100, 2) if budget_limit > 0 else 0.0
+                budget_update = {
+                    "id": budget_doc.id,
+                    "category": category,
+                    "limit": budget_limit,
+                    "spent": new_spent,
+                    "percentUsed": percent_used,
+                    "monthKey": month_key,
+                }
+
     # Save assistant reply to messages
     assistant_msg_ref = messages_ref.document()
     assistant_msg_ref.set({
@@ -118,7 +155,7 @@ async def chat(
             "intent": intent,
             "needsConfirmation": False,
             "transaction": transaction_data,
-            "budgetUpdate": None,
+            "budgetUpdate": budget_update,
             "alerts": []
         }
     }

@@ -35,6 +35,7 @@ from routes.budgets import router as budgets_router
 from routes.reports import router as reports_router
 from routes.alerts import router as alerts_router
 from routes.messages import router as messages_router
+from routes.verification import router as verification_router
 
 app.include_router(signup_router)
 app.include_router(profile_router)
@@ -45,6 +46,7 @@ app.include_router(budgets_router)
 app.include_router(reports_router)
 app.include_router(alerts_router)
 app.include_router(messages_router)
+app.include_router(verification_router)
 
 
 # Health check - test if server is running

@@ -1,20 +1,154 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from typing import Optional
+from firebase_config import get_firestore
 from auth import get_current_user
+from utils import get_current_month_key
+from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 
 router = APIRouter()
 
 
-@router.post("/budgets")
-async def create_budget(
-    current_user: dict = Depends(get_current_user)
-):
-    # TODO: Week 2
-    return {"success": True, "message": "Coming soon"}
+# ─── Request Schemas ─────────────────────────────────────────────────────────
 
+class BudgetRequest(BaseModel):
+    category: str = Field(..., min_length=1, description="Expense category (e.g. Food)")
+    limit: float = Field(..., gt=0, description="Monthly spending limit in NPR")
+    monthKey: Optional[str] = Field(
+        None,
+        description="Target month in YYYY-MM format. Defaults to current month.",
+    )
+
+
+# ─── POST /budgets ────────────────────────────────────────────────────────────
+
+@router.post("/budgets", status_code=201)
+async def create_or_update_budget(
+    body: BudgetRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Creates or updates a monthly budget for a given category.
+
+    - If a budget for this category + monthKey already exists → updates the limit.
+    - If it is a brand-new budget → initialises spent = 0.
+    - spent is never reset when updating an existing budget.
+    """
+    uid = current_user["uid"]
+    db = get_firestore()
+
+    month_key = body.monthKey or get_current_month_key()
+
+    budgets_ref = (
+        db.collection("users")
+        .document(uid)
+        .collection("budgets")
+    )
+
+    # Check for an existing budget for this category + month
+    existing_query = (
+        budgets_ref
+        .where("category", "==", body.category)
+        .where("monthKey", "==", month_key)
+        .limit(1)
+        .stream()
+    )
+    existing_docs = list(existing_query)
+
+    if existing_docs:
+        # Update limit only; preserve current spent value
+        doc_ref = existing_docs[0].reference
+        doc_ref.update({
+            "limit": body.limit,
+            "updatedAt": SERVER_TIMESTAMP,
+        })
+        updated = doc_ref.get().to_dict()
+        spent = updated.get("spent", 0.0)
+        percent_used = round((spent / body.limit) * 100, 2) if body.limit > 0 else 0.0
+
+        return {
+            "success": True,
+            "message": f"Budget for '{body.category}' updated.",
+            "data": {
+                "id": doc_ref.id,
+                "category": body.category,
+                "limit": body.limit,
+                "spent": spent,
+                "percentUsed": percent_used,
+                "monthKey": month_key,
+            },
+        }
+
+    # Create new budget document
+    new_ref = budgets_ref.document()
+    budget_data = {
+        "category": body.category,
+        "limit": body.limit,
+        "spent": 0.0,
+        "monthKey": month_key,
+        "createdAt": SERVER_TIMESTAMP,
+        "updatedAt": SERVER_TIMESTAMP,
+    }
+    new_ref.set(budget_data)
+
+    return {
+        "success": True,
+        "message": f"Budget for '{body.category}' created.",
+        "data": {
+            "id": new_ref.id,
+            "category": body.category,
+            "limit": body.limit,
+            "spent": 0.0,
+            "percentUsed": 0.0,
+            "monthKey": month_key,
+        },
+    }
+
+
+# ─── GET /budgets ─────────────────────────────────────────────────────────────
 
 @router.get("/budgets")
 async def get_budgets(
-    current_user: dict = Depends(get_current_user)
+    monthKey: Optional[str] = Query(None, description="YYYY-MM. Defaults to current month."),
+    current_user: dict = Depends(get_current_user),
 ):
-    # TODO: Week 2
-    return {"success": True, "data": {"budgets": []}}
+    """
+    Returns all budgets for the given month with percentUsed calculated.
+    """
+    uid = current_user["uid"]
+    db = get_firestore()
+
+    month_key = monthKey or get_current_month_key()
+
+    budgets_ref = (
+        db.collection("users")
+        .document(uid)
+        .collection("budgets")
+        .where("monthKey", "==", month_key)
+        .stream()
+    )
+
+    budgets = []
+    for doc in budgets_ref:
+        data = doc.to_dict()
+        limit = data.get("limit", 0.0)
+        spent = data.get("spent", 0.0)
+        percent_used = round((spent / limit) * 100, 2) if limit > 0 else 0.0
+
+        budgets.append({
+            "id": doc.id,
+            "category": data.get("category"),
+            "limit": limit,
+            "spent": spent,
+            "percentUsed": percent_used,
+            "monthKey": data.get("monthKey"),
+        })
+
+    return {
+        "success": True,
+        "data": {
+            "budgets": budgets,
+            "monthKey": month_key,
+            "count": len(budgets),
+        },
+    }

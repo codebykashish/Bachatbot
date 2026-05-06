@@ -50,7 +50,7 @@ async def complete_signup(
         "createdAt": SERVER_TIMESTAMP,
         "updatedAt": SERVER_TIMESTAMP,
         "onboarding": {
-            "isCompleted": False,
+            "isCompleted": True,
             "occupation": None,
             "housingType": None,
             "estimatedMonthlySpend": None
