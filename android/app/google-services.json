@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "269916736184",
-    "project_id": "bachatbot-c21f9",
-    "storage_bucket": "bachatbot-c21f9.firebasestorage.app"
+    "project_number": "660413510452",
+    "project_id": "bachatbot-innovation",
+    "storage_bucket": "bachatbot-innovation.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:269916736184:android:1251184bb05f3a481e024d",
+        "mobilesdk_app_id": "1:660413510452:android:6f705b39321b260d386b61",
         "android_client_info": {
           "package_name": "com.example.bachatbot"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyABiiSBErcXIhrb6MlykxSstF21k7DkSgg"
+          "current_key": "AIzaSyCUxtV2BUlHDWp70Xm3tEDW4i8YsAnGHDo"
         }
       ],
       "services": {

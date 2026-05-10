@@ -17,10 +17,7 @@ import 'package:flutter/foundation.dart'
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
-      throw UnsupportedError(
-        'DefaultFirebaseOptions have not been configured for web - '
-        'you can reconfigure this by running the FlutterFire CLI again.',
-      );
+      return web;
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
@@ -36,10 +33,7 @@ class DefaultFirebaseOptions {
           'you can reconfigure this by running the FlutterFire CLI again.',
         );
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return windows;
       case TargetPlatform.linux:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for linux - '
@@ -53,10 +47,31 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyABiiSBErcXIhrb6MlykxSstF21k7DkSgg',
-    appId: '1:269916736184:android:1251184bb05f3a481e024d',
-    messagingSenderId: '269916736184',
-    projectId: 'bachatbot-c21f9',
-    storageBucket: 'bachatbot-c21f9.firebasestorage.app',
+    apiKey: 'AIzaSyCUxtV2BUlHDWp70Xm3tEDW4i8YsAnGHDo',
+    appId: '1:660413510452:android:6f705b39321b260d386b61',
+    messagingSenderId: '660413510452',
+    projectId: 'bachatbot-innovation',
+    storageBucket: 'bachatbot-innovation.firebasestorage.app',
   );
+
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: 'AIzaSyA020nbTlhoeckygTY9_cVs3Ac_MtpLvjE',
+    appId: '1:660413510452:web:66ec2b9d086e0ac4386b61',
+    messagingSenderId: '660413510452',
+    projectId: 'bachatbot-innovation',
+    authDomain: 'bachatbot-innovation.firebaseapp.com',
+    storageBucket: 'bachatbot-innovation.firebasestorage.app',
+    measurementId: 'G-XSP4H9ZPV4',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyA020nbTlhoeckygTY9_cVs3Ac_MtpLvjE',
+    appId: '1:660413510452:web:c239ed897564a575386b61',
+    messagingSenderId: '660413510452',
+    projectId: 'bachatbot-innovation',
+    authDomain: 'bachatbot-innovation.firebaseapp.com',
+    storageBucket: 'bachatbot-innovation.firebasestorage.app',
+    measurementId: 'G-B11SME3LMS',
+  );
+
 }
