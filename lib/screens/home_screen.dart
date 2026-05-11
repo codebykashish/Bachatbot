@@ -167,7 +167,7 @@ class HomeScreenState extends State<HomeScreen> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: accentColor.withOpacity(0.12),
+                  color: accentColor.withValues(alpha: 0.12),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 )
@@ -193,7 +193,7 @@ class HomeScreenState extends State<HomeScreen> {
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: accentColor.withOpacity(0.15),
+                          color: accentColor.withValues(alpha: 0.15),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(icon, color: accentColor, size: 26),
@@ -249,7 +249,7 @@ class HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           )
@@ -318,8 +318,8 @@ class HomeScreenState extends State<HomeScreen> {
                       show: true,
                       gradient: LinearGradient(
                         colors: [
-                          _primary.withOpacity(0.25),
-                          _primary.withOpacity(0.0),
+                          _primary.withValues(alpha: 0.25),
+                          _primary.withValues(alpha: 0.0),
                         ],
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
@@ -370,7 +370,7 @@ class HomeScreenState extends State<HomeScreen> {
                 width: 56,
                 height: 56,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
+                  color: color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(_catIcon(name), color: color, size: 28),
@@ -408,7 +408,7 @@ class HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           )
@@ -420,7 +420,7 @@ class HomeScreenState extends State<HomeScreen> {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: _primary.withOpacity(0.12),
+              color: _primary.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(Icons.shopping_bag_outlined,
@@ -457,7 +457,7 @@ class HomeScreenState extends State<HomeScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: isOnTrack ? _primary.withOpacity(0.1) : Colors.red.shade50,
+              color: isOnTrack ? _primary.withValues(alpha: 0.1) : Colors.red.shade50,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
@@ -568,10 +568,10 @@ class HomeScreenState extends State<HomeScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(children: [
-                  const Icon(Icons.trending_up, color: _primary, size: 18),
-                  const SizedBox(width: 6),
-                  const Text('Categories',
+                const Row(children: [
+                  Icon(Icons.trending_up, color: _primary, size: 18),
+                  SizedBox(width: 6),
+                  Text('Categories',
                       style:
                           TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 ]),
