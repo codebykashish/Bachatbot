@@ -3,8 +3,10 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 
 class ApiService {
-  static const String baseUrl =
-      "https://undying-direness-bagpipe.ngrok-free.dev";
+  // If running on an Android Emulator, use 10.0.2.2 to access your computer's localhost:3000
+  // If running on a physical phone, change this to your computer's Wi-Fi IP address (e.g., "http://192.168.1.100:3000")
+  // Or use your new ngrok URL here if you prefer ngrok.
+  static const String baseUrl = "https://undying-direness-bagpipe.ngrok-free.dev";
 
   /// Gets a fresh token — Firebase auto-refreshes if expired
   /// This means user NEVER gets logged out due to token expiry

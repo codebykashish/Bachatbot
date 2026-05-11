@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import '../api_service.dart';
+import 'notification_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
+
+  /// Set to true when the user successfully sends a message this session.
+  /// ChatBotPage reads this to decide whether to pop(true) for refresh.
+  static bool messageSent = false;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -21,6 +26,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    ChatScreen.messageSent = false; // reset each time chat opens
     _loadHistory();
   }
 
@@ -80,6 +86,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final data = response['data'];
       final reply = data?['reply'] ?? 'Sorry, I could not understand that.';
       final intent = data?['intent'] ?? 'general_chat';
+      final alerts = data?['alerts'] as List?;
 
       setState(() {
         _messages.add({
@@ -90,6 +97,11 @@ class _ChatScreenState extends State<ChatScreen> {
         _isLoading = false;
       });
 
+      if (alerts != null && alerts.isNotEmpty) {
+        NotificationScreen.unreadCount.value += alerts.length;
+      }
+
+      ChatScreen.messageSent = true; // flag so MainScreen refreshes on pop
       _scrollToBottom();
     } catch (e) {
       if (!mounted) return;

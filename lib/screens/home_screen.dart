@@ -1,49 +1,152 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../api_service.dart';
 import 'categories_screen.dart';
 
+// State is public so MainScreen can call refresh() via GlobalKey
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  HomeScreenState createState() => HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> {
+  static const Color _primary = Color(0xFF2DBE7F);
+
   bool _isLoading = true;
   List<dynamic> _budgets = [];
+  Map<String, dynamic>? _report;
+  List<dynamic> _trendData = [];
+
   bool _isIncomeFlipped = false;
   bool _isExpenseFlipped = false;
+  String _selectedMonth = '';
+
+  static const List<Map<String, dynamic>> _catMeta = [
+    {'name': 'Food',          'icon': Icons.restaurant,        'color': Color(0xFFFF7043)},
+    {'name': 'Transport',     'icon': Icons.directions_car,    'color': Color(0xFF42A5F5)},
+    {'name': 'Rent',          'icon': Icons.home,              'color': Color(0xFF26A69A)},
+    {'name': 'Education',     'icon': Icons.school,            'color': Color(0xFF7E57C2)},
+    {'name': 'Shopping',      'icon': Icons.shopping_bag,      'color': Color(0xFFAB47BC)},
+    {'name': 'Health',        'icon': Icons.favorite,          'color': Color(0xFFEF5350)},
+    {'name': 'Entertainment', 'icon': Icons.tv,                'color': Color(0xFF8D6E63)},
+    {'name': 'Bills',         'icon': Icons.receipt_long,      'color': Color(0xFF78909C)},
+    {'name': 'Other',         'icon': Icons.category,          'color': Color(0xFFFFCA28)},
+  ];
 
   @override
   void initState() {
     super.initState();
-    _fetchBudgets();
+    final now = DateTime.now();
+    _selectedMonth = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    _fetchAll();
   }
 
-  Future<void> _fetchBudgets() async {
+  /// Called by MainScreen after a chat message is sent
+  void refresh() => _fetchAll();
+
+  String get _monthLabel {
+    final parts = _selectedMonth.split('-');
+    if (parts.length != 2) return _selectedMonth;
+    const months = [
+      'Jan','Feb','Mar','Apr','May','Jun',
+      'Jul','Aug','Sep','Oct','Nov','Dec'
+    ];
+    final m = int.tryParse(parts[1]);
+    if (m == null || m < 1 || m > 12) return _selectedMonth;
+    return '${months[m - 1]} ${parts[0]}';
+  }
+
+  // ── Data fetching ────────────────────────────────────────────────────────
+
+  Future<void> _fetchAll() async {
+    setState(() => _isLoading = true);
     try {
-      final now = DateTime.now();
-      final monthKey = "${now.year}-${now.month.toString().padLeft(2, '0')}";
-      final response = await ApiService.get('/budgets?monthKey=$monthKey');
-      if (!mounted) return;
-      if (response['success'] == true) {
-        setState(() {
-          _budgets = response['data']?['budgets'] ?? [];
-        });
-      }
-    } catch (e) {
-      // Ignore or show error
+      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend()]);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  Future<void> _fetchBudgets() async {
+    try {
+      final res = await ApiService.get('/budgets?monthKey=$_selectedMonth');
+      if (!mounted) return;
+      if (res['success'] == true) {
+        setState(() => _budgets = res['data']?['budgets'] ?? []);
+      }
+    } catch (_) {}
+  }
+
+  /// GET /monthly-report — source of truth for income & totalExpense
+  Future<void> _fetchReport() async {
+    try {
+      final res = await ApiService.get('/monthly-report?monthKey=$_selectedMonth');
+      if (!mounted) return;
+      if (res['success'] == true) {
+        setState(() => _report = res['data']);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _fetchTrend() async {
+    try {
+      final res = await ApiService.get('/daily-summary');
+      if (!mounted) return;
+      if (res['success'] == true) {
+        final raw = res['data']?['days'] ??
+            res['data']?['trend'] ??
+            res['data']?['dailySummary'] ??
+            [];
+        setState(() => _trendData = raw);
+      }
+    } catch (_) {}
+  }
+
+  // ── Derived values ───────────────────────────────────────────────────────
+
+  double get _totalIncome =>
+      (_report?['totalIncome'] ?? _report?['income'] ?? 0).toDouble();
+
+  double get _totalExpense =>
+      (_report?['totalExpense'] ?? _report?['expense'] ?? 0).toDouble();
+
+  String _firstName() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return 'User';
+    final display = user.displayName ?? '';
+    if (display.trim().isNotEmpty) return display.split(' ').first;
+    final email = user.email ?? '';
+    if (email.contains('@')) return email.split('@').first;
+    return 'User';
+  }
+
+  Color _catColor(String name) {
+    try {
+      return _catMeta.firstWhere((c) => c['name'] == name)['color'] as Color;
+    } catch (_) {
+      return _primary;
+    }
+  }
+
+  IconData _catIcon(String name) {
+    try {
+      return _catMeta.firstWhere((c) => c['name'] == name)['icon'] as IconData;
+    } catch (_) {
+      return Icons.category;
+    }
+  }
+
+  // ── Flip card ────────────────────────────────────────────────────────────
+
   Widget _buildFlipCard({
     required String title,
     required IconData icon,
-    required Color color,
+    required Color bgColor,
+    required Color accentColor,
     required String amountText,
     required bool isFlipped,
     required VoidCallback onTap,
@@ -60,15 +163,14 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Container(
             height: 100,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: bgColor,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: color.withOpacity(0.3)),
               boxShadow: [
                 BoxShadow(
-                  color: color.withOpacity(0.1),
-                  blurRadius: 8,
+                  color: accentColor.withOpacity(0.12),
+                  blurRadius: 10,
                   offset: const Offset(0, 4),
-                ),
+                )
               ],
             ),
             alignment: Alignment.center,
@@ -79,23 +181,31 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Text(
                       amountText,
                       style: TextStyle(
-                        fontSize: 20,
+                        fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: color,
+                        color: accentColor,
                       ),
                     ),
                   )
                 : Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(icon, color: color, size: 32),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: accentColor.withOpacity(0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(icon, color: accentColor, size: 26),
+                      ),
                       const SizedBox(height: 8),
                       Text(
                         title,
                         style: TextStyle(
-                          fontSize: 16,
+                          fontSize: 13,
                           fontWeight: FontWeight.bold,
-                          color: color,
+                          color: accentColor,
+                          letterSpacing: 0.5,
                         ),
                       ),
                     ],
@@ -106,123 +216,405 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: _fetchBudgets,
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              "Overview",
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                _buildFlipCard(
-                  title: "INCOME",
-                  icon: Icons.arrow_upward,
-                  color: const Color(0xFF2DBE7F),
-                  amountText: "Rs 45,000",
-                  isFlipped: _isIncomeFlipped,
-                  onTap: () => setState(() => _isIncomeFlipped = !_isIncomeFlipped),
+  // ── 7-day chart ──────────────────────────────────────────────────────────
+
+  Widget _build7DayChart() {
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    List<double> amounts;
+
+    if (_trendData.isNotEmpty) {
+      amounts = _trendData
+          .take(7)
+          .map<double>((d) => (d['amount'] ?? d['total'] ?? 0).toDouble())
+          .toList();
+      while (amounts.length < 7) { amounts.add(0); }
+    } else {
+      amounts = [80, 160, 120, 200, 280, 220, 160];
+    }
+
+    final maxY = (amounts.reduce(max) * 1.3)
+        .ceilToDouble()
+        .clamp(10, double.infinity)
+        .toDouble();
+    final spots = List.generate(
+      amounts.length,
+      (i) => FlSpot(i.toDouble(), amounts[i]),
+    );
+
+    return Container(
+      height: 200,
+      padding: const EdgeInsets.fromLTRB(8, 16, 16, 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          )
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(left: 8, bottom: 4),
+            child: Text('Velocity View',
+                style: TextStyle(fontSize: 11, color: Colors.grey)),
+          ),
+          Expanded(
+            child: LineChart(
+              LineChartData(
+                minY: 0,
+                maxY: maxY,
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: maxY / 4,
+                  getDrawingHorizontalLine: (_) =>
+                      FlLine(color: Colors.grey.shade100, strokeWidth: 1),
                 ),
-                const SizedBox(width: 16),
-                _buildFlipCard(
-                  title: "EXPENSE",
-                  icon: Icons.arrow_downward,
-                  color: Colors.redAccent,
-                  amountText: "Rs 5,000",
-                  isFlipped: _isExpenseFlipped,
-                  onTap: () => setState(() => _isExpenseFlipped = !_isExpenseFlipped),
+                borderData: FlBorderData(show: false),
+                titlesData: FlTitlesData(
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 36,
+                      interval: maxY / 4,
+                      getTitlesWidget: (v, _) => Text(
+                        v.toInt().toString(),
+                        style: const TextStyle(fontSize: 10, color: Colors.grey),
+                      ),
+                    ),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      getTitlesWidget: (v, _) {
+                        final idx = v.toInt();
+                        if (idx < 0 || idx >= labels.length) {
+                          return const SizedBox.shrink();
+                        }
+                        return Text(labels[idx],
+                            style: const TextStyle(
+                                fontSize: 10, color: Colors.grey));
+                      },
+                    ),
+                  ),
+                  rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                  topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                ),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: spots,
+                    isCurved: true,
+                    color: _primary,
+                    barWidth: 2.5,
+                    dotData: const FlDotData(show: false),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      gradient: LinearGradient(
+                        colors: [
+                          _primary.withOpacity(0.25),
+                          _primary.withOpacity(0.0),
+                        ],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Categories row ───────────────────────────────────────────────────────
+
+  Widget _buildCategoriesRow() {
+    final Map<String, dynamic> budgetMap = {
+      for (var b in _budgets) (b['category'] ?? ''): b
+    };
+
+    // Up to 4 categories: API budgets first, then defaults
+    final catNames = <String>[];
+    for (var b in _budgets) {
+      catNames.add(b['category'] ?? '');
+    }
+    for (var c in _catMeta) {
+      if (!catNames.contains(c['name'])) catNames.add(c['name'] as String);
+      if (catNames.length >= 4) break;
+    }
+    final visible = catNames.take(4).toList();
+
+    return SizedBox(
+      height: 100,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: visible.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 14),
+        itemBuilder: (ctx, i) {
+          final name = visible[i];
+          final budget = budgetMap[name];
+          final spent = (budget?['spent'] ?? 0).toDouble();
+          final color = _catColor(name);
+          return Column(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(_catIcon(name), color: color, size: 28),
+              ),
+              const SizedBox(height: 6),
+              Text(name,
+                  style: const TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.w600)),
+              Text(
+                'Rs.${spent.toInt()}',
+                style: const TextStyle(fontSize: 10, color: Colors.grey),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Today's Snapshot ─────────────────────────────────────────────────────
+
+  Widget _buildSnapshot() {
+    final topCat = _budgets.isNotEmpty
+        ? (_budgets.first['category'] ?? 'Food')
+        : 'Food';
+    final topSpent = _budgets.isNotEmpty
+        ? (_budgets.first['spent'] ?? 0).toDouble()
+        : 0.0;
+    final isOnTrack = _totalExpense <= _totalIncome || _totalIncome == 0;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          )
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: _primary.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.shopping_bag_outlined,
+                color: _primary, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Daily Expense Summary',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                const SizedBox(height: 4),
+                RichText(
+                  text: TextSpan(
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    children: [
+                      const TextSpan(text: "You've spent "),
+                      TextSpan(
+                        text: 'Rs.${topSpent.toInt()}',
+                        style: const TextStyle(
+                            color: Colors.red, fontWeight: FontWeight.bold),
+                      ),
+                      TextSpan(text: ' on $topCat today.'),
+                    ],
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 32),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: isOnTrack ? _primary.withOpacity(0.1) : Colors.red.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              isOnTrack ? 'ON TRACK' : 'OVER',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: isOnTrack ? _primary : Colors.red,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Build ────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      color: _primary,
+      onRefresh: _fetchAll,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Hello + month chip ────────────────────────────────────────
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Hello, ${_firstName()}!',
+                        style: const TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Your financial health looks steady.',
+                        style: TextStyle(fontSize: 13, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: _primary),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    _monthLabel,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: _primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 20),
+
+            // ── Income / Expense flip cards (real /monthly-report data) ───
+            Row(
+              children: [
+                _buildFlipCard(
+                  title: 'INCOME',
+                  icon: Icons.north_east,
+                  bgColor: const Color(0xFFEAFAF3),
+                  accentColor: _primary,
+                  amountText: _isLoading ? '…' : 'Rs ${_totalIncome.toInt()}',
+                  isFlipped: _isIncomeFlipped,
+                  onTap: () =>
+                      setState(() => _isIncomeFlipped = !_isIncomeFlipped),
+                ),
+                const SizedBox(width: 14),
+                _buildFlipCard(
+                  title: 'EXPENSE',
+                  icon: Icons.south_east,
+                  bgColor: const Color(0xFFFFF0F0),
+                  accentColor: Colors.redAccent,
+                  amountText:
+                      _isLoading ? '…' : 'Rs ${_totalExpense.toInt()}',
+                  isFlipped: _isExpenseFlipped,
+                  onTap: () =>
+                      setState(() => _isExpenseFlipped = !_isExpenseFlipped),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 28),
+
+            // ── Categories header + horizontal row ───────────────────────
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  "Top Categories",
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
+                Row(children: [
+                  const Icon(Icons.trending_up, color: _primary, size: 18),
+                  const SizedBox(width: 6),
+                  const Text('Categories',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                ]),
                 TextButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const CategoriesScreen(showAppBar: true)),
-                    );
-                  },
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const CategoriesScreen(showAppBar: true),
+                    ),
+                  ),
                   child: const Text(
-                    "See All",
-                    style: TextStyle(color: Color(0xFF2DBE7F), fontWeight: FontWeight.bold),
+                    'See All',
+                    style: TextStyle(
+                        color: _primary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _budgets.isEmpty
-                    ? const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(16.0),
-                          child: Text("No budgets set yet. Tap 'See All' to create one.", style: TextStyle(color: Colors.grey)),
-                        ),
-                      )
-                    : ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _budgets.length > 5 ? 5 : _budgets.length,
-                        itemBuilder: (context, index) {
-                          final budget = _budgets[index];
-                          final category = budget['category'] ?? 'Unknown';
-                          final spent = (budget['spent'] ?? 0).toDouble();
-                          final limit = (budget['limit'] ?? 1).toDouble();
-                          final percent = (spent / limit).clamp(0.0, 1.0);
+                ? const SizedBox(
+                    height: 100,
+                    child:
+                        Center(child: CircularProgressIndicator(color: _primary)))
+                : _buildCategoriesRow(),
 
-                          return Card(
-                            elevation: 1,
-                            margin: const EdgeInsets.only(bottom: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            child: Padding(
-                              padding: const EdgeInsets.all(16.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(
-                                        category,
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                                      ),
-                                      Text(
-                                        "Rs ${spent.toInt()} / Rs ${limit.toInt()}",
-                                        style: const TextStyle(color: Colors.grey, fontSize: 14),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 12),
-                                  LinearProgressIndicator(
-                                    value: percent,
-                                    backgroundColor: Colors.grey.shade200,
-                                    color: percent > 0.9
-                                        ? Colors.red
-                                        : (percent > 0.7 ? Colors.orange : const Color(0xFF2DBE7F)),
-                                    minHeight: 8,
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
+            const SizedBox(height: 28),
+
+            // ── 7-day trend ───────────────────────────────────────────────
+            const Text('7-Day Spending Trend',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            _build7DayChart(),
+
+            const SizedBox(height: 28),
+
+            // ── Today's Snapshot ──────────────────────────────────────────
+            const Text("Today's Snapshot",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            _buildSnapshot(),
           ],
         ),
       ),
