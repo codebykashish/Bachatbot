@@ -82,7 +82,58 @@ def serialize_doc(doc_dict: dict) -> dict:
             result[key] = value
     return result
 
-def get_current_month_key() -> str:
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
-    return now.strftime("%Y-%m")
+
+# ── Agentic query helpers ────────────────────────────────────────────────────
+
+def sum_month_expense(db, uid: str, month_key: str) -> float:
+    """Sum all confirmed expense transactions for the given month."""
+    docs = (
+        db.collection("users").document(uid).collection("transactions")
+        .where("monthKey", "==", month_key)
+        .where("type", "==", "expense")
+        .where("status", "==", "confirmed")
+        .stream()
+    )
+    total = 0.0
+    for doc in docs:
+        data = doc.to_dict()
+        if not data.get("isDeleted", False):
+            total += data.get("amount", 0.0)
+    return total
+
+
+def sum_category_expense(db, uid: str, category: str, month_key: str) -> float:
+    """Sum all confirmed expense transactions for a category in the given month."""
+    docs = (
+        db.collection("users").document(uid).collection("transactions")
+        .where("monthKey", "==", month_key)
+        .where("type", "==", "expense")
+        .where("status", "==", "confirmed")
+        .where("category", "==", category)
+        .stream()
+    )
+    total = 0.0
+    for doc in docs:
+        data = doc.to_dict()
+        if not data.get("isDeleted", False):
+            total += data.get("amount", 0.0)
+    return total
+
+
+def fetch_budget(db, uid: str, category: str, month_key: str):
+    """
+    Fetch the budget document for a given category + monthKey.
+    Returns dict with 'id' included, or None if not found.
+    """
+    docs = list(
+        db.collection("users").document(uid).collection("budgets")
+        .where("category", "==", category)
+        .where("monthKey", "==", month_key)
+        .limit(1)
+        .stream()
+    )
+    if not docs:
+        return None
+    data = docs[0].to_dict()
+    data["id"] = docs[0].id
+    return data

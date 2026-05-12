@@ -1,9 +1,18 @@
 import os
+import logging
 from dotenv import load_dotenv
 load_dotenv()
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from firebase_config import initialize_firebase
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    datefmt="%H:%M:%S"
+)
+logger = logging.getLogger("bachatbot")
 
 # Initialize Firebase when app starts
 initialize_firebase()
@@ -24,6 +33,38 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Request Logging Middleware ──────────────────────────────────────────────
+from auth import get_current_user
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    uid = "anonymous"
+    try:
+        current_user = await get_current_user(request)
+        uid = current_user.get("uid", "unknown")
+    except Exception:
+        pass
+
+    if request.method == "POST":
+        body_bytes = await request.body()
+        # Re-inject the body so downstream handlers can read it
+        async def receive():
+            return {"type": "http.request", "body": body_bytes}
+        request._receive = receive
+        try:
+            body_str = body_bytes.decode("utf-8")
+        except Exception:
+            body_str = str(body_bytes)
+        print(f"[REQ] {request.method} {request.url.path} uid={uid} body={body_str}")
+    else:
+        print(f"[REQ] {request.method} {request.url.path} uid={uid}")
+
+    response = await call_next(request)
+    print(f"[RES] {response.status_code} {request.url.path} uid={uid}")
+    return response
+
 
 # Import and include all routes
 from routes.signup import router as signup_router
@@ -65,4 +106,3 @@ async def health():
         "success": True,
         "status": "healthy"
     }
-

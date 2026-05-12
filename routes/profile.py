@@ -22,6 +22,7 @@ async def get_profile(
     """
     
     uid = current_user["uid"]
+    print(f"[PROFILE] uid={uid} get profile")
     db = get_firestore()
     
     # Fetch user document
@@ -65,6 +66,7 @@ async def update_profile(
     """
     
     uid = current_user["uid"]
+    print(f"[PROFILE] uid={uid} update profile")
     db = get_firestore()
     
     user_ref = db.collection("users").document(uid)

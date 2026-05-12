@@ -38,6 +38,7 @@ async def create_or_update_budget(
     db = get_firestore()
 
     month_key = body.monthKey or get_current_month_key()
+    print(f"[BUDGET] uid={uid} set {body.category} limit={body.limit} monthKey={month_key}")
 
     budgets_ref = (
         db.collection("users")
@@ -119,6 +120,7 @@ async def get_budgets(
     db = get_firestore()
 
     month_key = monthKey or get_current_month_key()
+    print(f"[BUDGET] uid={uid} list monthKey={month_key}")
 
     budgets_ref = (
         db.collection("users")
