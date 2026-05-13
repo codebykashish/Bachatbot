@@ -1,0 +1,22 @@
+# Flutter/Dart build artifacts
+build/
+.dart_tool/
+.packages
+.pub/
+.packages
+pubspec.lock
+
+# Android
+*.apk
+*.aab
+*.dex
+*.ap_
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+
+# IDE files
+.idea/
+.vscode/
+*.iml

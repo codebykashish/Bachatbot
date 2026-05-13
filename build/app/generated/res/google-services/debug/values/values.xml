@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="gcm_defaultSenderId" translatable="false">660413510452</string>
-    <string name="google_api_key" translatable="false">AIzaSyCUxtV2BUlHDWp70Xm3tEDW4i8YsAnGHDo</string>
-    <string name="google_app_id" translatable="false">1:660413510452:android:6f705b39321b260d386b61</string>
-    <string name="google_crash_reporting_api_key" translatable="false">AIzaSyCUxtV2BUlHDWp70Xm3tEDW4i8YsAnGHDo</string>
-    <string name="google_storage_bucket" translatable="false">bachatbot-innovation.firebasestorage.app</string>
-    <string name="project_id" translatable="false">bachatbot-innovation</string>
-</resources>
