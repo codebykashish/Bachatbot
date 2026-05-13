@@ -30,18 +30,33 @@ async def get_profile(
     user_ref = db.collection("users").document(uid)
     doc = user_ref.get()
     
-    # If user doesn't exist yet (should not happen normally)
+    # If the Firestore profile doesn't exist yet (e.g. the user authenticated
+    # via Firebase Auth but POST /profile was never called), auto-create a
+    # minimal stub so GET /profile never 404s for a legitimately logged-in user.
     if not doc.exists:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "USER_NOT_FOUND",
-                    "message": "User profile not found. Please complete signup."
-                }
-            }
-        )
+        print(f"[PROFILE] uid={uid} — Firestore doc missing, auto-creating stub profile")
+        stub = {
+            "firstName": current_user.get("name", "").split()[0] if current_user.get("name") else "",
+            "lastName": " ".join(current_user.get("name", "").split()[1:]) if current_user.get("name") else "",
+            "email": current_user.get("email", ""),
+            "phone": "",
+            "onboarding": {
+                "isCompleted": False,
+                "occupation": None,
+                "housingType": None,
+                "estimatedMonthlySpend": None
+            },
+            "preferences": {
+                "language": "en",
+                "currency": "NPR",
+                "alertThreshold": 80
+            },
+            "createdAt": SERVER_TIMESTAMP,
+            "updatedAt": SERVER_TIMESTAMP
+        }
+        user_ref.set(stub)
+        # Re-fetch so timestamps are populated
+        doc = user_ref.get()
     
     # Get data and add uid
     data = doc.to_dict()
