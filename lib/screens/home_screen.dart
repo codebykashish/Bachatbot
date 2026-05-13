@@ -107,7 +107,10 @@ class HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       debugPrint('[HomeScreen] /monthly-report response: $res');
       if (res['success'] == true) {
-        setState(() => _report = res['data']);
+        setState(() {
+          final data = res['data'];
+          _report = data?['report'] ?? data;
+        });
       }
     } catch (e) {
       debugPrint('[HomeScreen] /monthly-report error: $e');
