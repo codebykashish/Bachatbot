@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../api_service.dart';
+import '../services/notification_sync_service.dart';
 import 'home_screen.dart';
 import 'categories_screen.dart';
 import 'chatbot_page.dart';
 import 'login_screen.dart';
 import 'notification_screen.dart';
+import 'notification_permission_screen.dart';
 
 class MainScreen extends StatefulWidget {
   final String firstName;
@@ -37,6 +38,8 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
+    // Start the notification sync listener (no-op if permission not granted yet).
+    NotificationSyncService().init();
   }
 
   Future<void> _logout() async {
@@ -149,6 +152,23 @@ class _MainScreenState extends State<MainScreen> {
               onTap: () {
                 setState(() => _currentIndex = 1);
                 Navigator.pop(context);
+              },
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.notifications_active_outlined,
+                  color: _primary),
+              title: const Text('Notification Sync'),
+              subtitle: const Text('Auto-log finance notifications',
+                  style: TextStyle(fontSize: 11.5)),
+              onTap: () {
+                Navigator.pop(context); // close drawer first
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const NotificationPermissionScreen(),
+                  ),
+                );
               },
             ),
             const Divider(),

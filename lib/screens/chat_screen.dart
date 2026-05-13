@@ -37,6 +37,7 @@ class _ChatScreenState extends State<ChatScreen> {
     'expense_log',
     'income_log',
     'undo_last_expense',
+    'notification_confirm',
   };
 
   static const _refreshCategoriesIntents = {
@@ -44,6 +45,7 @@ class _ChatScreenState extends State<ChatScreen> {
     'income_log',
     'set_budget',
     'undo_last_expense',
+    'notification_confirm',
   };
 
   @override
@@ -75,6 +77,9 @@ class _ChatScreenState extends State<ChatScreen> {
             'role': msg['role'],
             'content': msg['content'],
             'intent': msg['intent'],
+            // Carry transactionId if the backend included one (notification flow)
+            if (msg['transactionId'] != null)
+              'transactionId': msg['transactionId'],
           });
         }
         _isHistoryLoaded = true;
@@ -110,12 +115,15 @@ class _ChatScreenState extends State<ChatScreen> {
       final reply = data?['reply'] ?? 'Sorry, I could not understand that.';
       final intent = data?['intent'] ?? 'general_chat';
       final alerts = data?['alerts'] as List?;
+      final transactionId = data?['transactionId'] as String?;
 
       setState(() {
         _messages.add({
           'role': 'assistant',
           'content': reply,
           'intent': intent,
+          // Only present for notification-sourced replies that need confirmation
+          if (transactionId != null) 'transactionId': transactionId,
         });
         _isLoading = false;
       });
@@ -156,6 +164,51 @@ class _ChatScreenState extends State<ChatScreen> {
       widget.onRefreshNeeded!(
         refreshHome: needsHome,
         refreshCategories: needsCategories,
+      );
+    }
+  }
+
+  // ── Notification transaction actions ─────────────────────────────────
+
+  Future<void> _confirmTransaction(String transactionId, int messageIndex) async {
+    print('[NOTIF_SYNC] Confirming transaction $transactionId');
+    // Remove action buttons optimistically
+    setState(() {
+      _messages[messageIndex].remove('transactionId');
+    });
+    try {
+      final res = await ApiService.post(
+          '/confirm-transaction/$transactionId', {});
+      print('[NOTIF_SYNC] Confirm response: $res');
+      // Trigger home/categories refresh since a transaction was confirmed
+      widget.onRefreshNeeded?.call(
+        refreshHome: true,
+        refreshCategories: true,
+      );
+      ChatScreen.messageSent = true;
+    } catch (e) {
+      print('[NOTIF_SYNC] Confirm error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not confirm transaction.')),
+      );
+    }
+  }
+
+  Future<void> _rejectTransaction(String transactionId, int messageIndex) async {
+    print('[NOTIF_SYNC] Rejecting transaction $transactionId');
+    setState(() {
+      _messages[messageIndex].remove('transactionId');
+    });
+    try {
+      final res = await ApiService.post(
+          '/reject-transaction/$transactionId', {});
+      print('[NOTIF_SYNC] Reject response: $res');
+    } catch (e) {
+      print('[NOTIF_SYNC] Reject error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not reject transaction.')),
       );
     }
   }
@@ -279,14 +332,29 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildMessageBubble(Map<String, dynamic> msg, {required String time}) {
     final isUser = msg['role'] == 'user';
     final content = (msg['content'] ?? '').toString();
+    final transactionId = msg['transactionId'] as String?;
+
+    // Compute the real index of this message in _messages so we can
+    // remove the transactionId after the user acts.
+    final messageIndex = _messages.indexOf(msg);
 
     if (isUser) {
       return _userBubble(content: content, time: time);
     }
-    return _assistantBubble(content: content, time: time);
+    return _assistantBubble(
+      content: content,
+      time: time,
+      transactionId: transactionId,
+      messageIndex: messageIndex,
+    );
   }
 
-  Widget _assistantBubble({required String content, required String time}) {
+  Widget _assistantBubble({
+    required String content,
+    required String time,
+    String? transactionId,
+    int messageIndex = -1,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
@@ -313,7 +381,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           const SizedBox(width: 10),
 
-          // bubble + time
+          // bubble + time + optional confirm/reject buttons
           Flexible(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -342,6 +410,11 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                 ),
+
+                // ── Confirm / Reject buttons (notification sync flow) ──
+                if (transactionId != null && messageIndex >= 0) ...
+                  _buildConfirmRejectRow(transactionId, messageIndex),
+
                 const SizedBox(height: 6),
                 Text(
                   time,
@@ -353,6 +426,55 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     );
+  }
+
+  /// Confirm / Reject action row shown below a bot bubble
+  /// when the message originated from a notification sync event.
+  List<Widget> _buildConfirmRejectRow(String transactionId, int messageIndex) {
+    return [
+      const SizedBox(height: 10),
+      Row(
+        children: [
+          // Confirm
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: () =>
+                  _confirmTransaction(transactionId, messageIndex),
+              icon: const Icon(Icons.check_circle_outline, size: 16),
+              label: const Text('Confirm'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _primary,
+                side: const BorderSide(color: _primary),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                textStyle: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Reject
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: () =>
+                  _rejectTransaction(transactionId, messageIndex),
+              icon: const Icon(Icons.cancel_outlined, size: 16),
+              label: const Text('Reject'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red.shade400,
+                side: BorderSide(color: Colors.red.shade300),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                textStyle: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ];
   }
 
   Widget _userBubble({required String content, required String time}) {
