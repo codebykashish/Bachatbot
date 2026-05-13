@@ -20,6 +20,8 @@ async def chat(
     body = await request.json()
     user_message = body.get("message", "").strip()
     source = body.get("source", "chat")
+    source_app = body.get("sourceApp", "Unknown")
+    original_message_id = body.get("originalMessageId")
 
     if not user_message:
         raise HTTPException(
@@ -58,14 +60,81 @@ async def chat(
 
     # Initialize
     transaction_data = None
+    notification_data = None
     budget_update = None
     month_key = get_current_month_key()
+    needs_confirmation = False
 
-    # If expense or income detected, save transaction
-    if intent in ["expense_log", "income_log"] and amount and category:
+    # Check if this is a notification source
+    if source == "notification":
+        needs_confirmation = True
+        if intent == "notification_parse" or (intent in ["expense_log", "income_log"] and amount and category):
+            # Create a PENDING transaction
+            tx_ref = db.collection("users").document(uid).collection("transactions").document()
+            
+            tx_data = {
+                "amount": float(amount),
+                "category": category,
+                "type": tx_type or "expense",
+                "status": "pending",
+                "source": "notification",
+                "description": user_message,
+                "monthKey": month_key,
+                "isDeleted": False,
+                "deletedAt": None,
+                "originalMessageId": original_message_id,
+                "createdAt": SERVER_TIMESTAMP,
+                "updatedAt": SERVER_TIMESTAMP
+            }
+            tx_ref.set(tx_data)
+
+            transaction_data = {
+                "id": tx_ref.id,
+                "amount": float(amount),
+                "category": category,
+                "type": tx_type or "expense",
+                "status": "pending",
+                "source": "notification",
+                "description": user_message,
+                "monthKey": month_key,
+                "isDeleted": False,
+                "deletedAt": None,
+                "originalMessageId": original_message_id
+            }
+
+            # Create a notification document
+            notif_ref = db.collection("users").document(uid).collection("notifications").document()
+            notif_data = {
+                "rawText": user_message,
+                "parsedAmount": float(amount),
+                "parsedCategory": category,
+                "parsedType": tx_type or "expense",
+                "sourceApp": source_app,
+                "status": "pending",
+                "transactionId": tx_ref.id,
+                "createdAt": SERVER_TIMESTAMP
+            }
+            notif_ref.set(notif_data)
+
+            notification_data = {
+                "id": notif_ref.id,
+                "rawText": user_message,
+                "parsedAmount": float(amount),
+                "parsedCategory": category,
+                "parsedType": tx_type or "expense",
+                "sourceApp": source_app,
+                "status": "pending",
+                "transactionId": tx_ref.id
+            }
+            
+            print(f"[CHAT][NOTIF] uid={uid} amount={amount} category={category} type={tx_type}")
+
+    # For source == "chat" (existing behavior)
+    elif intent in ["expense_log", "income_log"] and amount and category:
 
         tx_ref = db.collection("users").document(uid).collection("transactions").document()
 
+  
         tx_data = {
             "amount": float(amount),
             "category": category,
@@ -143,21 +212,26 @@ async def chat(
             "amount": amount,
             "category": category,
             "type": tx_type
-        } if intent in ["expense_log", "income_log"] else None,
+        } if intent in ["expense_log", "income_log", "notification_parse"] else None,
         "relatedTransactionId": transaction_data["id"] if transaction_data else None,
         "createdAt": SERVER_TIMESTAMP
     })
 
+    response_data = {
+        "reply": reply,
+        "intent": intent,
+        "needsConfirmation": needs_confirmation,
+        "transaction": transaction_data,
+        "budgetUpdate": budget_update,
+        "alerts": []
+    }
+
+    if notification_data:
+        response_data["notification"] = notification_data
+
     return {
         "success": True,
-        "data": {
-            "reply": reply,
-            "intent": intent,
-            "needsConfirmation": False,
-            "transaction": transaction_data,
-            "budgetUpdate": budget_update,
-            "alerts": []
-        }
+        "data": response_data
     }
 
 @router.get("/messages")
