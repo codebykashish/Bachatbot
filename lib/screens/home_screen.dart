@@ -28,9 +28,9 @@ class HomeScreenState extends State<HomeScreen> {
   String _selectedMonth = '';
 
   static const List<Map<String, dynamic>> _catMeta = [
-    {'name': 'Food',          'icon': Icons.restaurant,        'color': Color(0xFFFF7043)},
-    {'name': 'Transport',     'icon': Icons.directions_car,    'color': Color(0xFF42A5F5)},
-    {'name': 'Rent',          'icon': Icons.home,              'color': Color(0xFF26A69A)},
+    {'name': 'Food',          'icon': Icons.restaurant,        'color': Color(0xFF4A90E2)},
+    {'name': 'Transport',     'icon': Icons.directions_car,    'color': Color(0xFF26A69A)},
+    {'name': 'Rent',          'icon': Icons.home,              'color': Color(0xFFFFB74D)},
     {'name': 'Education',     'icon': Icons.school,            'color': Color(0xFF7E57C2)},
     {'name': 'Shopping',      'icon': Icons.shopping_bag,      'color': Color(0xFFAB47BC)},
     {'name': 'Health',        'icon': Icons.favorite,          'color': Color(0xFFEF5350)},
@@ -186,17 +186,11 @@ class HomeScreenState extends State<HomeScreen> {
             ..rotateY(isFlipped ? pi : 0),
           transformAlignment: Alignment.center,
           child: Container(
-            height: 100,
+            height: 90,
             decoration: BoxDecoration(
               color: bgColor,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: accentColor.withValues(alpha: 0.12),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                )
-              ],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: accentColor.withValues(alpha: 0.3), width: 1.2),
             ),
             alignment: Alignment.center,
             child: isFlipped
@@ -206,7 +200,7 @@ class HomeScreenState extends State<HomeScreen> {
                     child: Text(
                       amountText,
                       style: TextStyle(
-                        fontSize: 18,
+                        fontSize: 16,
                         fontWeight: FontWeight.bold,
                         color: accentColor,
                       ),
@@ -216,18 +210,18 @@ class HomeScreenState extends State<HomeScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(8),
+                        padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
                           color: accentColor.withValues(alpha: 0.15),
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(icon, color: accentColor, size: 26),
+                        child: Icon(icon, color: accentColor, size: 20),
                       ),
                       const SizedBox(height: 8),
                       Text(
                         title,
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: 12,
                           fontWeight: FontWeight.bold,
                           color: accentColor,
                           letterSpacing: 0.5,
@@ -369,8 +363,13 @@ class HomeScreenState extends State<HomeScreen> {
       for (var b in _budgets) (b['category'] ?? ''): b
     };
 
-    return SizedBox(
-      height: 100,
+    return Container(
+      height: 120,
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF6F7F9),
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: _catMeta.length,
@@ -396,13 +395,13 @@ class HomeScreenState extends State<HomeScreen> {
             child: Column(
               children: [
                 Container(
-                  width: 56,
-                  height: 56,
+                  width: 50,
+                  height: 50,
                   decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.12),
+                    color: color,
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Icon(icon, color: color, size: 28),
+                  child: Icon(icon, color: Colors.white, size: 24),
                 ),
                 const SizedBox(height: 6),
                 Text(name,
@@ -438,7 +437,7 @@ class HomeScreenState extends State<HomeScreen> {
     final isOnTrack = _totalExpense <= _totalIncome || _totalIncome == 0;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -450,8 +449,13 @@ class HomeScreenState extends State<HomeScreen> {
           )
         ],
       ),
-      child: Row(
-        children: [
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: const BoxDecoration(
+          border: Border(left: BorderSide(color: _primary, width: 6)),
+        ),
+        child: Row(
+          children: [
           Container(
             width: 44,
             height: 44,
@@ -497,6 +501,7 @@ class HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
+      ),
     );
   }
 
@@ -526,7 +531,7 @@ class HomeScreenState extends State<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Hello $_greetingName',
+                        'Hello, $_greetingName!',
                         style: const TextStyle(
                           fontSize: 26,
                           fontWeight: FontWeight.bold,
@@ -535,7 +540,7 @@ class HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 2),
                       const Text(
-                        'Your financial overview at a glance.',
+                        'Your financial health looks steady.',
                         style: TextStyle(fontSize: 13, color: Colors.grey),
                       ),
                     ],
@@ -569,7 +574,7 @@ class HomeScreenState extends State<HomeScreen> {
                 _buildFlipCard(
                   title: 'INCOME',
                   icon: Icons.north_east,
-                  bgColor: const Color(0xFFEAFAF3),
+                  bgColor: const Color(0xFFF2FBF6),
                   accentColor: _primary,
                   amountText: showLoading ? '…' : 'Rs ${_totalIncome.toInt()}',
                   isFlipped: _isIncomeFlipped,
@@ -580,7 +585,7 @@ class HomeScreenState extends State<HomeScreen> {
                 _buildFlipCard(
                   title: 'EXPENSE',
                   icon: Icons.south_east,
-                  bgColor: const Color(0xFFFFF0F0),
+                  bgColor: const Color(0xFFFFF4F4),
                   accentColor: Colors.redAccent,
                   amountText:
                       showLoading ? '…' : 'Rs ${_totalExpense.toInt()}',

@@ -202,6 +202,7 @@ class _MainScreenState extends State<MainScreen> {
         children: [
           HomeScreen(key: _homeKey, firstName: widget.firstName),
           CategoriesScreen(key: _categoriesKey),
+          const Center(child: Text('Reports Coming Soon')),
         ],
       ),
       // ── FAB → chat ────────────────────────────────────────────────────────
@@ -209,7 +210,7 @@ class _MainScreenState extends State<MainScreen> {
         backgroundColor: _primary,
         tooltip: 'Chat with BachatBot',
         onPressed: _openChat,
-        child: const Icon(Icons.chat_bubble_outline, color: Colors.white),
+        child: const Icon(Icons.smart_toy_outlined, color: Colors.white),
       ),
       // ── Bottom nav ────────────────────────────────────────────────────────
       bottomNavigationBar: BottomNavigationBar(
@@ -222,6 +223,7 @@ class _MainScreenState extends State<MainScreen> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.grid_view_outlined), activeIcon: Icon(Icons.grid_view), label: 'Categories'),
+          BottomNavigationBarItem(icon: Icon(Icons.insert_chart_outlined), activeIcon: Icon(Icons.insert_chart), label: 'Reports'),
         ],
       ),
     );
