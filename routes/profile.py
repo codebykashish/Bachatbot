@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from firebase_config import get_firestore
 from auth import get_current_user
 from schemas.profile import ProfileUpdateRequest
-from utils import serialize_doc
+from utils import serialize_doc, get_current_month_key, sum_month_expense, sum_month_income
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 from firebase_admin import auth as firebase_auth
 import logging
@@ -19,36 +19,61 @@ async def get_profile(
     """
     Returns current user's full profile from Firestore.
     Frontend uses this to check if onboarding is done.
+    Also includes totalIncome and totalExpense for the home screen.
     """
-    
+
     uid = current_user["uid"]
     print(f"[PROFILE] uid={uid} action=get")
     db = get_firestore()
-    
+
     # Fetch user document
     user_ref = db.collection("users").document(uid)
     doc = user_ref.get()
-    
-    # If user doesn't exist yet (should not happen normally)
+
+    # If the Firestore document doesn't exist yet (e.g. /complete-signup was
+    # never called), auto-create a minimal stub from the token so the home
+    # screen never returns a hard 404 for an otherwise valid authenticated user.
     if not doc.exists:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "USER_NOT_FOUND",
-                    "message": "User profile not found. Please complete signup."
-                }
-            }
-        )
-    
+        print(f"[PROFILE] uid={uid} doc missing — auto-creating stub from token")
+        stub = {
+            "firstName": current_user.get("name", "").split(" ")[0] if current_user.get("name") else "",
+            "lastName": " ".join(current_user.get("name", "").split(" ")[1:]) if current_user.get("name") else "",
+            "email": current_user.get("email", ""),
+            "phone": "",
+            "onboarding": {
+                "isCompleted": False,
+                "occupation": None,
+                "housingType": None,
+                "estimatedMonthlySpend": None,
+            },
+            "preferences": {
+                "language": "ne",
+                "currency": "NPR",
+                "alertThreshold": 80,
+            },
+            "createdAt": SERVER_TIMESTAMP,
+            "updatedAt": SERVER_TIMESTAMP,
+        }
+        user_ref.set(stub)
+        # Re-read to get resolved server timestamps
+        doc = user_ref.get()
+
     # Get data and add uid
     data = doc.to_dict()
     data["uid"] = uid
-    
+
     # Convert timestamps
     response_data = serialize_doc(data)
-    
+
+    # Aggregate current-month totals — same logic as GET /monthly-report
+    month_key = get_current_month_key()
+    total_income = sum_month_income(db, uid, month_key)
+    total_expense = sum_month_expense(db, uid, month_key)
+    response_data["totalIncome"] = total_income
+    response_data["totalExpense"] = total_expense
+
+    print(f"[PROFILE] uid={uid} totalIncome={total_income} totalExpense={total_expense}")
+
     return {
         "success": True,
         "data": response_data
