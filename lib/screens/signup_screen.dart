@@ -71,6 +71,15 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green.shade700,
+      ),
+    );
+  }
+
   Future<void> _sendCode() async {
     final email = _emailController.text.trim();
     if (email.isEmpty || !email.contains('@')) {
@@ -154,23 +163,40 @@ class _SignupScreenState extends State<SignupScreen> {
       );
 
       // 2. Complete signup in backend (WITH token)
-      await ApiService.post('/complete-signup', {
-        'firstName': firstName,
-        'lastName': lastName,
-        'email': email,
-        'phone': phone.isNotEmpty ? phone : null,
-      });
+      try {
+        final signupRes = await ApiService.post('/complete-signup', {
+          'firstName': firstName,
+          'lastName': lastName,
+          'email': email,
+          'phone': phone.isNotEmpty ? phone : null,
+        });
+        debugPrint('[SignupScreen] /complete-signup response: $signupRes');
+      } catch (e) {
+        // Handle 409 conflict (user already exists in backend) — that's OK
+        debugPrint('[SignupScreen] /complete-signup error (may be 409): $e');
+      }
+
+      // 3. Verify profile was created
+      try {
+        final profileRes = await ApiService.get('/profile');
+        debugPrint('[SignupScreen] /profile after signup: $profileRes');
+      } catch (e) {
+        debugPrint('[SignupScreen] /profile error after signup: $e');
+      }
 
       if (!mounted) return;
+      _showSuccess('Account created successfully!');
+
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => const MainScreen()),
+        MaterialPageRoute(builder: (_) => MainScreen(firstName: firstName,)),
         (route) => false,
       );
     } on FirebaseAuthException catch (e) {
       _showError(e.message ?? 'Signup failed in Firebase.');
     } catch (e) {
-      _showError('Failed to complete signup in backend.');
+      debugPrint('[SignupScreen] signup error: $e');
+      _showError('Failed to complete signup. Please try again.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

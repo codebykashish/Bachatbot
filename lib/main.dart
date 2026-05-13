@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_screen.dart';
+import 'api_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,7 +46,27 @@ class AuthWrapper extends StatelessWidget {
           );
         }
         if (snapshot.hasData && snapshot.data != null) {
-          return const MainScreen();
+          return FutureBuilder<dynamic>(
+            future: ApiService.get('/profile'),
+            builder: (context, profileSnapshot) {
+              if (profileSnapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  backgroundColor: Color(0xFF2DBE7F),
+                  body: Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  ),
+                );
+              }
+              String firstName = 'User';
+              if (profileSnapshot.hasData) {
+                final res = profileSnapshot.data;
+                if (res != null && res['success'] == true && res['data'] != null) {
+                  firstName = res['data']['firstName'] as String? ?? 'User';
+                }
+              }
+              return MainScreen(firstName: firstName);
+            },
+          );
         }
         return const LoginScreen();
       },

@@ -4,8 +4,13 @@ import 'chat_screen.dart';
 /// Wrapper page for the chat screen.
 /// Pops with `true` when the user sends at least one message so the caller
 /// (MainScreen) knows to refresh the home totals and budget categories.
+///
+/// Also accepts an [onRefreshNeeded] callback for real-time, intent-aware
+/// refreshes that fire immediately after the bot responds (not just on pop).
 class ChatBotPage extends StatelessWidget {
-  const ChatBotPage({super.key});
+  final ChatRefreshCallback? onRefreshNeeded;
+
+  const ChatBotPage({super.key, this.onRefreshNeeded});
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +29,7 @@ class ChatBotPage extends StatelessWidget {
         ),
         foregroundColor: Colors.black87,
       ),
-      body: const ChatScreen(),
+      body: ChatScreen(onRefreshNeeded: onRefreshNeeded),
     );
   }
 }

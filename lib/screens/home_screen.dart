@@ -1,13 +1,14 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../api_service.dart';
 import 'categories_screen.dart';
 
 // State is public so MainScreen can call refresh() via GlobalKey
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final String firstName;
+
+  const HomeScreen({super.key, required this.firstName});
 
   @override
   HomeScreenState createState() => HomeScreenState();
@@ -34,6 +35,7 @@ class HomeScreenState extends State<HomeScreen> {
     {'name': 'Health',        'icon': Icons.favorite,          'color': Color(0xFFEF5350)},
     {'name': 'Entertainment', 'icon': Icons.tv,                'color': Color(0xFF8D6E63)},
     {'name': 'Bills',         'icon': Icons.receipt_long,      'color': Color(0xFF78909C)},
+    {'name': 'Salary',        'icon': Icons.account_balance_wallet, 'color': Color(0xFF66BB6A)},
     {'name': 'Other',         'icon': Icons.category,          'color': Color(0xFFFFCA28)},
   ];
 
@@ -45,8 +47,9 @@ class HomeScreenState extends State<HomeScreen> {
     _fetchAll();
   }
 
-  /// Called by MainScreen after a chat message is sent
-  void refresh() => _fetchAll();
+  /// Called by MainScreen after a chat message is sent.
+  /// Does NOT re-fetch profile (already cached).
+  void refresh() => _refreshData();
 
   String get _monthLabel {
     final parts = _selectedMonth.split('-');
@@ -62,34 +65,52 @@ class HomeScreenState extends State<HomeScreen> {
 
   // ── Data fetching ────────────────────────────────────────────────────────
 
+  /// Full fetch including profile (called once on init)
   Future<void> _fetchAll() async {
     setState(() => _isLoading = true);
     try {
-      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend()]);
+      final futures = <Future>[_fetchBudgets(), _fetchReport(), _fetchTrend()];
+      await Future.wait(futures);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  /// Data-only refresh (skips profile, used after chat)
+  Future<void> _refreshData() async {
+    // Don't set _isLoading = true so we don't flash '…' on cards
+    try {
+      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend()]);
+    } catch (_) {}
+  }
+
+
+
   Future<void> _fetchBudgets() async {
     try {
       final res = await ApiService.get('/budgets?monthKey=$_selectedMonth');
       if (!mounted) return;
+      debugPrint('[HomeScreen] /budgets response keys: ${res.keys}');
       if (res['success'] == true) {
         setState(() => _budgets = res['data']?['budgets'] ?? []);
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[HomeScreen] /budgets error: $e');
+    }
   }
 
-  /// GET /monthly-report — source of truth for income & totalExpense
+  /// GET /monthly-report — source of truth for income & totalExpense & daily snapshot
   Future<void> _fetchReport() async {
     try {
       final res = await ApiService.get('/monthly-report?monthKey=$_selectedMonth');
       if (!mounted) return;
+      debugPrint('[HomeScreen] /monthly-report response: $res');
       if (res['success'] == true) {
         setState(() => _report = res['data']);
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[HomeScreen] /monthly-report error: $e');
+    }
   }
 
   Future<void> _fetchTrend() async {
@@ -97,10 +118,10 @@ class HomeScreenState extends State<HomeScreen> {
       final res = await ApiService.get('/daily-summary');
       if (!mounted) return;
       if (res['success'] == true) {
-        final raw = res['data']?['days'] ??
-            res['data']?['trend'] ??
-            res['data']?['dailySummary'] ??
-            [];
+        final raw = res['data']?['days']
+            ?? res['data']?['trend']
+            ?? res['data']?['dailySummary']
+            ?? [];
         setState(() => _trendData = raw);
       }
     } catch (_) {}
@@ -114,31 +135,15 @@ class HomeScreenState extends State<HomeScreen> {
   double get _totalExpense =>
       (_report?['totalExpense'] ?? _report?['expense'] ?? 0).toDouble();
 
-  String _firstName() {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return 'User';
-    final display = user.displayName ?? '';
-    if (display.trim().isNotEmpty) return display.split(' ').first;
-    final email = user.email ?? '';
-    if (email.contains('@')) return email.split('@').first;
-    return 'User';
-  }
+  // Daily snapshot fields from /monthly-report
+  double get _todayTotalExpense =>
+      (_report?['todayTotalExpense'] ?? 0).toDouble();
 
-  Color _catColor(String name) {
-    try {
-      return _catMeta.firstWhere((c) => c['name'] == name)['color'] as Color;
-    } catch (_) {
-      return _primary;
-    }
-  }
+  String get _todayTopCategory =>
+      (_report?['todayTopCategory'] ?? '').toString();
 
-  IconData _catIcon(String name) {
-    try {
-      return _catMeta.firstWhere((c) => c['name'] == name)['icon'] as IconData;
-    } catch (_) {
-      return Icons.category;
-    }
-  }
+  String get _todaySummaryText =>
+      (_report?['todaySummaryText'] ?? '').toString();
 
   // ── Flip card ────────────────────────────────────────────────────────────
 
@@ -229,13 +234,15 @@ class HomeScreenState extends State<HomeScreen> {
           .toList();
       while (amounts.length < 7) { amounts.add(0); }
     } else {
-      amounts = [80, 160, 120, 200, 280, 220, 160];
+      amounts = [0, 0, 0, 0, 0, 0, 0];
     }
 
-    final maxY = (amounts.reduce(max) * 1.3)
-        .ceilToDouble()
-        .clamp(10, double.infinity)
-        .toDouble();
+    final maxY = amounts.every((a) => a == 0)
+        ? 100.0
+        : (amounts.reduce(max) * 1.3)
+            .ceilToDouble()
+            .clamp(10, double.infinity)
+            .toDouble();
     final spots = List.generate(
       amounts.length,
       (i) => FlSpot(i.toDouble(), amounts[i]),
@@ -335,70 +342,79 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── Categories row ───────────────────────────────────────────────────────
+  // ── Categories row (all 10, horizontally scrollable, tappable) ──────────
 
   Widget _buildCategoriesRow() {
     final Map<String, dynamic> budgetMap = {
       for (var b in _budgets) (b['category'] ?? ''): b
     };
 
-    // Up to 4 categories: API budgets first, then defaults
-    final catNames = <String>[];
-    for (var b in _budgets) {
-      catNames.add(b['category'] ?? '');
-    }
-    for (var c in _catMeta) {
-      if (!catNames.contains(c['name'])) catNames.add(c['name'] as String);
-      if (catNames.length >= 4) break;
-    }
-    final visible = catNames.take(4).toList();
-
     return SizedBox(
       height: 100,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        itemCount: visible.length,
+        itemCount: _catMeta.length,
         separatorBuilder: (_, __) => const SizedBox(width: 14),
         itemBuilder: (ctx, i) {
-          final name = visible[i];
+          final meta = _catMeta[i];
+          final name = meta['name'] as String;
           final budget = budgetMap[name];
           final spent = (budget?['spent'] ?? 0).toDouble();
-          final color = _catColor(name);
-          return Column(
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(14),
+          final color = meta['color'] as Color;
+          final icon = meta['icon'] as IconData;
+
+          return InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const CategoriesScreen(showAppBar: true),
                 ),
-                child: Icon(_catIcon(name), color: color, size: 28),
-              ),
-              const SizedBox(height: 6),
-              Text(name,
-                  style: const TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w600)),
-              Text(
-                'Rs.${spent.toInt()}',
-                style: const TextStyle(fontSize: 10, color: Colors.grey),
-              ),
-            ],
+              );
+            },
+            child: Column(
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: color, size: 28),
+                ),
+                const SizedBox(height: 6),
+                Text(name,
+                    style: const TextStyle(
+                        fontSize: 11, fontWeight: FontWeight.w600)),
+                Text(
+                  'Rs.${spent.toInt()}',
+                  style: const TextStyle(fontSize: 10, color: Colors.grey),
+                ),
+              ],
+            ),
           );
         },
       ),
     );
   }
 
-  // ── Today's Snapshot ─────────────────────────────────────────────────────
+  // ── Today's Snapshot (real backend data) ─────────────────────────────────
 
   Widget _buildSnapshot() {
-    final topCat = _budgets.isNotEmpty
-        ? (_budgets.first['category'] ?? 'Food')
-        : 'Food';
-    final topSpent = _budgets.isNotEmpty
-        ? (_budgets.first['spent'] ?? 0).toDouble()
-        : 0.0;
+    // Use backend todaySummaryText if available, else construct from fields
+    String summaryText;
+    if (_todaySummaryText.isNotEmpty) {
+      summaryText = _todaySummaryText;
+    } else if (_todayTotalExpense > 0 && _todayTopCategory.isNotEmpty) {
+      summaryText = 'You spent Rs ${_todayTotalExpense.toInt()} on $_todayTopCategory today.';
+    } else if (_todayTotalExpense > 0) {
+      summaryText = 'You spent Rs ${_todayTotalExpense.toInt()} today.';
+    } else {
+      summaryText = 'No expenses recorded today.';
+    }
+
     final isOnTrack = _totalExpense <= _totalIncome || _totalIncome == 0;
 
     return Container(
@@ -436,19 +452,9 @@ class HomeScreenState extends State<HomeScreen> {
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 ),
                 const SizedBox(height: 4),
-                RichText(
-                  text: TextSpan(
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                    children: [
-                      const TextSpan(text: "You've spent "),
-                      TextSpan(
-                        text: 'Rs.${topSpent.toInt()}',
-                        style: const TextStyle(
-                            color: Colors.red, fontWeight: FontWeight.bold),
-                      ),
-                      TextSpan(text: ' on $topCat today.'),
-                    ],
-                  ),
+                Text(
+                  summaryText,
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
                 ),
               ],
             ),
@@ -478,6 +484,9 @@ class HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Show real values even while refreshing (don't flash '…')
+    final showLoading = _isLoading && _report == null;
+
     return RefreshIndicator(
       color: _primary,
       onRefresh: _fetchAll,
@@ -497,7 +506,7 @@ class HomeScreenState extends State<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Hello, ${_firstName()}!',
+                        'Hello, ${widget.firstName}!',
                         style: const TextStyle(
                           fontSize: 26,
                           fontWeight: FontWeight.bold,
@@ -506,7 +515,7 @@ class HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 2),
                       const Text(
-                        'Your financial health looks steady.',
+                        'Your financial overview at a glance.',
                         style: TextStyle(fontSize: 13, color: Colors.grey),
                       ),
                     ],
@@ -542,7 +551,7 @@ class HomeScreenState extends State<HomeScreen> {
                   icon: Icons.north_east,
                   bgColor: const Color(0xFFEAFAF3),
                   accentColor: _primary,
-                  amountText: _isLoading ? '…' : 'Rs ${_totalIncome.toInt()}',
+                  amountText: showLoading ? '…' : 'Rs ${_totalIncome.toInt()}',
                   isFlipped: _isIncomeFlipped,
                   onTap: () =>
                       setState(() => _isIncomeFlipped = !_isIncomeFlipped),
@@ -554,7 +563,7 @@ class HomeScreenState extends State<HomeScreen> {
                   bgColor: const Color(0xFFFFF0F0),
                   accentColor: Colors.redAccent,
                   amountText:
-                      _isLoading ? '…' : 'Rs ${_totalExpense.toInt()}',
+                      showLoading ? '…' : 'Rs ${_totalExpense.toInt()}',
                   isFlipped: _isExpenseFlipped,
                   onTap: () =>
                       setState(() => _isExpenseFlipped = !_isExpenseFlipped),
@@ -593,7 +602,7 @@ class HomeScreenState extends State<HomeScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            _isLoading
+            (showLoading)
                 ? const SizedBox(
                     height: 100,
                     child:

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../api_service.dart';
 import 'home_screen.dart';
 import 'categories_screen.dart';
 import 'chatbot_page.dart';
@@ -7,7 +8,9 @@ import 'login_screen.dart';
 import 'notification_screen.dart';
 
 class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+  final String firstName;
+
+  const MainScreen({super.key, required this.firstName});
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -29,6 +32,11 @@ class _MainScreenState extends State<MainScreen> {
       case 1: return 'Categories';
       default: return 'BachatBot';
     }
+  }
+
+  @override
+  void initState() {
+    super.initState();
   }
 
   Future<void> _logout() async {
@@ -73,12 +81,29 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  /// Intent-based real-time refresh callback from chat.
+  /// Called while chat is still open, immediately after bot responds.
+  void _onChatRefreshNeeded({
+    bool refreshHome = false,
+    bool refreshCategories = false,
+  }) {
+    if (refreshHome) {
+      _homeKey.currentState?.refresh();
+    }
+    if (refreshCategories) {
+      _categoriesKey.currentState?.refresh();
+    }
+  }
+
   // Open chat; if a message was sent (returns true) → refresh home totals
   Future<void> _openChat() async {
     final sent = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(builder: (_) => const ChatBotPage()),
+      MaterialPageRoute(
+        builder: (_) => ChatBotPage(onRefreshNeeded: _onChatRefreshNeeded),
+      ),
     );
+    // Also refresh on pop as a safety net
     if (sent == true && mounted) {
       _homeKey.currentState?.refresh();
       _categoriesKey.currentState?.refresh();
@@ -175,7 +200,7 @@ class _MainScreenState extends State<MainScreen> {
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          HomeScreen(key: _homeKey),
+          HomeScreen(key: _homeKey, firstName: widget.firstName),
           CategoriesScreen(key: _categoriesKey),
         ],
       ),

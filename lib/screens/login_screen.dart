@@ -32,18 +32,35 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
-      // Call /profile to generate backend session log
-      try { await ApiService.get('/profile'); } catch (_) {}
+      String firstName = 'User';
+      // Call /profile to establish backend session and verify it exists
+      try {
+        final profileRes = await ApiService.get('/profile');
+        debugPrint('[LoginScreen] /profile result: $profileRes');
+
+        // If profile doesn't exist (success: false or no data), create it
+        if (profileRes['success'] != true || profileRes['data'] == null) {
+          debugPrint('[LoginScreen] Profile not found, attempting to create...');
+          await _createProfileFallback(cred.user);
+          firstName = (cred.user?.displayName ?? 'User').split(' ').first;
+        } else {
+          firstName = profileRes['data']['firstName'] as String? ?? 'User';
+        }
+      } catch (e) {
+        debugPrint('[LoginScreen] /profile error: $e — attempting fallback');
+        await _createProfileFallback(cred.user);
+        firstName = (cred.user?.displayName ?? 'User').split(' ').first;
+      }
 
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => const MainScreen()),
+          MaterialPageRoute(builder: (_) => MainScreen(firstName: firstName)),
           (route) => false,
         );
       }
@@ -71,6 +88,24 @@ class _LoginScreenState extends State<LoginScreen> {
       _showError('An unexpected error occurred.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// Fallback: create a backend profile if /profile returns 404 or fails.
+  /// Uses Firebase displayName / email as defaults.
+  Future<void> _createProfileFallback(User? user) async {
+    if (user == null) return;
+    try {
+      final nameParts = (user.displayName ?? 'User').split(' ');
+      final res = await ApiService.post('/complete-signup', {
+        'firstName': nameParts.first,
+        'lastName': nameParts.length > 1 ? nameParts.sublist(1).join(' ') : '',
+        'email': user.email ?? '',
+      });
+      debugPrint('[LoginScreen] /complete-signup fallback result: $res');
+    } catch (e) {
+      // 409 conflict = profile already exists, which is fine
+      debugPrint('[LoginScreen] /complete-signup fallback error (may be 409): $e');
     }
   }
 

@@ -25,6 +25,7 @@ class CategoriesScreenState extends State<CategoriesScreen> {
     {'name': 'Health',        'icon': Icons.favorite,          'color': Color(0xFFEF5350)},
     {'name': 'Entertainment', 'icon': Icons.tv,                'color': Color(0xFF8D6E63)},
     {'name': 'Bills',         'icon': Icons.receipt_long,      'color': Color(0xFF78909C)},
+    {'name': 'Salary',        'icon': Icons.account_balance_wallet, 'color': Color(0xFF66BB6A)},
     {'name': 'Other',         'icon': Icons.category,          'color': Color(0xFFFFCA28)},
   ];
 
@@ -119,7 +120,7 @@ class CategoriesScreenState extends State<CategoriesScreen> {
     }
   }
 
-  // ── build display list (9 defaults + existing merged) ────────────────────
+  // ── build display list (10 defaults + existing merged) ────────────────────
   List<Map<String, dynamic>> _buildDisplayList() {
     final budgetMap = {for (var b in _budgets) (b['category'] ?? ''): b};
     final list = <Map<String, dynamic>>[];
@@ -138,6 +139,7 @@ class CategoriesScreenState extends State<CategoriesScreen> {
   double get _totalLimit => _budgets.fold(0.0, (s, b) => s + (b['limit'] ?? 0).toDouble());
   double get _totalSpent => _budgets.fold(0.0, (s, b) => s + (b['spent'] ?? 0).toDouble());
   double get _netSavings => (_totalLimit - _totalSpent).clamp(0.0, double.infinity);
+  double get _spentPercent => _totalLimit > 0 ? (_totalSpent / _totalLimit * 100) : 0;
 
   @override
   Widget build(BuildContext context) {
@@ -222,10 +224,21 @@ class CategoriesScreenState extends State<CategoriesScreen> {
                                 const SizedBox(height: 8),
                                 Row(
                                   children: [
-                                    const Icon(Icons.trending_up, color: _primary, size: 16),
+                                    Icon(
+                                      _spentPercent > 100 ? Icons.warning_amber : Icons.check_circle_outline,
+                                      color: _spentPercent > 100 ? Colors.red : _primary,
+                                      size: 16,
+                                    ),
                                     const SizedBox(width: 4),
-                                    const Text('12% increase from last month',
-                                        style: TextStyle(fontSize: 12, color: _primary)),
+                                    Text(
+                                      _totalLimit > 0
+                                          ? '${_spentPercent.toInt()}% of budget used'
+                                          : 'No budgets set yet',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: _spentPercent > 100 ? Colors.red : _primary,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ],
@@ -233,7 +246,7 @@ class CategoriesScreenState extends State<CategoriesScreen> {
                           ),
                           Container(
                             width: 44, height: 44,
-                            decoration: BoxDecoration(color: _primary.withOpacity(0.15), shape: BoxShape.circle),
+                            decoration: BoxDecoration(color: _primary.withValues(alpha: 0.15), shape: BoxShape.circle),
                             child: const Icon(Icons.trending_up, color: _primary, size: 22),
                           ),
                         ],
@@ -243,14 +256,10 @@ class CategoriesScreenState extends State<CategoriesScreen> {
                     const SizedBox(height: 20),
 
                     // ── Spending Buckets header ─────────────────────────────
-                    Row(
+                    const Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Spending Buckets', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        TextButton(
-                          onPressed: () {},
-                          child: const Text('View All >', style: TextStyle(color: _primary, fontSize: 13, fontWeight: FontWeight.bold)),
-                        ),
+                        Text('Spending Buckets', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                       ],
                     ),
 
@@ -283,7 +292,7 @@ class CategoriesScreenState extends State<CategoriesScreen> {
                         children: [
                           Container(
                             width: 40, height: 40,
-                            decoration: BoxDecoration(color: _primary.withOpacity(0.15), shape: BoxShape.circle),
+                            decoration: BoxDecoration(color: _primary.withValues(alpha: 0.15), shape: BoxShape.circle),
                             child: const Icon(Icons.trending_up, color: _primary, size: 20),
                           ),
                           const SizedBox(width: 14),
@@ -292,13 +301,17 @@ class CategoriesScreenState extends State<CategoriesScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'You saved Rs ${_netSavings.toInt()} this month!',
+                                  _totalLimit > 0
+                                      ? 'You saved Rs ${_netSavings.toInt()} this month!'
+                                      : 'Set budgets to track your savings.',
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87),
                                 ),
                                 const SizedBox(height: 2),
-                                const Text(
-                                  'Keep it up to reach your savings goal.',
-                                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                                Text(
+                                  _totalLimit > 0
+                                      ? 'Keep it up to reach your savings goal.'
+                                      : 'Tap any category above to set a budget limit.',
+                                  style: const TextStyle(fontSize: 12, color: Colors.grey),
                                 ),
                               ],
                             ),
@@ -333,7 +346,7 @@ class CategoriesScreenState extends State<CategoriesScreen> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 3))],
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 3))],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -343,7 +356,7 @@ class CategoriesScreenState extends State<CategoriesScreen> {
               children: [
                 Container(
                   width: 40, height: 40,
-                  decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(10)),
+                  decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
                   child: Icon(icon, color: color, size: 20),
                 ),
                 if (!isNotSet)

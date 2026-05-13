@@ -2,8 +2,17 @@ import 'package:flutter/material.dart';
 import '../api_service.dart';
 import 'notification_screen.dart';
 
+/// Callback signature for chat intent-based refresh.
+/// [refreshHome] and [refreshCategories] are flags indicating what to refresh.
+typedef ChatRefreshCallback = void Function({
+  bool refreshHome,
+  bool refreshCategories,
+});
+
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  final ChatRefreshCallback? onRefreshNeeded;
+
+  const ChatScreen({super.key, this.onRefreshNeeded});
 
   /// Set to true when the user successfully sends a message this session.
   /// ChatBotPage reads this to decide whether to pop(true) for refresh.
@@ -22,6 +31,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
   static const Color _primary = Color(0xFF2DBE7F);
   static const Color _pageBg = Color(0xFFF6F7F9);
+
+  // Intents that require refreshing Home and/or Categories
+  static const _refreshHomeIntents = {
+    'expense_log',
+    'income_log',
+    'undo_last_expense',
+  };
+
+  static const _refreshCategoriesIntents = {
+    'expense_log',
+    'income_log',
+    'set_budget',
+    'undo_last_expense',
+  };
 
   @override
   void initState() {
@@ -97,9 +120,13 @@ class _ChatScreenState extends State<ChatScreen> {
         _isLoading = false;
       });
 
+      // Update notification badge if alerts were returned
       if (alerts != null && alerts.isNotEmpty) {
         NotificationScreen.unreadCount.value += alerts.length;
       }
+
+      // Trigger intent-based refresh
+      _triggerRefreshForIntent(intent);
 
       ChatScreen.messageSent = true; // flag so MainScreen refreshes on pop
       _scrollToBottom();
@@ -115,6 +142,21 @@ class _ChatScreenState extends State<ChatScreen> {
       });
 
       _scrollToBottom();
+    }
+  }
+
+  /// Trigger selective refresh based on the chat intent
+  void _triggerRefreshForIntent(String intent) {
+    if (widget.onRefreshNeeded == null) return;
+
+    final needsHome = _refreshHomeIntents.contains(intent);
+    final needsCategories = _refreshCategoriesIntents.contains(intent);
+
+    if (needsHome || needsCategories) {
+      widget.onRefreshNeeded!(
+        refreshHome: needsHome,
+        refreshCategories: needsCategories,
+      );
     }
   }
 
@@ -206,7 +248,7 @@ class _ChatScreenState extends State<ChatScreen> {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: _primary.withOpacity(0.10),
+              color: _primary.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(14),
             ),
             child: const Icon(Icons.auto_awesome, color: _primary, size: 22),
@@ -285,7 +327,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     border: Border.all(color: const Color(0xFFE6E8EE)),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.04),
+                        color: Colors.black.withValues(alpha: 0.04),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
                       ),
@@ -333,7 +375,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     border: Border.all(color: const Color(0xFF4F6CFF), width: 2),
                     boxShadow: [
                       BoxShadow(
-                        color: _primary.withOpacity(0.16),
+                        color: _primary.withValues(alpha: 0.16),
                         blurRadius: 14,
                         offset: const Offset(0, 6),
                       ),
@@ -443,36 +485,49 @@ class _ChatScreenState extends State<ChatScreen> {
           const SizedBox(width: 10),
           _quickActionButton(Icons.bar_chart, "Show report"),
           const SizedBox(width: 10),
-          _quickActionButton(Icons.notifications, "Set reminder"),
+          _quickActionButton(Icons.undo, "Undo last"),
         ],
       ),
     );
   }
 
   Widget _quickActionButton(IconData icon, String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE6E8EE)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: _primary),
-          const SizedBox(width: 8),
-          Text(
-            text,
-            style: const TextStyle(fontSize: 12.5, color: Color(0xFF22252A)),
-          ),
-        ],
+    return GestureDetector(
+      onTap: () {
+        // Pre-fill the text field with the action text
+        _controller.text = text == "Add expense"
+            ? ""
+            : text == "Show report"
+                ? "Show my monthly report"
+                : "Undo last expense";
+        if (text != "Add expense") {
+          _send();
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFE6E8EE)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: _primary),
+            const SizedBox(width: 8),
+            Text(
+              text,
+              style: const TextStyle(fontSize: 12.5, color: Color(0xFF22252A)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -487,7 +542,7 @@ class _ChatScreenState extends State<ChatScreen> {
         color: _pageBg,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, -6),
           ),

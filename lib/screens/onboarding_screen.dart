@@ -3,7 +3,8 @@ import '../api_service.dart';
 import 'home_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
-  const OnboardingScreen({super.key});
+  final String firstName;
+  const OnboardingScreen({super.key, required this.firstName,});
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -81,7 +82,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        MaterialPageRoute(builder: (_) => HomeScreen(firstName: widget.firstName)),
         (route) => false,
       );
     } catch (e) {
