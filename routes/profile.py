@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from firebase_config import get_firestore
 from auth import get_current_user
 from schemas.profile import ProfileUpdateRequest
-from utils import serialize_doc
+from utils import serialize_doc, get_current_month_key, sum_month_expense, sum_month_income
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 from firebase_admin import auth as firebase_auth
 import logging
@@ -19,9 +19,11 @@ async def get_profile(
     """
     Returns current user's full profile from Firestore.
     Frontend uses this to check if onboarding is done.
+    Also includes totalIncome and totalExpense for the home screen.
     """
     
     uid = current_user["uid"]
+    print(f"[PROFILE] uid={uid} action=get")
     db = get_firestore()
     
     # Fetch user document
@@ -48,6 +50,13 @@ async def get_profile(
     # Convert timestamps
     response_data = serialize_doc(data)
     
+    # Aggregate current-month totals (same logic as monthly-report)
+    month_key = get_current_month_key()
+    total_income = sum_month_income(db, uid, month_key)
+    total_expense = sum_month_expense(db, uid, month_key)
+    response_data["totalIncome"] = total_income
+    response_data["totalExpense"] = total_expense
+    
     return {
         "success": True,
         "data": response_data
@@ -65,6 +74,7 @@ async def update_profile(
     """
     
     uid = current_user["uid"]
+    print(f"[PROFILE] uid={uid} action=update")
     db = get_firestore()
     
     user_ref = db.collection("users").document(uid)
@@ -213,23 +223,4 @@ async def logout(current_user: dict = Depends(get_current_user)):
                     "message": f"Failed to log out user: {str(e)}"
                 }
             }
-        )
-
-    
-    # try:
-    #     firebase_auth.revoke_refresh_tokens(uid)
-    #     return {
-    #         "success": True,
-    #         "message": "User logged out successfully."
-    #     }
-    # except Exception as e:
-    #     raise HTTPException(
-    #         status_code=500,
-    #         detail={
-    #             "success": False,
-    #             "error": {
-    #                 "code": "LOGOUT_FAILED",
-    #                 "message": f"Failed to log out user: {str(e)}"
-    #             }
-    #         }
-    #     )
+        )

@@ -2,42 +2,255 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from firebase_config import get_firestore
 from auth import get_current_user
 from gemini import process_chat_message
-from utils import get_current_month_key, serialize_doc
-from google.cloud.firestore_v1 import SERVER_TIMESTAMP
+from utils import (
+    get_current_month_key, serialize_doc,
+    sum_month_expense, sum_category_expense, fetch_budget,
+)
+from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment
 from typing import Optional
+
 router = APIRouter()
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Helpers — one function per action type
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _handle_expense_or_income(db, uid, action, source, month_key):
+    """
+    Save transaction, increment budget.spent (if expense + budget exists),
+    create a transaction_saved alert.
+    Returns (transaction_dict, budget_update_or_None, alert_or_None, reply_part).
+    """
+    amount = float(action["amount"])
+    category = action.get("category")
+    tx_type = action.get("type", "expense")
+    description = action.get("description", "")
+
+    # ── Save transaction ─────────────────────────────────────────────────
+    tx_ref = (
+        db.collection("users").document(uid)
+        .collection("transactions").document()
+    )
+    tx_ref.set({
+        "amount": amount,
+        "category": category,
+        "type": tx_type,
+        "status": "confirmed",
+        "source": source,
+        "description": description,
+        "monthKey": month_key,
+        "isDeleted": False,
+        "deletedAt": None,
+        "originalMessageId": None,
+        "createdAt": SERVER_TIMESTAMP,
+        "updatedAt": SERVER_TIMESTAMP,
+    })
+    print(f"[CHAT] Transaction saved: id={tx_ref.id} {tx_type} {category} Rs {amount}")
+
+    transaction_out = {
+        "id": tx_ref.id,
+        "amount": amount,
+        "category": category,
+        "type": tx_type,
+        "status": "confirmed",
+        "source": source,
+        "description": description,
+        "monthKey": month_key,
+        "isDeleted": False,
+        "deletedAt": None,
+        "originalMessageId": None,
+    }
+
+    # ── Budget increment (expenses only) ─────────────────────────────────
+    budget_update = None
+    percent_used = 0.0
+
+    if tx_type == "expense" and category:
+        budgets_ref = db.collection("users").document(uid).collection("budgets")
+        matching = list(
+            budgets_ref
+            .where("category", "==", category)
+            .where("monthKey", "==", month_key)
+            .limit(1)
+            .stream()
+        )
+        if matching:
+            bref = matching[0].reference
+            old_spent = matching[0].to_dict().get("spent", 0.0)
+            bref.update({
+                "spent": Increment(amount),
+                "updatedAt": SERVER_TIMESTAMP,
+            })
+            updated = bref.get().to_dict()
+            new_spent = updated.get("spent", 0.0)
+            blimit = updated.get("limit", 0.0)
+            remaining = max(0.0, blimit - new_spent)
+            percent_used = round((new_spent / blimit) * 100, 2) if blimit > 0 else 0.0
+            budget_update = {
+                "id": matching[0].id,
+                "category": updated.get("category", category),
+                "limit": blimit,
+                "spent": new_spent,
+                "remaining": remaining,
+                "percentUsed": percent_used,
+                "monthKey": month_key,
+            }
+            print(f"[CHAT] [BUDGET] {category}: spent {old_spent} -> {new_spent} ({percent_used}%)")
+        else:
+            print(f"[CHAT] [BUDGET] No budget for '{category}' in {month_key}")
+
+    # ── Alert ────────────────────────────────────────────────────────────
+    alert_out = None
+    try:
+        label = "expense" if tx_type == "expense" else "income"
+        cat_label = f"{category} " if category else ""
+        msg = f"Rs {int(amount)} {cat_label}{label} saved."
+        if tx_type == "expense" and budget_update and percent_used >= 80:
+            msg = f"{category} Rs {int(amount)} saved, {int(percent_used)}% budget used!"
+
+        aref = db.collection("users").document(uid).collection("alerts").document()
+        aref.set({
+            "type": "transaction_saved",
+            "message": msg,
+            "category": category,
+            "severity": "medium" if percent_used >= 80 else "low",
+            "isRead": False,
+            "isDeleted": False,
+            "monthKey": month_key,
+            "relatedTransactionId": tx_ref.id,
+            "createdAt": SERVER_TIMESTAMP,
+        })
+        alert_out = {
+            "id": aref.id, "type": "transaction_saved",
+            "message": msg, "category": category,
+            "severity": "medium" if percent_used >= 80 else "low",
+            "isRead": False, "monthKey": month_key,
+            "relatedTransactionId": tx_ref.id,
+        }
+        print(f"[CHAT] [ALERT] {aref.id}: '{msg}'")
+    except Exception as e:
+        print(f"[CHAT] [ALERT] FAILED: {e}")
+
+    # Reply part
+    cat_display = category or "Income"
+    reply_part = f"Rs {int(amount)} {cat_display}"
+
+    return transaction_out, budget_update, alert_out, reply_part
+
+
+def _handle_set_budget(db, uid, action, month_key):
+    """
+    Upsert budget: overwrite limit, keep spent.
+    Returns (budget_update_dict, alert_or_None, reply_part).
+    """
+    category = action.get("category")
+    limit_val = float(action["limit"])
+
+    print(f"[CHAT] Setting budget: {category} limit=Rs {limit_val} monthKey={month_key}")
+
+    budgets_ref = db.collection("users").document(uid).collection("budgets")
+    matching = list(
+        budgets_ref
+        .where("category", "==", category)
+        .where("monthKey", "==", month_key)
+        .limit(1)
+        .stream()
+    )
+
+    if matching:
+        bref = matching[0].reference
+        bref.update({"limit": limit_val, "updatedAt": SERVER_TIMESTAMP})
+        budget_id = matching[0].id
+        spent = matching[0].to_dict().get("spent", 0.0)
+        print(f"[CHAT] [BUDGET] Updated id={budget_id}, kept spent={spent}")
+    else:
+        new_ref = budgets_ref.document()
+        new_ref.set({
+            "category": category,
+            "limit": limit_val,
+            "spent": 0.0,
+            "alertThreshold": 80,
+            "monthKey": month_key,
+            "createdAt": SERVER_TIMESTAMP,
+            "updatedAt": SERVER_TIMESTAMP,
+        })
+        budget_id = new_ref.id
+        spent = 0.0
+        print(f"[CHAT] [BUDGET] Created id={budget_id}")
+
+    pct = round((spent / limit_val) * 100, 2) if limit_val > 0 else 0.0
+    remaining = max(0.0, limit_val - spent)
+    budget_update = {
+        "id": budget_id,
+        "category": category,
+        "limit": limit_val,
+        "spent": spent,
+        "remaining": remaining,
+        "percentUsed": pct,
+        "monthKey": month_key,
+    }
+
+    # Alert
+    alert_out = None
+    try:
+        msg = f"{category} budget Rs {int(limit_val)} set gareko chu."
+        aref = db.collection("users").document(uid).collection("alerts").document()
+        aref.set({
+            "type": "budget_set",
+            "message": msg,
+            "category": category,
+            "severity": "low",
+            "isRead": False,
+            "isDeleted": False,
+            "monthKey": month_key,
+            "createdAt": SERVER_TIMESTAMP,
+        })
+        alert_out = {
+            "id": aref.id, "type": "budget_set",
+            "message": msg, "category": category,
+            "severity": "low", "isRead": False, "monthKey": month_key,
+        }
+        print(f"[CHAT] [ALERT] {aref.id}: '{msg}'")
+    except Exception as e:
+        print(f"[CHAT] [ALERT] FAILED: {e}")
+
+    reply_part = f"{category} budget Rs {int(limit_val)} set"
+
+    return budget_update, alert_out, reply_part
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /chat
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/chat")
 async def chat(
     request: Request,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     uid = current_user["uid"]
     db = get_firestore()
 
-    # Parse request body
     body = await request.json()
     user_message = body.get("message", "").strip()
     source = body.get("source", "chat")
-    source_app = body.get("sourceApp", "Unknown")
-    original_message_id = body.get("originalMessageId")
+
+    print(f"\n{'='*60}")
+    print(f"[CHAT] uid={uid} message='{user_message}'")
+    print(f"{'='*60}")
 
     if not user_message:
         raise HTTPException(
             status_code=400,
             detail={
                 "success": False,
-                "error": {
-                    "code": "EMPTY_MESSAGE",
-                    "message": "Message cannot be empty."
-                }
-            }
+                "error": {"code": "EMPTY_MESSAGE", "message": "Message cannot be empty."},
+            },
         )
 
-    # Save user message to Firestore
+    # ── Save user message ────────────────────────────────────────────────
     messages_ref = db.collection("users").document(uid).collection("messages")
-
     user_msg_ref = messages_ref.document()
     user_msg_ref.set({
         "role": "user",
@@ -45,257 +258,279 @@ async def chat(
         "intent": None,
         "extractedData": None,
         "relatedTransactionId": None,
-        "createdAt": SERVER_TIMESTAMP
+        "createdAt": SERVER_TIMESTAMP,
     })
 
-    # Send to Gemini and get structured response
+    # ── Call Gemini ──────────────────────────────────────────────────────
     gemini_result = await process_chat_message(user_message)
+    gemini_reply = gemini_result["reply"]
+    actions = gemini_result["actions"]
 
-    reply = gemini_result["reply"]
-    intent = gemini_result["intent"]
-    amount = gemini_result["amount"]
-    category = gemini_result["category"]
-    tx_type = gemini_result["type"]
-    description = gemini_result["description"]
+    print(f"[CHAT] uid={uid} actions={[a.get('intent') for a in actions]}")
 
-    # Initialize
-    transaction_data = None
-    notification_data = None
-    budget_update = None
-    month_key = get_current_month_key()
-    needs_confirmation = False
+    # ── Accumulators ─────────────────────────────────────────────────────
+    last_transaction = None
+    last_budget_update = None
+    alerts_created = []
+    reply_parts = []           # pieces like "Rs 150 Food", "Transport budget Rs 5000 set"
+    primary_intent = actions[0].get("intent", "general_chat") if actions else "general_chat"
 
-    # Check if this is a notification source
-    if source == "notification":
-        needs_confirmation = True
-        if intent == "notification_parse" or (intent in ["expense_log", "income_log"] and amount and category):
-            # Create a PENDING transaction
-            tx_ref = db.collection("users").document(uid).collection("transactions").document()
-            
-            tx_data = {
-                "amount": float(amount),
-                "category": category,
-                "type": tx_type or "expense",
-                "status": "pending",
-                "source": "notification",
-                "description": user_message,
-                "monthKey": month_key,
-                "isDeleted": False,
-                "deletedAt": None,
-                "originalMessageId": original_message_id,
-                "createdAt": SERVER_TIMESTAMP,
-                "updatedAt": SERVER_TIMESTAMP
-            }
-            tx_ref.set(tx_data)
+    # ── Process each action ──────────────────────────────────────────────
+    for action in actions:
+        intent = action.get("intent", "general_chat")
+        month_key = action.get("monthKey") or get_current_month_key()
 
-            transaction_data = {
-                "id": tx_ref.id,
-                "amount": float(amount),
-                "category": category,
-                "type": tx_type or "expense",
-                "status": "pending",
-                "source": "notification",
-                "description": user_message,
-                "monthKey": month_key,
-                "isDeleted": False,
-                "deletedAt": None,
-                "originalMessageId": original_message_id
-            }
-
-            # Create a notification document
-            notif_ref = db.collection("users").document(uid).collection("notifications").document()
-            notif_data = {
-                "rawText": user_message,
-                "parsedAmount": float(amount),
-                "parsedCategory": category,
-                "parsedType": tx_type or "expense",
-                "sourceApp": source_app,
-                "status": "pending",
-                "transactionId": tx_ref.id,
-                "createdAt": SERVER_TIMESTAMP
-            }
-            notif_ref.set(notif_data)
-
-            notification_data = {
-                "id": notif_ref.id,
-                "rawText": user_message,
-                "parsedAmount": float(amount),
-                "parsedCategory": category,
-                "parsedType": tx_type or "expense",
-                "sourceApp": source_app,
-                "status": "pending",
-                "transactionId": tx_ref.id
-            }
-            
-            print(f"[CHAT][NOTIF] uid={uid} amount={amount} category={category} type={tx_type}")
-
-    # For source == "chat" (existing behavior)
-    elif intent in ["expense_log", "income_log"] and amount and category:
-
-        tx_ref = db.collection("users").document(uid).collection("transactions").document()
-
-  
-        tx_data = {
-            "amount": float(amount),
-            "category": category,
-            "type": tx_type,
-            "status": "confirmed",
-            "source": source,
-            "description": description,
-            "monthKey": month_key,
-            "isDeleted": False,
-            "deletedAt": None,
-            "originalMessageId": None,
-            "createdAt": SERVER_TIMESTAMP,
-            "updatedAt": SERVER_TIMESTAMP
-        }
-
-        tx_ref.set(tx_data)
-
-        transaction_data = {
-            "id": tx_ref.id,
-            "amount": float(amount),
-            "category": category,
-            "type": tx_type,
-            "status": "confirmed",
-            "source": source,
-            "description": description,
-            "monthKey": month_key,
-            "isDeleted": False,
-            "deletedAt": None,
-            "originalMessageId": None
-        }
-
-        # ── Budget spent increment (only for expenses) ──────────────────────
-        if intent == "expense_log":
-            budgets_ref = (
-                db.collection("users")
-                .document(uid)
-                .collection("budgets")
+        # ── EXPENSE / INCOME ─────────────────────────────────────────────
+        if intent in ("expense_log", "income_log") and action.get("amount"):
+            txn, bud, alt, rp = _handle_expense_or_income(
+                db, uid, action, source, month_key,
             )
-            matching_docs = list(
-                budgets_ref
-                .where("category", "==", category)
-                .where("monthKey", "==", month_key)
-                .limit(1)
-                .stream()
+            last_transaction = txn
+            if bud:
+                last_budget_update = bud
+            if alt:
+                alerts_created.append(alt)
+            reply_parts.append(rp)
+
+        # ── SET BUDGET ───────────────────────────────────────────────────
+        elif intent == "set_budget" and action.get("limit") is not None and action.get("category"):
+            bud, alt, rp = _handle_set_budget(db, uid, action, month_key)
+            last_budget_update = bud
+            if alt:
+                alerts_created.append(alt)
+            reply_parts.append(rp)
+
+        # ── QUERY MONTH TOTAL ────────────────────────────────────────────
+        elif intent == "query_month_total":
+            total = sum_month_expense(db, uid, month_key)
+            reply_parts.append(f"Yo mahina total kharcha Rs {int(total)} cha")
+            print(f"[CHAT] query_month_total: Rs {total}")
+
+        # ── QUERY CATEGORY SPEND ─────────────────────────────────────────
+        elif intent == "query_category_spend" and action.get("category"):
+            cat = action["category"]
+            total = sum_category_expense(db, uid, cat, month_key)
+            reply_parts.append(f"{cat} ma Rs {int(total)} kharcha gareko chau yo mahina")
+            print(f"[CHAT] query_category_spend: {cat} -> Rs {total}")
+
+        # ── QUERY BUDGET STATUS ──────────────────────────────────────────
+        elif intent == "query_budget_status" and action.get("category"):
+            cat = action["category"]
+            b = fetch_budget(db, uid, cat, month_key)
+            if b:
+                bl = b.get("limit", 0)
+                bs = b.get("spent", 0)
+                br = max(0, bl - bs)
+                bp = round((bs / bl * 100), 1) if bl > 0 else 0
+                reply_parts.append(f"{cat} budget Rs {int(bl)}, spent Rs {int(bs)}, baki Rs {int(br)} ({bp}%)")
+            else:
+                reply_parts.append(f"{cat} ko lagi budget set gareko chaina yo mahina")
+            print(f"[CHAT] query_budget_status: {cat}")
+
+        # ── UNDO LAST EXPENSE ────────────────────────────────────────────
+        elif intent == "undo_last_expense":
+            cat_filter = action.get("category")
+            print(f"[CHAT] Undo last expense, category filter={cat_filter}")
+
+            tx_col = db.collection("users").document(uid).collection("transactions")
+            q = (
+                tx_col
+                .where("type", "==", "expense")
+                .where("status", "==", "confirmed")
+                .where("isDeleted", "==", False)
+                .order_by("createdAt", direction="DESCENDING")
+                .limit(5)
             )
-            if matching_docs:
-                budget_doc = matching_docs[0]
-                budget_ref = budget_doc.reference
-                # Atomic increment — safe under concurrent writes
-                from google.cloud.firestore_v1 import Increment
-                budget_ref.update({
-                    "spent": Increment(float(amount)),
+            candidates = list(q.stream())
+
+            target = None
+            for doc in candidates:
+                d = doc.to_dict()
+                if cat_filter and d.get("category") != cat_filter:
+                    continue
+                target = doc
+                break
+
+            if target:
+                td = target.to_dict()
+                t_amt = td.get("amount", 0)
+                t_cat = td.get("category", "Unknown")
+
+                target.reference.update({
+                    "isDeleted": True,
+                    "deletedAt": SERVER_TIMESTAMP,
                     "updatedAt": SERVER_TIMESTAMP,
                 })
-                updated_budget = budget_ref.get().to_dict()
-                new_spent = updated_budget.get("spent", 0.0)
-                budget_limit = updated_budget.get("limit", 0.0)
-                percent_used = round((new_spent / budget_limit) * 100, 2) if budget_limit > 0 else 0.0
-                budget_update = {
-                    "id": budget_doc.id,
-                    "category": category,
-                    "limit": budget_limit,
-                    "spent": new_spent,
-                    "percentUsed": percent_used,
-                    "monthKey": month_key,
-                }
+                print(f"[CHAT] [UNDO] Soft-deleted tx={target.id} Rs {t_amt} {t_cat}")
 
-    # Save assistant reply to messages
+                # Decrement budget
+                if t_cat:
+                    t_mk = td.get("monthKey", month_key)
+                    bud_docs = list(
+                        db.collection("users").document(uid).collection("budgets")
+                        .where("category", "==", t_cat)
+                        .where("monthKey", "==", t_mk)
+                        .limit(1)
+                        .stream()
+                    )
+                    if bud_docs:
+                        bud_docs[0].reference.update({
+                            "spent": Increment(-float(t_amt)),
+                            "updatedAt": SERVER_TIMESTAMP,
+                        })
+                        print(f"[CHAT] [UNDO] Budget decremented: {t_cat}")
+
+                reply_parts.append(f"Rs {int(t_amt)} {t_cat} expense undo gareko chu")
+                last_transaction = {
+                    "id": target.id, "amount": t_amt, "category": t_cat,
+                    "type": "expense", "status": "confirmed", "isDeleted": True,
+                }
+            else:
+                reply_parts.append("Kei expense fela parena undo garna lai")
+                print("[CHAT] [UNDO] No matching expense")
+
+        # ── GENERAL CHAT / GREETING ──────────────────────────────────────
+        else:
+            print(f"[CHAT] General/greeting — no DB writes")
+
+    # ── Build final reply ────────────────────────────────────────────────
+    if reply_parts:
+        # Synthesize a combined reply from the action parts
+        has_expense = any(a.get("intent") in ("expense_log", "income_log") for a in actions)
+        has_budget = any(a.get("intent") == "set_budget" for a in actions)
+
+        if has_expense and has_budget:
+            # Mix of expenses + budget sets
+            expense_parts = []
+            budget_parts = []
+            for a, rp in zip(actions, reply_parts):
+                if a.get("intent") in ("expense_log", "income_log"):
+                    expense_parts.append(rp)
+                elif a.get("intent") == "set_budget":
+                    budget_parts.append(rp)
+
+            pieces = []
+            if expense_parts:
+                pieces.append(", ".join(expense_parts) + " ma save gareko chu")
+            if budget_parts:
+                pieces.append(" ra ".join(budget_parts) + " gareko chu")
+
+            reply = " ra ".join(pieces) + " ✅"
+
+        elif has_expense:
+            if len(reply_parts) > 1:
+                reply = ", ".join(reply_parts) + " ma save gareko chu ✅"
+            else:
+                reply = reply_parts[0] + " ma save gareko chu ✅"
+
+        elif has_budget:
+            reply = " ra ".join(reply_parts) + " gareko chu ✅"
+
+        else:
+            # Queries / undo / etc.
+            reply = ". ".join(reply_parts) + "."
+    else:
+        # Pure general chat — use Gemini's natural reply
+        reply = gemini_reply
+
+    # ── Save assistant message ───────────────────────────────────────────
     assistant_msg_ref = messages_ref.document()
+    extracted = None
+    if primary_intent not in ("general_chat", "greeting"):
+        extracted = [
+            {k: a.get(k) for k in ("intent", "amount", "category", "type", "limit", "monthKey")}
+            for a in actions
+        ]
+
     assistant_msg_ref.set({
         "role": "assistant",
         "content": reply,
-        "intent": intent,
-        "extractedData": {
-            "amount": amount,
-            "category": category,
-            "type": tx_type
-        } if intent in ["expense_log", "income_log", "notification_parse"] else None,
-        "relatedTransactionId": transaction_data["id"] if transaction_data else None,
-        "createdAt": SERVER_TIMESTAMP
+        "intent": primary_intent,
+        "extractedData": extracted,
+        "relatedTransactionId": last_transaction["id"] if last_transaction else None,
+        "createdAt": SERVER_TIMESTAMP,
     })
 
-    response_data = {
-        "reply": reply,
-        "intent": intent,
-        "needsConfirmation": needs_confirmation,
-        "transaction": transaction_data,
-        "budgetUpdate": budget_update,
-        "alerts": []
-    }
-
-    if notification_data:
-        response_data["notification"] = notification_data
+    print(
+        f"[CHAT] DONE: actions={[a.get('intent') for a in actions]}, "
+        f"tx={'YES ' + last_transaction['id'] if last_transaction else 'NO'}, "
+        f"budget={'YES' if last_budget_update else 'NO'}, "
+        f"alerts={len(alerts_created)}"
+    )
+    print(f"{'='*60}\n")
 
     return {
         "success": True,
-        "data": response_data
+        "data": {
+            "reply": reply,
+            "intent": primary_intent,
+            "needsConfirmation": False,
+            "transaction": last_transaction,
+            "budgetUpdate": last_budget_update,
+            "alerts": alerts_created,
+        },
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GET /messages
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/messages")
 async def get_messages(
     monthKey: Optional[str] = Query(None),
     limit: int = Query(50),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
-    """
-    Get chat history/messages for current user
-    """
+    """Get chat history/messages for current user."""
     uid = current_user["uid"]
     db = get_firestore()
-    
+
     messages_ref = db.collection("users").document(uid).collection("messages")
-    
     query = messages_ref.order_by("createdAt", direction="DESCENDING").limit(limit)
-    
     docs = query.stream()
-    
+
     messages = []
     for doc in docs:
         data = doc.to_dict()
         data["id"] = doc.id
         messages.append(serialize_doc(data))
-    
+
     return {
         "success": True,
         "data": {
             "messages": messages,
-            "count": len(messages)
-        }
+            "count": len(messages),
+        },
     }
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DELETE /messages/{id}
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @router.delete("/messages/{message_id}")
 async def delete_message(
     message_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
-    """
-    Delete a message from chat history
-    """
+    """Delete a message from chat history."""
     uid = current_user["uid"]
     db = get_firestore()
-    
-    msg_ref = db.collection("users").document(uid).collection("messages").document(message_id)
-    
+
+    msg_ref = (
+        db.collection("users").document(uid)
+        .collection("messages").document(message_id)
+    )
     doc = msg_ref.get()
     if not doc.exists:
         raise HTTPException(
             status_code=404,
             detail={
                 "success": False,
-                "error": {
-                    "code": "MESSAGE_NOT_FOUND",
-                    "message": "Message not found"
-                }
-            }
+                "error": {"code": "MESSAGE_NOT_FOUND", "message": "Message not found"},
+            },
         )
-    
+
     msg_ref.delete()
-    
-    return {
-        "success": True,
-        "message": "Message deleted"
-    }
+    return {"success": True, "message": "Message deleted"}

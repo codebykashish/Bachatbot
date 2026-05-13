@@ -13,19 +13,19 @@ def initialize_firebase():
         # Local FIRST
         if os.path.exists("serviceAccountKey.json"):
             cred = credentials.Certificate("serviceAccountKey.json")
-            print("✅ Local serviceAccountKey.json")
+            print("[OK] Local serviceAccountKey.json")
         
         # Railway SECOND
         elif os.getenv("FIREBASE_SERVICE_ACCOUNT"):
             service_account = json.loads(os.getenv("FIREBASE_SERVICE_ACCOUNT"))
             cred = credentials.Certificate(service_account)
-            print("✅ Railway env")
+            print("[OK] Railway env")
         
         if cred is None:
             raise Exception("Missing serviceAccountKey.json or FIREBASE_SERVICE_ACCOUNT env")
         
         _app = firebase_admin.initialize_app(cred)
-        print("✅ Firebase initialized")
+        print("[OK] Firebase initialized")
 
 def get_firestore():
     # Returns Firestore database client
