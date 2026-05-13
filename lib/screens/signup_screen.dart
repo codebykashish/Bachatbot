@@ -157,10 +157,13 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() => _isLoading = true);
     try {
       // 1. Firebase create user
-      await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
+      
+      // Save the first name to Firebase Auth profile
+      await userCredential.user?.updateDisplayName(firstName);
 
       // 2. Complete signup in backend (WITH token)
       try {

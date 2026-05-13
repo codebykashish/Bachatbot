@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../api_service.dart';
 import 'categories_screen.dart';
 
@@ -144,6 +145,22 @@ class HomeScreenState extends State<HomeScreen> {
 
   String get _todaySummaryText =>
       (_report?['todaySummaryText'] ?? '').toString();
+
+  String get _greetingName {
+    // 1. Prioritize widget.firstName (from backend profile entered during signup)
+    if (widget.firstName.trim().isNotEmpty && widget.firstName.trim() != 'User') {
+      return widget.firstName.trim();
+    }
+
+    // 2. Try Firebase Display Name (saved during signup)
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && user.displayName != null && user.displayName!.trim().isNotEmpty) {
+      return user.displayName!.trim();
+    }
+    
+    // 3. Fallback
+    return 'User';
+  }
 
   // ── Flip card ────────────────────────────────────────────────────────────
 
@@ -506,7 +523,7 @@ class HomeScreenState extends State<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Hello, ${widget.firstName}!',
+                        'Hello $_greetingName',
                         style: const TextStyle(
                           fontSize: 26,
                           fontWeight: FontWeight.bold,
