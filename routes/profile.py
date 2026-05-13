@@ -22,7 +22,7 @@ async def get_profile(
     """
     
     uid = current_user["uid"]
-    print(f"[PROFILE] uid={uid} get profile")
+    print(f"[PROFILE] uid={uid} action=get")
     db = get_firestore()
     
     # Fetch user document
@@ -66,7 +66,7 @@ async def update_profile(
     """
     
     uid = current_user["uid"]
-    print(f"[PROFILE] uid={uid} update profile")
+    print(f"[PROFILE] uid={uid} action=update")
     db = get_firestore()
     
     user_ref = db.collection("users").document(uid)
@@ -215,23 +215,4 @@ async def logout(current_user: dict = Depends(get_current_user)):
                     "message": f"Failed to log out user: {str(e)}"
                 }
             }
-        )
-
-    
-    # try:
-    #     firebase_auth.revoke_refresh_tokens(uid)
-    #     return {
-    #         "success": True,
-    #         "message": "User logged out successfully."
-    #     }
-    # except Exception as e:
-    #     raise HTTPException(
-    #         status_code=500,
-    #         detail={
-    #             "success": False,
-    #             "error": {
-    #                 "code": "LOGOUT_FAILED",
-    #                 "message": f"Failed to log out user: {str(e)}"
-    #             }
-    #         }
-    #     )
+        )

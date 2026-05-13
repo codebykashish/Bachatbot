@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from firebase_config import get_firestore
 from auth import get_current_user
-from utils import get_current_month_key, serialize_doc
+from utils import (
+    get_current_month_key, serialize_doc,
+    is_today, is_in_current_week, is_in_current_month,
+)
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 from typing import Optional
 
@@ -12,20 +15,25 @@ router = APIRouter()
 async def get_alerts(
     monthKey: Optional[str] = Query(None, description="YYYY-MM. Defaults to current month."),
     category: Optional[str] = Query(None, description="Filter by category."),
+    dateRange: Optional[str] = Query(None, description="today | week | month | all"),
     isRead: Optional[bool] = Query(None, description="Filter by read status."),
     limit: int = Query(50, description="Max alerts to return."),
     current_user: dict = Depends(get_current_user),
 ):
     """
     Fetch alerts for the notification/alert screen.
-    Matches ENDPOINTS.md Endpoint 12 exactly.
+    Ordered newest-first. Supports category and dateRange filters.
     """
     uid = current_user["uid"]
     db = get_firestore()
 
     month_key = monthKey or get_current_month_key()
-    print(f"[ALERTS] uid={uid} monthKey={month_key} category={category} isRead={isRead}")
+    effective_range = dateRange or "all"
 
+    print(f"[ALERTS] uid={uid} monthKey={month_key} category={category} dateRange={effective_range} isRead={isRead}")
+
+    # When dateRange is "all", we still scope to monthKey for sanity.
+    # For "today"/"week" we fetch by monthKey and filter further in-memory.
     alerts_ref = (
         db.collection("users").document(uid).collection("alerts")
         .where("monthKey", "==", month_key)
@@ -39,26 +47,36 @@ async def get_alerts(
     for doc in docs:
         data = doc.to_dict()
 
-        # Skip soft-deleted alerts
+        # Skip soft-deleted
         if data.get("isDeleted", False):
             continue
 
-        # Filter by category if provided
+        # Filter by category
         if category and data.get("category") != category:
             continue
 
-        # Filter by isRead if provided
+        # Filter by isRead
         if isRead is not None and data.get("isRead", False) != isRead:
             continue
 
-        # Count unread
+        # Filter by dateRange
+        created_at = data.get("createdAt")
+        if effective_range == "today" and not is_today(created_at):
+            continue
+        elif effective_range == "week" and not is_in_current_week(created_at):
+            continue
+        elif effective_range == "month" and not is_in_current_month(created_at):
+            continue
+        # "all" → no extra time filter
+
+        # Count unread (across all filtered results)
         if not data.get("isRead", False):
             unread_count += 1
 
         data["id"] = doc.id
         alerts.append(serialize_doc(data))
 
-    # Sort by createdAt DESC (newest first)
+    # Sort newest first
     alerts.sort(key=lambda a: a.get("createdAt", ""), reverse=True)
 
     # Apply limit
@@ -70,8 +88,8 @@ async def get_alerts(
         "success": True,
         "data": {
             "alerts": alerts,
-            "unreadCount": unread_count
-        }
+            "unreadCount": unread_count,
+        },
     }
 
 
@@ -80,14 +98,14 @@ async def mark_alert_read(
     alert_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    """
-    Mark a single alert as read.
-    Matches ENDPOINTS.md Endpoint 13.
-    """
+    """Mark a single alert as read."""
     uid = current_user["uid"]
     db = get_firestore()
 
-    alert_ref = db.collection("users").document(uid).collection("alerts").document(alert_id)
+    alert_ref = (
+        db.collection("users").document(uid)
+        .collection("alerts").document(alert_id)
+    )
     doc = alert_ref.get()
 
     if not doc.exists:
@@ -97,18 +115,15 @@ async def mark_alert_read(
                 "success": False,
                 "error": {
                     "code": "ALERT_NOT_FOUND",
-                    "message": "Alert not found."
-                }
-            }
+                    "message": "Alert not found.",
+                },
+            },
         )
 
-    alert_ref.update({
-        "isRead": True,
-    })
-
+    alert_ref.update({"isRead": True})
     print(f"[ALERTS] uid={uid} marked alert {alert_id} as read")
 
     return {
         "success": True,
-        "message": "Alert marked as read."
+        "message": "Alert marked as read.",
     }

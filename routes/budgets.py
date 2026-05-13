@@ -18,6 +18,10 @@ class BudgetRequest(BaseModel):
         None,
         description="Target month in YYYY-MM format. Defaults to current month.",
     )
+    alertThreshold: Optional[int] = Field(
+        80,
+        description="Alert threshold percentage (0-100).",
+    )
 
 
 # ─── POST /budgets ────────────────────────────────────────────────────────────
@@ -38,7 +42,8 @@ async def create_or_update_budget(
     db = get_firestore()
 
     month_key = body.monthKey or get_current_month_key()
-    print(f"[BUDGET] uid={uid} set {body.category} limit={body.limit} monthKey={month_key}")
+    threshold = body.alertThreshold if body.alertThreshold is not None else 80
+    print(f"[BUDGET] uid={uid} category={body.category} limit={body.limit} monthKey={month_key}")
 
     budgets_ref = (
         db.collection("users")
@@ -61,11 +66,14 @@ async def create_or_update_budget(
         doc_ref = existing_docs[0].reference
         doc_ref.update({
             "limit": body.limit,
+            "alertThreshold": threshold,
             "updatedAt": SERVER_TIMESTAMP,
         })
         updated = doc_ref.get().to_dict()
         spent = updated.get("spent", 0.0)
         percent_used = round((spent / body.limit) * 100, 2) if body.limit > 0 else 0.0
+
+        print(f"[BUDGET] Updated existing budget id={doc_ref.id}, kept spent={spent}")
 
         return {
             "success": True,
@@ -75,7 +83,9 @@ async def create_or_update_budget(
                 "category": body.category,
                 "limit": body.limit,
                 "spent": spent,
+                "remaining": max(0.0, body.limit - spent),
                 "percentUsed": percent_used,
+                "alertThreshold": threshold,
                 "monthKey": month_key,
             },
         }
@@ -86,11 +96,14 @@ async def create_or_update_budget(
         "category": body.category,
         "limit": body.limit,
         "spent": 0.0,
+        "alertThreshold": threshold,
         "monthKey": month_key,
         "createdAt": SERVER_TIMESTAMP,
         "updatedAt": SERVER_TIMESTAMP,
     }
     new_ref.set(budget_data)
+
+    print(f"[BUDGET] Created new budget id={new_ref.id}")
 
     return {
         "success": True,
@@ -100,7 +113,9 @@ async def create_or_update_budget(
             "category": body.category,
             "limit": body.limit,
             "spent": 0.0,
+            "remaining": body.limit,
             "percentUsed": 0.0,
+            "alertThreshold": threshold,
             "monthKey": month_key,
         },
     }
@@ -113,9 +128,7 @@ async def get_budgets(
     monthKey: Optional[str] = Query(None, description="YYYY-MM. Defaults to current month."),
     current_user: dict = Depends(get_current_user),
 ):
-    """
-    Returns all budgets for the given month with percentUsed calculated.
-    """
+    """Returns all budgets for the given month with percentUsed calculated."""
     uid = current_user["uid"]
     db = get_firestore()
 
@@ -133,16 +146,18 @@ async def get_budgets(
     budgets = []
     for doc in budgets_ref:
         data = doc.to_dict()
-        limit = data.get("limit", 0.0)
+        limit_val = data.get("limit", 0.0)
         spent = data.get("spent", 0.0)
-        percent_used = round((spent / limit) * 100, 2) if limit > 0 else 0.0
+        percent_used = round((spent / limit_val) * 100, 2) if limit_val > 0 else 0.0
 
         budgets.append({
             "id": doc.id,
             "category": data.get("category"),
-            "limit": limit,
+            "limit": limit_val,
             "spent": spent,
+            "remaining": max(0.0, limit_val - spent),
             "percentUsed": percent_used,
+            "alertThreshold": data.get("alertThreshold", 80),
             "monthKey": data.get("monthKey"),
         })
 

@@ -11,37 +11,32 @@ router = APIRouter()
 @router.post("/complete-signup", status_code=201)
 async def complete_signup(
     body: SignupRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Creates user profile in Firestore after Firebase signup.
-    Called once immediately after signup.
+    Idempotent: if profile already exists, returns it instead of erroring.
     """
-    
-    # Get uid from verified token
     uid = current_user["uid"]
-    
-    # Get Firestore client
     db = get_firestore()
-    
-    # Reference to user document
+
+    print(f"[SIGNUP] uid={uid} email={body.email}")
+
     user_ref = db.collection("users").document(uid)
-    
-    # Check if user already exists
+
+    # Check if user already exists — return existing profile instead of 409
     existing = user_ref.get()
     if existing.exists:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "USER_EXISTS",
-                    "message": "User profile already exists."
-                }
-            }
-        )
-    
-    # Build user document
+        print(f"[SIGNUP] uid={uid} profile already exists, returning existing")
+        data = existing.to_dict()
+        data["uid"] = uid
+        return {
+            "success": True,
+            "message": "Signup completed.",
+            "data": serialize_doc(data),
+        }
+
+    # Build user document per schema.md
     user_data = {
         "firstName": body.firstName,
         "lastName": body.lastName,
@@ -53,31 +48,26 @@ async def complete_signup(
             "isCompleted": True,
             "occupation": None,
             "housingType": None,
-            "estimatedMonthlySpend": None
+            "estimatedMonthlySpend": None,
         },
         "preferences": {
             "language": "ne",
             "currency": "NPR",
-            "alertThreshold": 80
-        }
+            "alertThreshold": 80,
+        },
     }
-    
-    # Write to Firestore
+
     user_ref.set(user_data)
-    
-    # Fetch the created document to return it
-    # (SERVER_TIMESTAMP gets resolved by Firestore)
+
+    # Re-read to get resolved timestamps
     created_doc = user_ref.get()
     created_data = created_doc.to_dict()
-    
-    # Add uid to response
     created_data["uid"] = uid
-    
-    # Convert timestamps to strings for JSON response
-    response_data = serialize_doc(created_data)
-    
+
+    print(f"[SIGNUP] uid={uid} profile created successfully")
+
     return {
         "success": True,
         "message": "Signup completed.",
-        "data": response_data
+        "data": serialize_doc(created_data),
     }

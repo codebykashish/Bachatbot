@@ -54,9 +54,9 @@ async def log_requests(request: Request, call_next):
             return {"type": "http.request", "body": body_bytes}
         request._receive = receive
         try:
-            body_str = body_bytes.decode("utf-8")
+            body_str = body_bytes.decode("utf-8")[:500]
         except Exception:
-            body_str = str(body_bytes)
+            body_str = str(body_bytes)[:500]
         print(f"[REQ] {request.method} {request.url.path} uid={uid} body={body_str}")
     else:
         print(f"[REQ] {request.method} {request.url.path} uid={uid}")
@@ -95,7 +95,7 @@ app.include_router(verification_router)
 async def root():
     return {
         "success": True,
-        "message": "BachatBot API is running ✅",
+        "message": "BachatBot API is running",
         "version": "1.0.0"
     }
 

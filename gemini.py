@@ -42,180 +42,222 @@ from schemas.categories import (
 
 EXPENSE_CATEGORY_OPTIONS = " | ".join(f'"{c}"' for c in EXPENSE_CATEGORIES)
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SYSTEM PROMPT — uses DATA[...]DATA with a JSON ARRAY of action objects.
+# Each action object has its own intent, so mixed actions work naturally.
+# ═══════════════════════════════════════════════════════════════════════════════
+
 SYSTEM_PROMPT = f"""
 You are BachatBot, a smart expense tracking assistant for Nepal.
 You understand Nepali and English mixed language (Nepali romanized).
 
 Your job is to understand what the user says and extract financial information.
 
-Always respond in this format:
+RESPONSE FORMAT (ALWAYS follow this exactly):
 
-[Your friendly reply to user]
+[Your friendly reply to user in Nepali/English]
 
-DATA{{
-  "intent": "expense_log" | "income_log" | "set_budget" | "query_month_total" | "query_category_spend" | "query_budget_status" | "general_chat" | "greeting",
-  "amount": 250 | null,
-  "limit": 8000 | null,
-  "category": {EXPENSE_CATEGORY_OPTIONS} | null,
-  "type": "expense" | "income" | null,
-  "monthKey": "2026-05" | null,
-  "description": "original user message"
-}}DATA
+DATA[
+  {{"intent": "...", ...}},
+  {{"intent": "...", ...}}
+]DATA
 
-INTENTS:
-- expense_log: User logs an expense (e.g. "Momo 250", "bus ma 30 gayo")
-- income_log: User logs income (e.g. "Salary aayo 45000", "5000 paisa aayo")
-- set_budget: User wants to set/update a budget for a category (e.g. "Food budget 8000 set gara")
-- query_month_total: User asks total spending this month (e.g. "Yo mahina kati kharcha bhayo?")
-- query_category_spend: User asks spending in a specific category (e.g. "Food ma kati spend gareko chu?")
-- query_budget_status: User asks budget status for a category (e.g. "Food budget kati cha?")
-- general_chat: General conversation
-- greeting: Hello/hi/namaste
+The DATA block is ALWAYS a JSON array (even for a single action).
+Each element is an action object with these possible fields:
+  - "intent": REQUIRED. One of:
+      "expense_log", "income_log", "set_budget",
+      "query_month_total", "query_category_spend", "query_budget_status",
+      "undo_last_expense", "general_chat", "greeting"
+  - "amount": number or null (for expense_log / income_log)
+  - "category": one of {EXPENSE_CATEGORY_OPTIONS} or null
+  - "type": "expense" | "income" | null
+  - "limit": number or null (ONLY for set_budget — the budget limit amount)
+  - "monthKey": "YYYY-MM" or null (null = current month)
 
-Rules:
-- If user says expense related thing → intent = expense_log, type = "expense"
-- If user says income related thing → intent = income_log, type = "income"
-- If user wants to set a budget → intent = set_budget. Put the budget amount in "limit" (NOT in "amount"). "amount" should be null.
-- If user asks total spending → intent = query_month_total
-- If user asks spending in a category → intent = query_category_spend
-- If user asks budget status → intent = query_budget_status
-- If user is just chatting → intent = general_chat
-- If user says hello/hi/namaste → intent = greeting
-- Always respond friendly in Nepali or English based on user language
-- For Nepal context: momo=Food, bus/tempo=Transportation, salary/tlab=income
+RULES:
+1. If user logs an expense → intent = "expense_log", type = "expense", fill amount + category.
+2. If user logs income → intent = "income_log", type = "income", fill amount.
+3. If user sets a budget → intent = "set_budget", fill category + limit (NOT amount). amount should be null.
+4. If user asks total spending → intent = "query_month_total".
+5. If user asks category spending → intent = "query_category_spend", fill category.
+6. If user asks budget status → intent = "query_budget_status", fill category.
+7. If user says "undo" / "pahila ko expense hata" / "tyo galat thiyo" → intent = "undo_last_expense".
+8. General chat / greetings → intent = "general_chat" or "greeting".
+
+MULTI-ACTION RULE (VERY IMPORTANT):
+If the user mentions MULTIPLE actions in ONE message (e.g. two expenses, or an expense AND a budget set),
+return MULTIPLE objects in the array — one per action.
+
+Category mapping for Nepal:
+- momo / khana / food = "Food"
+- bus / tempo / transportation / yatayat = "Transport"
+- salary / talab / income = income_log
+- rent / ghar bhada = "Rent"
+- pasal / shopping = "Shopping"
+- doctor / ausadhi / health = "Health"
 - Category must be exactly one of: {EXPENSE_CATEGORY_OPTIONS}
-- For income_log, category can be null (income doesn't need expense category)
-- Amount and limit must be a number only, no Rs or rupees text
-- monthKey should be null unless user specifies a specific month
 
-Examples:
+EXAMPLES:
 
 User: "Momo 250"
 Reply: Rs 250 Food ma save gareko chu ✅
-DATA{{"intent": "expense_log", "amount": 250, "limit": null, "category": "Food", "type": "expense", "monthKey": null, "description": "Momo 250"}}DATA
+DATA[{{"intent":"expense_log","amount":250,"category":"Food","type":"expense","limit":null,"monthKey":null}}]DATA
 
 User: "Salary aayo 45000"
 Reply: Rs 45000 income record gareko chu ✅
-DATA{{"intent": "income_log", "amount": 45000, "limit": null, "category": null, "type": "income", "monthKey": null, "description": "Salary aayo 45000"}}DATA
+DATA[{{"intent":"income_log","amount":45000,"category":null,"type":"income","limit":null,"monthKey":null}}]DATA
 
-User: "Food budget 8000 set gara yo mahina"
-Reply: Food budget Rs 8000 set gardai chu.
-DATA{{"intent": "set_budget", "amount": null, "limit": 8000, "category": "Food", "type": null, "monthKey": null, "description": "Food budget 8000 set gara yo mahina"}}DATA
+User: "Food budget 8000 set gara"
+Reply: Food budget Rs 8000 set gardai chu ✅
+DATA[{{"intent":"set_budget","amount":null,"category":"Food","type":null,"limit":8000,"monthKey":null}}]DATA
 
-User: "Food ma kati spend gareko chu?"
-Reply: Timro Food ko spend check gardai chu.
-DATA{{"intent": "query_category_spend", "amount": null, "limit": null, "category": "Food", "type": null, "monthKey": null, "description": "Food ma kati spend gareko chu?"}}DATA
+User: "150 momo khaye ra 20 bus ma gayo"
+Reply: Rs 150 Food ma ra Rs 20 Transport ma save gareko chu ✅
+DATA[{{"intent":"expense_log","amount":150,"category":"Food","type":"expense","limit":null,"monthKey":null}},{{"intent":"expense_log","amount":20,"category":"Transport","type":"expense","limit":null,"monthKey":null}}]DATA
+
+User: "20 food ma kharcha gare ra transport ko budget 5000 set gara"
+Reply: Rs 20 Food ma save gareko chu ra Transport budget Rs 5000 set gareko chu ✅
+DATA[{{"intent":"expense_log","amount":20,"category":"Food","type":"expense","limit":null,"monthKey":null}},{{"intent":"set_budget","amount":null,"category":"Transport","type":null,"limit":5000,"monthKey":null}}]DATA
 
 User: "Yo mahina total kharcha kati bhayo?"
 Reply: Yo mahina ko total kharcha check gardai chu.
-DATA{{"intent": "query_month_total", "amount": null, "limit": null, "category": null, "type": null, "monthKey": null, "description": "Yo mahina total kharcha kati bhayo?"}}DATA
+DATA[{{"intent":"query_month_total","amount":null,"category":null,"type":null,"limit":null,"monthKey":null}}]DATA
+
+User: "Food ma kati spend gareko chu?"
+Reply: Food ko spend check gardai chu.
+DATA[{{"intent":"query_category_spend","amount":null,"category":"Food","type":null,"limit":null,"monthKey":null}}]DATA
 
 User: "Food budget kati cha?"
 Reply: Food budget status check gardai chu.
-DATA{{"intent": "query_budget_status", "amount": null, "limit": null, "category": "Food", "type": null, "monthKey": null, "description": "Food budget kati cha?"}}DATA
+DATA[{{"intent":"query_budget_status","amount":null,"category":"Food","type":null,"limit":null,"monthKey":null}}]DATA
+
+User: "undo"
+Reply: Pahilo ko expense undo gardai chu.
+DATA[{{"intent":"undo_last_expense","amount":null,"category":null,"type":null,"limit":null,"monthKey":null}}]DATA
 
 User: "Hello"
 Reply: Namaste! Ma BachatBot chu. Timro kharcha track garna ready chu 😊
-DATA{{"intent": "greeting", "amount": null, "limit": null, "category": null, "type": null, "monthKey": null, "description": "Hello"}}DATA
+DATA[{{"intent":"greeting","amount":null,"category":null,"type":null,"limit":null,"monthKey":null}}]DATA
 """
 
 
-def parse_gemini_response(response_text: str) -> dict:
+def parse_gemini_response(response_text: str) -> list:
     """
-    Extract the DATA{{...}}DATA block from Gemini response.
-    Returns dict with intent, amount, limit, category, type, monthKey, description.
+    Extract the DATA[...]DATA block from Gemini's response.
+    Returns a list of action dicts, each with: intent, amount, category, type, limit, monthKey.
+    Handles both:
+      - New array format: DATA[...]DATA
+      - Legacy single-object format: DATA{...}DATA (wrapped into a one-element list)
     """
-    # Find DATA{...}DATA block
-    pattern = r'DATA\{(.*?)\}DATA'
-    match = re.search(pattern, response_text, re.DOTALL)
+    # ── Try new array format first: DATA[...]DATA ────────────────────────
+    array_pattern = r'DATA\[(.*?)\]DATA'
+    array_match = re.search(array_pattern, response_text, re.DOTALL)
 
-    if not match:
-        # No structured data found, treat as general chat
-        return {
-            "intent": "general_chat",
-            "amount": None,
-            "limit": None,
-            "category": None,
-            "type": None,
-            "monthKey": None,
-            "description": ""
-        }
+    if array_match:
+        try:
+            json_str = "[" + array_match.group(1) + "]"
+            actions = json.loads(json_str)
+            if isinstance(actions, list):
+                for action in actions:
+                    if action.get("category"):
+                        action["category"] = normalize_expense_category(action["category"])
+                return actions
+        except json.JSONDecodeError as e:
+            print(f"[GEMINI] Array parse failed: {e}")
 
-    try:
-        json_str = "{" + match.group(1) + "}"
-        data = json.loads(json_str)
+    # ── Fallback: legacy single-object DATA{{...}}DATA ───────────────────
+    obj_pattern = r'DATA\{(.*?)\}DATA'
+    obj_match = re.search(obj_pattern, response_text, re.DOTALL)
 
-        # Normalize expense category
-        if data.get("category"):
-            data["category"] = normalize_expense_category(data["category"])
+    if obj_match:
+        try:
+            json_str = "{" + obj_match.group(1) + "}"
+            data = json.loads(json_str)
 
-        return data
-    except json.JSONDecodeError:
-        return {
-            "intent": "general_chat",
-            "amount": None,
-            "limit": None,
-            "category": None,
-            "type": None,
-            "monthKey": None,
-            "description": ""
-        }
+            if data.get("category"):
+                data["category"] = normalize_expense_category(data["category"])
+
+            # If legacy format had an "items" array, expand each into its own action
+            raw_items = data.get("items")
+            if raw_items and isinstance(raw_items, list) and len(raw_items) > 0:
+                actions = []
+                for item in raw_items:
+                    if item.get("category"):
+                        item["category"] = normalize_expense_category(item["category"])
+                    actions.append({
+                        "intent": data.get("intent", "expense_log"),
+                        "amount": item.get("amount"),
+                        "category": item.get("category"),
+                        "type": item.get("type", data.get("type")),
+                        "limit": None,
+                        "monthKey": data.get("monthKey"),
+                    })
+                return actions
+
+            # Single action
+            return [data]
+        except json.JSONDecodeError as e:
+            print(f"[GEMINI] Object parse failed: {e}")
+
+    # ── Nothing matched → general chat ───────────────────────────────────
+    return [{
+        "intent": "general_chat",
+        "amount": None,
+        "category": None,
+        "type": None,
+        "limit": None,
+        "monthKey": None,
+    }]
 
 
 def get_reply_text(response_text: str) -> str:
     """
-    Extract just the friendly reply part (before DATA block).
+    Extract the friendly reply part (everything before the DATA block).
     """
+    # Try DATA[ first (new format)
+    if "DATA[" in response_text:
+        return response_text.split("DATA[")[0].strip()
+    # Fallback to DATA{ (legacy)
     if "DATA{" in response_text:
-        reply = response_text.split("DATA{")[0].strip()
-        return reply
+        return response_text.split("DATA{")[0].strip()
     return response_text.strip()
 
 
 async def process_chat_message(user_message: str) -> dict:
+    """
+    Send user message to Gemini, parse response.
+    Returns dict with:
+      - reply: str (friendly text)
+      - actions: list of action dicts
+    """
     try:
-        # Check if API Key exists
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             print("[ERROR] GEMINI_API_KEY is missing from .env file!")
             return {
                 "reply": "API Key missing",
-                "intent": "error",
-                "amount": None,
-                "limit": None,
-                "category": None,
-                "type": None,
-                "monthKey": None,
-                "description": user_message,
+                "actions": [{"intent": "error", "amount": None, "category": None,
+                             "type": None, "limit": None, "monthKey": None}],
             }
 
         full_prompt = f"{SYSTEM_PROMPT}\n\nUser: {user_message}"
         response = model.generate_content(full_prompt)
         response_text = response.text
 
-        parsed_data = parse_gemini_response(response_text)
+        actions = parse_gemini_response(response_text)
         reply_text = get_reply_text(response_text)
+
+        print(f"[GEMINI] Parsed {len(actions)} action(s): {[a.get('intent') for a in actions]}")
 
         return {
             "reply": reply_text,
-            "intent": parsed_data.get("intent", "general_chat"),
-            "amount": parsed_data.get("amount"),
-            "limit": parsed_data.get("limit"),
-            "category": parsed_data.get("category"),
-            "type": parsed_data.get("type"),
-            "monthKey": parsed_data.get("monthKey"),
-            "description": parsed_data.get("description", user_message),
+            "actions": actions,
         }
 
     except Exception as e:
         print(f"[ERROR] GEMINI SYSTEM ERROR: {str(e)}")
         return {
             "reply": f"Internal Error: {str(e)}",
-            "intent": "general_chat",
-            "amount": None,
-            "limit": None,
-            "category": None,
-            "type": None,
-            "monthKey": None,
-            "description": user_message,
+            "actions": [{"intent": "general_chat", "amount": None, "category": None,
+                         "type": None, "limit": None, "monthKey": None}],
         }
