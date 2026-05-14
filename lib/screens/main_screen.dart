@@ -64,6 +64,9 @@ class _MainScreenState extends State<MainScreen> {
 
     setState(() => _isLoggingOut = true);
     try {
+      // 1. Notify backend first — token is still valid at this point
+      await ApiService.logout();
+      // 2. Invalidate the client-side Firebase session
       await FirebaseAuth.instance.signOut();
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(

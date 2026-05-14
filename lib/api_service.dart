@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -102,6 +103,25 @@ class ApiService {
       return jsonDecode(response.body);
     } catch (e) {
       rethrow;
+    }
+  }
+
+  /// Notifies the backend of logout while the Firebase token is still valid.
+  /// Must be called BEFORE FirebaseAuth.instance.signOut().
+  static Future<void> logout() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return; // already signed out on client
+      // Use the current token without forcing a refresh — it's still valid
+      final token = await user.getIdToken(false);
+      if (token == null) return;
+      await http.post(
+        Uri.parse("$baseUrl/logout"),
+        headers: _headers(token),
+      );
+    } catch (e) {
+      // Log but don't rethrow — client-side signOut must still proceed
+      debugPrint('[ApiService] logout backend call failed: $e');
     }
   }
 
