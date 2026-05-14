@@ -202,7 +202,7 @@ async def create_profile(
         }
     }
 
-@router.post("/logout")
+@router.api_route("/logout", methods=["GET", "POST"])
 async def logout(current_user: dict = Depends(get_current_user)):
     """
     Logs out the user by revoking their Firebase token.
