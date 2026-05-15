@@ -6,6 +6,7 @@ import 'categories_screen.dart';
 import 'chatbot_page.dart';
 import 'login_screen.dart';
 import 'notification_screen.dart';
+import 'mock_notification_screen.dart';
 
 class MainScreen extends StatefulWidget {
   final String firstName;
@@ -149,6 +150,21 @@ class _MainScreenState extends State<MainScreen> {
               onTap: () {
                 setState(() => _currentIndex = 1);
                 Navigator.pop(context);
+              },
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.bug_report_outlined, color: Color(0xFF2DBE7F)),
+              title: const Text('Test Mock Notification',
+                  style: TextStyle(color: Color(0xFF2DBE7F))),
+              subtitle: const Text('Dev only', style: TextStyle(fontSize: 11)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const MockNotificationScreen()),
+                );
               },
             ),
             const Divider(),
