@@ -153,6 +153,28 @@ async def confirm_transaction(
 
     # income → no budget update (intentional)
 
+    # ── 6. Create assistant message so Chat UI shows the result ──────────
+    try:
+        messages_ref = db.collection("users").document(uid).collection("messages")
+        cat_display = category or "Income"
+        confirm_reply = f"OK, Rs {int(amount)} {cat_display} ma save gareko chu ✅"
+        msg_ref = messages_ref.document()
+        msg_ref.set({
+            "role":                 "assistant",
+            "content":              confirm_reply,
+            "intent":               "notification_confirmed",
+            "extractedData":        {
+                "amount": amount,
+                "category": category,
+                "type": tx_type,
+            },
+            "relatedTransactionId": transaction_id,
+            "createdAt":            SERVER_TIMESTAMP,
+        })
+        print(f"[CONFIRM] Assistant message created: {msg_ref.id}")
+    except Exception as e:
+        print(f"[CONFIRM] Assistant message FAILED: {e}")
+
     return {
         "success": True,
         "message": "Transaction confirmed.",
@@ -241,14 +263,34 @@ async def reject_transaction(
 
     # ── 4. No budget changes on rejection ────────────────────────────────
 
+    # ── 5. Create assistant message so Chat UI shows the rejection ───────
+    amount   = float(tx.get("amount", 0))
+    category = tx.get("category", "")
+    source_app = tx.get("description", "").split(":")[0] if ":" in tx.get("description", "") else "Notification"
+    try:
+        messages_ref = db.collection("users").document(uid).collection("messages")
+        reject_reply = f"OK, {source_app} Rs {int(amount)} {category} transaction ignore gareko chu."
+        msg_ref = messages_ref.document()
+        msg_ref.set({
+            "role":                 "assistant",
+            "content":              reject_reply,
+            "intent":               "notification_rejected",
+            "extractedData":        None,
+            "relatedTransactionId": transaction_id,
+            "createdAt":            SERVER_TIMESTAMP,
+        })
+        print(f"[REJECT] Assistant message created: {msg_ref.id}")
+    except Exception as e:
+        print(f"[REJECT] Assistant message FAILED: {e}")
+
     return {
         "success": True,
         "message": "Transaction rejected.",
         "data": {
             "transaction": {
                 "id":       transaction_id,
-                "amount":   float(tx.get("amount", 0)),
-                "category": tx.get("category"),
+                "amount":   amount,
+                "category": category,
                 "type":     tx.get("type"),
                 "status":   "rejected",
                 "source":   tx.get("source"),
