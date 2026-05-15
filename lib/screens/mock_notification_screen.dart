@@ -101,22 +101,32 @@ class _MockNotificationScreenState extends State<MockNotificationScreen> {
     if (_transactionId == null) return;
     setState(() => _isConfirming = true);
     try {
-      await ApiService.post('/confirm-transaction/$_transactionId', {});
+      final res = await ApiService.post('/confirm-transaction/$_transactionId', {});
       if (!mounted) return;
-      setState(() {
-        _needsConfirmation = false;
-        _transactionId = null;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Transaction confirmed'),
-          backgroundColor: Color(0xFF2DBE7F),
-        ),
-      );
+      if (res['success'] == true) {
+        setState(() {
+          _needsConfirmation = false;
+          _transactionId = null;
+          _botReply = 'Confirmed ✅';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Transaction confirmed.'),
+            backgroundColor: Color(0xFF2DBE7F),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Confirm failed.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Confirm failed: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isConfirming = false);
@@ -127,23 +137,32 @@ class _MockNotificationScreenState extends State<MockNotificationScreen> {
     if (_transactionId == null) return;
     setState(() => _isRejecting = true);
     try {
-      await ApiService.post('/reject-transaction/$_transactionId', {});
+      final res = await ApiService.post('/reject-transaction/$_transactionId', {});
       if (!mounted) return;
-      setState(() {
-        _needsConfirmation = false;
-        _transactionId = null;
-        _botReply = null;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('❌ Transaction rejected'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      if (res['success'] == true) {
+        setState(() {
+          _needsConfirmation = false;
+          _transactionId = null;
+          _botReply = 'Rejected ❌';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Transaction rejected.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Reject failed.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Reject failed: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isRejecting = false);
