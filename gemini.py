@@ -261,3 +261,88 @@ async def process_chat_message(user_message: str) -> dict:
             "actions": [{"intent": "general_chat", "amount": None, "category": None,
                          "type": None, "limit": None, "monthKey": None}],
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NOTIFICATION PARSER — separate from main chat flow
+# Used ONLY by the source=="notification" branch in routes/chat.py.
+# Does NOT affect normal chat logic at all.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_NOTIFICATION_PROMPT = f"""
+You are a financial notification parser for Nepal.
+Parse the raw wallet/bank notification text and return ONLY a JSON object.
+
+Output format (strict JSON, no markdown, no extra text):
+{{"amount": <number>, "category": "<category>", "type": "expense" | "income"}}
+
+Categories allowed: {EXPENSE_CATEGORY_OPTIONS}
+
+Rules:
+- Payment / transferred / debited / kharcha → type = "expense"
+- Received / credited / income / deposit    → type = "income"
+- Infer category from merchant or context:
+    - Bhatbhateni / Food / restaurant / coffee / momo / khana → "Food"
+    - Bus / taxi / Pathao / InDrive / yatayat               → "Transport"
+    - Hospital / pharmacy / ausadhi / clinic                 → "Health"
+    - Rent / ghar bhada                                       → "Rent"
+    - Shopping / pasal / cloth                                → "Shopping"
+    - Salary / talab / payroll                                → "Salary"
+    - If unsure                                               → "Other"
+- amount must be a plain number (no "Rs", no commas).
+- If amount cannot be determined, use 0.
+
+Examples:
+Input:  "eSewa: Payment of Rs 500 to Bhatbhateni"
+Output: {{"amount": 500, "category": "Food", "type": "expense"}}
+
+Input:  "Khalti: Rs 1200 paid to Pathao"
+Output: {{"amount": 1200, "category": "Transport", "type": "expense"}}
+
+Input:  "NabilBank: Salary credited Rs 45000"
+Output: {{"amount": 45000, "category": "Salary", "type": "income"}}
+"""
+
+
+async def parse_notification_text(notification_text: str) -> dict:
+    """
+    Parse a raw wallet/bank notification string using a dedicated Gemini prompt.
+    Returns dict with keys: amount (float), category (str), type (str).
+    Falls back gracefully on any error.
+    """
+    default = {"amount": 0.0, "category": "Other", "type": "expense"}
+    try:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            print("[NOTIF_PARSE] No API key — returning default")
+            return default
+
+        prompt = f"{_NOTIFICATION_PROMPT}\n\nInput: \"{notification_text}\"\nOutput:"
+        response = model.generate_content(prompt)
+        raw = response.text.strip()
+
+        # Strip accidental markdown fences
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+
+        parsed = json.loads(raw)
+        amount   = float(parsed.get("amount", 0))
+        category = parsed.get("category", "Other")
+        tx_type  = parsed.get("type", "expense")
+
+        # Normalise category through existing mapping
+        if category:
+            category = normalize_expense_category(category)
+
+        print(
+            f"[NOTIF_PARSE] '{notification_text}' → "
+            f"amount={amount} category={category} type={tx_type}"
+        )
+        return {"amount": amount, "category": category, "type": tx_type}
+
+    except json.JSONDecodeError as e:
+        print(f"[NOTIF_PARSE] JSON parse error: {e} | raw='{raw}'")
+        return default
+    except Exception as e:
+        print(f"[NOTIF_PARSE] Error: {e}")
+        return default

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from firebase_config import get_firestore
 from auth import get_current_user
-from gemini import process_chat_message
+from gemini import process_chat_message, parse_notification_text
 from utils import (
     get_current_month_key, serialize_doc,
     sum_month_expense, sum_category_expense, fetch_budget,
@@ -260,6 +260,138 @@ async def chat(
         "relatedTransactionId": None,
         "createdAt": SERVER_TIMESTAMP,
     })
+
+    # ════════════════════════════════════════════════════════════════════
+    # NOTIFICATION BRANCH — source == "notification"
+    # Creates a PENDING transaction + notification doc.
+    # Does NOT update budgets or confirm the transaction.
+    # Returns early with needsConfirmation = true.
+    # ════════════════════════════════════════════════════════════════════
+    if source == "notification":
+        source_app = body.get("sourceApp", "Unknown")
+        original_message_id = body.get("originalMessageId", None)
+        month_key = get_current_month_key()
+
+        # A. Parse via Gemini (notification-specific prompt)
+        parsed = await parse_notification_text(user_message)
+        amount    = parsed.get("amount", 0.0)
+        category  = parsed.get("category", "Other")
+        tx_type   = parsed.get("type", "expense")
+
+        print(
+            f"[CHAT][NOTIF] uid={uid} app={source_app} "
+            f"amount={amount} category={category} type={tx_type}"
+        )
+
+        # B. Create PENDING transaction
+        tx_ref = (
+            db.collection("users").document(uid)
+            .collection("transactions").document()
+        )
+        tx_data = {
+            "amount":            float(amount),
+            "category":          category,
+            "type":              tx_type,
+            "status":            "pending",
+            "source":            "notification",
+            "description":       user_message,
+            "monthKey":          month_key,
+            "isDeleted":         False,
+            "deletedAt":         None,
+            "originalMessageId": original_message_id,
+            "createdAt":         SERVER_TIMESTAMP,
+            "updatedAt":         SERVER_TIMESTAMP,
+        }
+        tx_ref.set(tx_data)
+        print(f"[CHAT][NOTIF] Pending transaction created: id={tx_ref.id}")
+
+        transaction_out = {
+            "id":                tx_ref.id,
+            "amount":            float(amount),
+            "category":          category,
+            "type":              tx_type,
+            "status":            "pending",
+            "source":            "notification",
+            "description":       user_message,
+            "monthKey":          month_key,
+            "isDeleted":         False,
+            "deletedAt":         None,
+            "originalMessageId": original_message_id,
+        }
+
+        # C. Create notification doc
+        notif_ref = (
+            db.collection("users").document(uid)
+            .collection("notifications").document()
+        )
+        notif_data = {
+            "rawText":        user_message,
+            "parsedAmount":   float(amount),
+            "parsedCategory": category,
+            "parsedType":     tx_type,
+            "sourceApp":      source_app,
+            "status":         "pending",
+            "transactionId":  tx_ref.id,
+            "createdAt":      SERVER_TIMESTAMP,
+        }
+        notif_ref.set(notif_data)
+        print(f"[CHAT][NOTIF] Notification doc created: id={notif_ref.id}")
+
+        notification_out = {
+            "id":             notif_ref.id,
+            "rawText":        user_message,
+            "parsedAmount":   float(amount),
+            "parsedCategory": category,
+            "parsedType":     tx_type,
+            "sourceApp":      source_app,
+            "status":         "pending",
+            "transactionId":  tx_ref.id,
+        }
+
+        # D. Build Nepali confirmation reply
+        if tx_type == "expense":
+            reply = (
+                f"{source_app} bata Rs {int(amount)} {category} ma "
+                f"kharcha bhako jasto cha. Thik cha?"
+            )
+        else:
+            reply = (
+                f"{source_app} bata Rs {int(amount)} income aayeko "
+                f"jasto cha. Thik cha?"
+            )
+
+        # Save assistant message
+        assistant_msg_ref = messages_ref.document()
+        assistant_msg_ref.set({
+            "role":                 "assistant",
+            "content":              reply,
+            "intent":               "notification_parse",
+            "extractedData":        [{
+                "intent": "notification_parse",
+                "amount": float(amount),
+                "category": category,
+                "type": tx_type,
+            }],
+            "relatedTransactionId": tx_ref.id,
+            "createdAt":            SERVER_TIMESTAMP,
+        })
+
+        # E. Return notification-style response
+        return {
+            "success": True,
+            "data": {
+                "reply":             reply,
+                "intent":            "notification_parse",
+                "needsConfirmation": True,
+                "transaction":       transaction_out,
+                "notification":      notification_out,
+                "budgetUpdate":      None,
+                "alerts":            [],
+            },
+        }
+    # ════════════════════════════════════════════════════════════════════
+    # END NOTIFICATION BRANCH — normal chat flow continues below
+    # ════════════════════════════════════════════════════════════════════
 
     # ── Call Gemini ──────────────────────────────────────────────────────
     gemini_result = await process_chat_message(user_message)
