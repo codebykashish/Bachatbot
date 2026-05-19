@@ -6,6 +6,7 @@ from utils import (
     serialize_doc, is_today,
 )
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
+from datetime import datetime, timezone
 from typing import Optional
 
 router = APIRouter()
@@ -14,18 +15,32 @@ router = APIRouter()
 @router.get("/monthly-report")
 async def get_monthly_report(
     monthKey: Optional[str] = Query(None, description="YYYY-MM. Defaults to current month."),
+    view: Optional[str] = Query("month", description="'month' (default) or 'week' (last 7 days)."),
     current_user: dict = Depends(get_current_user),
 ):
     """
     Generate monthly report by aggregating transactions and budgets.
     Includes daily snapshot fields for the Home screen.
-    Matches ENDPOINTS.md Endpoint 11 + optional daily snapshot.
+    Matches ENDPOINTS.md Endpoint 11 + optional daily snapshot + insights.
+
+    Query params:
+    - monthKey: YYYY-MM (default current month)
+    - view: "month" | "week" — if "week", only include last 7 days of transactions
     """
     uid = current_user["uid"]
     db = get_firestore()
 
     month_key = monthKey or get_current_month_key()
-    print(f"[REPORT] uid={uid} monthKey={month_key}")
+    use_week_filter = (view or "").strip().lower() == "week"
+
+    print(f"[REPORT] uid={uid} monthKey={month_key} view={'week' if use_week_filter else 'month'}")
+
+    # ── Week filter boundaries ───────────────────────────────────────────
+    week_start = None
+    if use_week_filter:
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        week_start = now - timedelta(days=6)  # last 7 days including today
 
     # ── Fetch all confirmed, non-deleted transactions for this month ─────
     tx_docs = (
@@ -52,6 +67,16 @@ async def get_monthly_report(
         tx_type = data.get("type", "")
         category = data.get("category")
         created_at = data.get("createdAt")
+
+        # If week view, skip transactions outside the 7-day window
+        if use_week_filter and week_start and created_at:
+            try:
+                if hasattr(created_at, "replace"):
+                    ts = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+                    if ts < week_start:
+                        continue
+            except Exception:
+                pass  # include if we can't determine the date
 
         if tx_type == "expense":
             total_expense += amount
@@ -81,8 +106,8 @@ async def get_monthly_report(
     else:
         today_summary_text = "Aaja kei kharcha bhayena."
 
-    # ── Fetch budgets for this month → budget utilization ────────────────
-    budget_docs = (
+    # ── Fetch budgets for this month → budget utilization + insights ─────
+    budget_docs_list = list(
         db.collection("users").document(uid).collection("budgets")
         .where("monthKey", "==", month_key)
         .stream()
@@ -90,7 +115,10 @@ async def get_monthly_report(
 
     budget_utilization = {}
     total_remaining = 0.0
-    for doc in budget_docs:
+    # Build budget lookup for insights: {category: {limit, spent_from_budget}}
+    budget_lookup = {}
+
+    for doc in budget_docs_list:
         bdata = doc.to_dict()
         cat = bdata.get("category", "")
         limit_val = bdata.get("limit", 0.0)
@@ -98,6 +126,68 @@ async def get_monthly_report(
         if limit_val > 0:
             budget_utilization[cat] = round((spent_val / limit_val) * 100)
             total_remaining += max(0.0, limit_val - spent_val)
+        budget_lookup[cat] = {"limit": limit_val, "spent": spent_val}
+
+    # ── Insights ─────────────────────────────────────────────────────────
+    # Per-category insights (only for categories that have a budget)
+    category_insights = {}
+    any_overspent = False
+    any_high = False
+    total_budget_limit = 0.0
+    total_budget_spent = 0.0
+
+    for cat, binfo in budget_lookup.items():
+        blimit = binfo["limit"]
+        # Use actual transaction-based spending from categoryBreakdown for this period
+        bspent = category_breakdown.get(cat, 0.0)
+        total_budget_limit += blimit
+        total_budget_spent += bspent
+
+        if blimit <= 0:
+            category_insights[cat] = {
+                "status": "ok",
+                "spent": bspent,
+                "limit": blimit,
+            }
+            continue
+
+        pct = (bspent / blimit) * 100
+
+        if pct > 100:
+            status = "overspent"
+            any_overspent = True
+        elif pct > 80:
+            status = "high"
+            any_high = True
+        elif pct <= 50:
+            status = "low"
+        else:
+            status = "ok"
+
+        # Special case: exactly at limit
+        if bspent == blimit and blimit > 0:
+            status = "exact"
+
+        category_insights[cat] = {
+            "status": status,
+            "spent": bspent,
+            "limit": blimit,
+        }
+
+    # Overall status
+    if any_overspent:
+        overall_status = "overspent"
+    elif any_high:
+        overall_status = "high"
+    elif total_budget_limit > 0 and total_budget_spent <= total_budget_limit * 0.5:
+        overall_status = "low"
+    else:
+        overall_status = "ok"
+
+    insights = {
+        "overallStatus": overall_status,
+        "categories": category_insights,
+    }
 
     # ── Days remaining + survival budget ─────────────────────────────────
     days_remaining = get_days_remaining_in_month()
@@ -119,6 +209,7 @@ async def get_monthly_report(
         "netSavings": net_savings,
         "categoryBreakdown": category_breakdown,
         "budgetUtilization": budget_utilization,
+        "insights": insights,
         "daysRemaining": days_remaining,
         "survivalBudgetPerDay": survival_budget_per_day,
         "alertCount": alert_count,
@@ -141,6 +232,7 @@ async def get_monthly_report(
     print(
         f"[REPORT] totalExpense={total_expense} totalIncome={total_income} "
         f"netSavings={net_savings} cats={list(category_breakdown.keys())} "
+        f"insights={overall_status} view={'week' if use_week_filter else 'month'} "
         f"todayExpense={today_expense} todayTop={today_top_category}"
     )
 
