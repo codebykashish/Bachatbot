@@ -28,16 +28,28 @@ class HomeScreenState extends State<HomeScreen> {
   String _selectedMonth = '';
 
   static const List<Map<String, dynamic>> _catMeta = [
-    {'name': 'Food',          'icon': Icons.restaurant,        'color': Color(0xFF4A90E2)},
-    {'name': 'Transport',     'icon': Icons.directions_car,    'color': Color(0xFF26A69A)},
-    {'name': 'Rent',          'icon': Icons.home,              'color': Color(0xFFFFB74D)},
-    {'name': 'Education',     'icon': Icons.school,            'color': Color(0xFF7E57C2)},
-    {'name': 'Shopping',      'icon': Icons.shopping_bag,      'color': Color(0xFFAB47BC)},
-    {'name': 'Health',        'icon': Icons.favorite,          'color': Color(0xFFEF5350)},
-    {'name': 'Entertainment', 'icon': Icons.tv,                'color': Color(0xFF8D6E63)},
-    {'name': 'Bills',         'icon': Icons.receipt_long,      'color': Color(0xFF78909C)},
-    {'name': 'Salary',        'icon': Icons.account_balance_wallet, 'color': Color(0xFF66BB6A)},
-    {'name': 'Other',         'icon': Icons.category,          'color': Color(0xFFFFCA28)},
+    {'name': 'Food', 'icon': Icons.restaurant, 'color': Color(0xFF4A90E2)},
+    {
+      'name': 'Transport',
+      'icon': Icons.directions_car,
+      'color': Color(0xFF26A69A)
+    },
+    {'name': 'Rent', 'icon': Icons.home, 'color': Color(0xFFFFB74D)},
+    {'name': 'Education', 'icon': Icons.school, 'color': Color(0xFF7E57C2)},
+    {
+      'name': 'Shopping',
+      'icon': Icons.shopping_bag,
+      'color': Color(0xFFAB47BC)
+    },
+    {'name': 'Health', 'icon': Icons.favorite, 'color': Color(0xFFEF5350)},
+    {'name': 'Entertainment', 'icon': Icons.tv, 'color': Color(0xFF8D6E63)},
+    {'name': 'Bills', 'icon': Icons.receipt_long, 'color': Color(0xFF78909C)},
+    {
+      'name': 'Salary',
+      'icon': Icons.account_balance_wallet,
+      'color': Color(0xFF66BB6A)
+    },
+    {'name': 'Other', 'icon': Icons.category, 'color': Color(0xFFFFCA28)},
   ];
 
   @override
@@ -56,8 +68,18 @@ class HomeScreenState extends State<HomeScreen> {
     final parts = _selectedMonth.split('-');
     if (parts.length != 2) return _selectedMonth;
     const months = [
-      'Jan','Feb','Mar','Apr','May','Jun',
-      'Jul','Aug','Sep','Oct','Nov','Dec'
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
     ];
     final m = int.tryParse(parts[1]);
     if (m == null || m < 1 || m > 12) return _selectedMonth;
@@ -85,8 +107,6 @@ class HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
   }
 
-
-
   Future<void> _fetchBudgets() async {
     try {
       final res = await ApiService.get('/budgets?monthKey=$_selectedMonth');
@@ -103,7 +123,8 @@ class HomeScreenState extends State<HomeScreen> {
   /// GET /monthly-report — source of truth for income & totalExpense & daily snapshot
   Future<void> _fetchReport() async {
     try {
-      final res = await ApiService.get('/monthly-report?monthKey=$_selectedMonth');
+      final res =
+          await ApiService.get('/monthly-report?monthKey=$_selectedMonth');
       if (!mounted) return;
       debugPrint('[HomeScreen] /monthly-report response: $res');
       if (res['success'] == true) {
@@ -122,10 +143,10 @@ class HomeScreenState extends State<HomeScreen> {
       final res = await ApiService.get('/daily-summary');
       if (!mounted) return;
       if (res['success'] == true) {
-        final raw = res['data']?['days']
-            ?? res['data']?['trend']
-            ?? res['data']?['dailySummary']
-            ?? [];
+        final raw = res['data']?['days'] ??
+            res['data']?['trend'] ??
+            res['data']?['dailySummary'] ??
+            [];
         setState(() => _trendData = raw);
       }
     } catch (_) {}
@@ -151,16 +172,19 @@ class HomeScreenState extends State<HomeScreen> {
 
   String get _greetingName {
     // 1. Prioritize widget.firstName (from backend profile entered during signup)
-    if (widget.firstName.trim().isNotEmpty && widget.firstName.trim() != 'User') {
+    if (widget.firstName.trim().isNotEmpty &&
+        widget.firstName.trim() != 'User') {
       return widget.firstName.trim();
     }
 
     // 2. Try Firebase Display Name (saved during signup)
     final user = FirebaseAuth.instance.currentUser;
-    if (user != null && user.displayName != null && user.displayName!.trim().isNotEmpty) {
+    if (user != null &&
+        user.displayName != null &&
+        user.displayName!.trim().isNotEmpty) {
       return user.displayName!.trim();
     }
-    
+
     // 3. Fallback
     return 'User';
   }
@@ -190,7 +214,8 @@ class HomeScreenState extends State<HomeScreen> {
             decoration: BoxDecoration(
               color: bgColor,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: accentColor.withValues(alpha: 0.3), width: 1.2),
+              border: Border.all(
+                  color: accentColor.withValues(alpha: 0.3), width: 1.2),
             ),
             alignment: Alignment.center,
             child: isFlipped
@@ -246,7 +271,9 @@ class HomeScreenState extends State<HomeScreen> {
           .take(7)
           .map<double>((d) => (d['amount'] ?? d['total'] ?? 0).toDouble())
           .toList();
-      while (amounts.length < 7) { amounts.add(0); }
+      while (amounts.length < 7) {
+        amounts.add(0);
+      }
     } else {
       amounts = [0, 0, 0, 0, 0, 0, 0];
     }
@@ -305,7 +332,8 @@ class HomeScreenState extends State<HomeScreen> {
                       interval: maxY / 4,
                       getTitlesWidget: (v, _) => Text(
                         v.toInt().toString(),
-                        style: const TextStyle(fontSize: 10, color: Colors.grey),
+                        style:
+                            const TextStyle(fontSize: 10, color: Colors.grey),
                       ),
                     ),
                   ),
@@ -365,7 +393,7 @@ class HomeScreenState extends State<HomeScreen> {
 
     return Container(
       height: 120,
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
       decoration: BoxDecoration(
         color: const Color(0xFFF6F7F9),
         borderRadius: BorderRadius.circular(16),
@@ -373,7 +401,7 @@ class HomeScreenState extends State<HomeScreen> {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: _catMeta.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 14),
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (ctx, i) {
           final meta = _catMeta[i];
           final name = meta['name'] as String;
@@ -395,21 +423,25 @@ class HomeScreenState extends State<HomeScreen> {
             child: Column(
               children: [
                 Container(
-                  width: 50,
-                  height: 50,
+                  width: 48,
+                  height: 48,
                   decoration: BoxDecoration(
                     color: color,
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(icon, color: Colors.white, size: 24),
+                  child: Icon(icon, color: Colors.white, size: 22),
                 ),
                 const SizedBox(height: 6),
                 Text(name,
                     style: const TextStyle(
-                        fontSize: 11, fontWeight: FontWeight.w600)),
+                        fontSize: 10, fontWeight: FontWeight.w600),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
                 Text(
                   'Rs.${spent.toInt()}',
-                  style: const TextStyle(fontSize: 10, color: Colors.grey),
+                  style: const TextStyle(fontSize: 9, color: Colors.grey),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
@@ -427,7 +459,8 @@ class HomeScreenState extends State<HomeScreen> {
     if (_todaySummaryText.isNotEmpty) {
       summaryText = _todaySummaryText;
     } else if (_todayTotalExpense > 0 && _todayTopCategory.isNotEmpty) {
-      summaryText = 'You spent Rs ${_todayTotalExpense.toInt()} on $_todayTopCategory today.';
+      summaryText =
+          'You spent Rs ${_todayTotalExpense.toInt()} on $_todayTopCategory today.';
     } else if (_todayTotalExpense > 0) {
       summaryText = 'You spent Rs ${_todayTotalExpense.toInt()} today.';
     } else {
@@ -456,51 +489,53 @@ class HomeScreenState extends State<HomeScreen> {
         ),
         child: Row(
           children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: _primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: _primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.shopping_bag_outlined,
+                  color: _primary, size: 22),
             ),
-            child: const Icon(Icons.shopping_bag_outlined,
-                color: _primary, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Daily Expense Summary',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  summaryText,
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: isOnTrack ? _primary.withValues(alpha: 0.1) : Colors.red.shade50,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              isOnTrack ? 'ON TRACK' : 'OVER',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: isOnTrack ? _primary : Colors.red,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Daily Expense Summary',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    summaryText,
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
               ),
             ),
-          ),
-        ],
-      ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: isOnTrack
+                    ? _primary.withValues(alpha: 0.1)
+                    : Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                isOnTrack ? 'ON TRACK' : 'OVER',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: isOnTrack ? _primary : Colors.red,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -587,8 +622,7 @@ class HomeScreenState extends State<HomeScreen> {
                   icon: Icons.south_east,
                   bgColor: const Color(0xFFFFF4F4),
                   accentColor: Colors.redAccent,
-                  amountText:
-                      showLoading ? '…' : 'Rs ${_totalExpense.toInt()}',
+                  amountText: showLoading ? '…' : 'Rs ${_totalExpense.toInt()}',
                   isFlipped: _isExpenseFlipped,
                   onTap: () =>
                       setState(() => _isExpenseFlipped = !_isExpenseFlipped),
@@ -630,8 +664,8 @@ class HomeScreenState extends State<HomeScreen> {
             (showLoading)
                 ? const SizedBox(
                     height: 100,
-                    child:
-                        Center(child: CircularProgressIndicator(color: _primary)))
+                    child: Center(
+                        child: CircularProgressIndicator(color: _primary)))
                 : _buildCategoriesRow(),
 
             const SizedBox(height: 28),
