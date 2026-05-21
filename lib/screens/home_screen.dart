@@ -1,9 +1,10 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../api_service.dart';
+import '../widgets/report_chart.dart';
 import 'categories_screen.dart';
+import 'reports_screen.dart';
 
 // State is public so MainScreen can call refresh() via GlobalKey
 class HomeScreen extends StatefulWidget {
@@ -22,6 +23,7 @@ class HomeScreenState extends State<HomeScreen> {
   List<dynamic> _budgets = [];
   Map<String, dynamic>? _report;
   List<dynamic> _trendData = [];
+  Map<String, double> _categoryBreakdown = {};
 
   bool _isIncomeFlipped = false;
   bool _isExpenseFlipped = false;
@@ -131,6 +133,8 @@ class HomeScreenState extends State<HomeScreen> {
         setState(() {
           final data = res['data'];
           _report = data?['report'] ?? data;
+          _categoryBreakdown =
+              _mapToDouble(_report?['categoryBreakdown'] ?? {});
         });
       }
     } catch (e) {
@@ -150,6 +154,13 @@ class HomeScreenState extends State<HomeScreen> {
         setState(() => _trendData = raw);
       }
     } catch (_) {}
+  }
+
+  Map<String, double> _mapToDouble(dynamic map) {
+    if (map is! Map) return {};
+    return map.map<String, double>(
+      (k, v) => MapEntry(k.toString(), (v ?? 0).toDouble()),
+    );
   }
 
   // ── Derived values ───────────────────────────────────────────────────────
@@ -260,130 +271,6 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── 7-day chart ──────────────────────────────────────────────────────────
-
-  Widget _build7DayChart() {
-    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    List<double> amounts;
-
-    if (_trendData.isNotEmpty) {
-      amounts = _trendData
-          .take(7)
-          .map<double>((d) => (d['amount'] ?? d['total'] ?? 0).toDouble())
-          .toList();
-      while (amounts.length < 7) {
-        amounts.add(0);
-      }
-    } else {
-      amounts = [0, 0, 0, 0, 0, 0, 0];
-    }
-
-    final maxY = amounts.every((a) => a == 0)
-        ? 100.0
-        : (amounts.reduce(max) * 1.3)
-            .ceilToDouble()
-            .clamp(10, double.infinity)
-            .toDouble();
-    final spots = List.generate(
-      amounts.length,
-      (i) => FlSpot(i.toDouble(), amounts[i]),
-    );
-
-    return Container(
-      height: 200,
-      padding: const EdgeInsets.fromLTRB(8, 16, 16, 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          )
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Padding(
-            padding: EdgeInsets.only(left: 8, bottom: 4),
-            child: Text('Velocity View',
-                style: TextStyle(fontSize: 11, color: Colors.grey)),
-          ),
-          Expanded(
-            child: LineChart(
-              LineChartData(
-                minY: 0,
-                maxY: maxY,
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: maxY / 4,
-                  getDrawingHorizontalLine: (_) =>
-                      FlLine(color: Colors.grey.shade100, strokeWidth: 1),
-                ),
-                borderData: FlBorderData(show: false),
-                titlesData: FlTitlesData(
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 36,
-                      interval: maxY / 4,
-                      getTitlesWidget: (v, _) => Text(
-                        v.toInt().toString(),
-                        style:
-                            const TextStyle(fontSize: 10, color: Colors.grey),
-                      ),
-                    ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      getTitlesWidget: (v, _) {
-                        final idx = v.toInt();
-                        if (idx < 0 || idx >= labels.length) {
-                          return const SizedBox.shrink();
-                        }
-                        return Text(labels[idx],
-                            style: const TextStyle(
-                                fontSize: 10, color: Colors.grey));
-                      },
-                    ),
-                  ),
-                  rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                  topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                ),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: spots,
-                    isCurved: true,
-                    color: _primary,
-                    barWidth: 2.5,
-                    dotData: const FlDotData(show: false),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      gradient: LinearGradient(
-                        colors: [
-                          _primary.withValues(alpha: 0.25),
-                          _primary.withValues(alpha: 0.0),
-                        ],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ── Categories row (all 10, horizontally scrollable, tappable) ──────────
 
   Widget _buildCategoriesRow() {
@@ -392,8 +279,8 @@ class HomeScreenState extends State<HomeScreen> {
     };
 
     return Container(
-      height: 120,
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+      height: 140,
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
       decoration: BoxDecoration(
         color: const Color(0xFFF6F7F9),
         borderRadius: BorderRadius.circular(16),
@@ -401,7 +288,7 @@ class HomeScreenState extends State<HomeScreen> {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: _catMeta.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        separatorBuilder: (_, __) => const SizedBox(width: 4),
         itemBuilder: (ctx, i) {
           final meta = _catMeta[i];
           final name = meta['name'] as String;
@@ -410,40 +297,45 @@ class HomeScreenState extends State<HomeScreen> {
           final color = meta['color'] as Color;
           final icon = meta['icon'] as IconData;
 
-          return InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const CategoriesScreen(showAppBar: true),
-                ),
-              );
-            },
-            child: Column(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: color,
-                    borderRadius: BorderRadius.circular(12),
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CategoriesScreen(showAppBar: true),
                   ),
-                  child: Icon(icon, color: Colors.white, size: 22),
-                ),
-                const SizedBox(height: 6),
-                Text(name,
-                    style: const TextStyle(
-                        fontSize: 10, fontWeight: FontWeight.w600),
+                );
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(icon, color: Colors.white, size: 32),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(name,
+                      style: const TextStyle(
+                          fontSize: 11, fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Rs.${spent.toInt()}',
+                    style: const TextStyle(fontSize: 9, color: Colors.grey),
                     maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-                Text(
-                  'Rs.${spent.toInt()}',
-                  style: const TextStyle(fontSize: 9, color: Colors.grey),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -670,11 +562,53 @@ class HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 28),
 
-            // ── 7-day trend ───────────────────────────────────────────────
-            const Text('7-Day Spending Trend',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            // ── Monthly Report Chart (line graph, clickable to full Reports) ──
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Monthly Report',
+                    style:
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                TextButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const ReportsScreen(),
+                      ),
+                    );
+                  },
+                  child: const Text(
+                    'View Full',
+                    style: TextStyle(
+                        color: _primary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
-            _build7DayChart(),
+            (showLoading)
+                ? const SizedBox(
+                    height: 200,
+                    child: Center(
+                        child: CircularProgressIndicator(color: _primary)))
+                : GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ReportsScreen(),
+                        ),
+                      );
+                    },
+                    child: ReportChart(
+                      categoryBreakdown: _categoryBreakdown,
+                      isCompact: false,
+                      useLineChart: true,
+                    ),
+                  ),
 
             const SizedBox(height: 28),
 

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
 import '../api_service.dart';
+import '../widgets/report_chart.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -277,128 +277,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildCategoryChart() {
-    if (_categoryBreakdown.isEmpty) {
-      return Container(
-        height: 250,
-        alignment: Alignment.center,
-        child: const Text('No data available'),
-      );
-    }
-
-    final categories = _categoryBreakdown.keys.toList();
-    final amounts = _categoryBreakdown.values.toList();
-    final maxY = amounts.isEmpty
-        ? 100.0
-        : (amounts.reduce((a, b) => a > b ? a : b) * 1.2).toDouble();
-
-    final barGroups = List.generate(
-      categories.length,
-      (index) => BarChartGroupData(
-        x: index,
-        barRods: [
-          BarChartRodData(
-            toY: amounts[index],
-            color: _primary,
-            width: 16,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
-          ),
-        ],
-      ),
-    );
-
-    return Container(
-      height: 280,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          )
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Category Breakdown',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: BarChart(
-              BarChartData(
-                maxY: maxY,
-                barTouchData: BarTouchData(enabled: false),
-                titlesData: FlTitlesData(
-                  topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                  rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 40,
-                      getTitlesWidget: (value, meta) {
-                        return Text(
-                          '${value.toInt()}',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      getTitlesWidget: (value, meta) {
-                        final index = value.toInt();
-                        if (index < 0 || index >= categories.length) {
-                          return const SizedBox.shrink();
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            categories[index],
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.grey,
-                            ),
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: maxY / 4,
-                  getDrawingHorizontalLine: (_) => FlLine(
-                    color: Colors.grey.shade100,
-                    strokeWidth: 1,
-                  ),
-                ),
-                borderData: FlBorderData(show: false),
-                barGroups: barGroups,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+    return ReportChart(categoryBreakdown: _categoryBreakdown, isCompact: false);
   }
 
   Widget _buildCategoryInsights() {
