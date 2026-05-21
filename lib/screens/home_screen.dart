@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../api_service.dart';
@@ -25,8 +24,7 @@ class HomeScreenState extends State<HomeScreen> {
   List<dynamic> _trendData = [];
   Map<String, double> _categoryBreakdown = {};
 
-  bool _isIncomeFlipped = false;
-  bool _isExpenseFlipped = false;
+  bool _hideAmounts = true;
   String _selectedMonth = '';
 
   static const List<Map<String, dynamic>> _catMeta = [
@@ -181,6 +179,17 @@ class HomeScreenState extends State<HomeScreen> {
   String get _todaySummaryText =>
       (_report?['todaySummaryText'] ?? '').toString();
 
+  double get _remainingIncome {
+    final net = _report?['netSavings'];
+    if (net != null) return (net as num).toDouble();
+    return _totalIncome - _totalExpense;
+  }
+
+  String _formatAmount(double value) {
+    if (_hideAmounts) return 'Rs ****';
+    return 'Rs ${value.toStringAsFixed(0)}';
+  }
+
   String get _greetingName {
     // 1. Prioritize widget.firstName (from backend profile entered during signup)
     if (widget.firstName.trim().isNotEmpty &&
@@ -200,74 +209,112 @@ class HomeScreenState extends State<HomeScreen> {
     return 'User';
   }
 
-  // ── Flip card ────────────────────────────────────────────────────────────
+  // ── Summary Cards (Remaining Income + Income/Expense) ────────────────────
 
-  Widget _buildFlipCard({
-    required String title,
-    required IconData icon,
-    required Color bgColor,
-    required Color accentColor,
-    required String amountText,
-    required bool isFlipped,
-    required VoidCallback onTap,
-  }) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 400),
-          transform: Matrix4.identity()
-            ..setEntry(3, 2, 0.001)
-            ..rotateY(isFlipped ? pi : 0),
-          transformAlignment: Alignment.center,
-          child: Container(
-            height: 90,
-            decoration: BoxDecoration(
-              color: bgColor,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                  color: accentColor.withValues(alpha: 0.3), width: 1.2),
-            ),
-            alignment: Alignment.center,
-            child: isFlipped
-                ? Transform(
-                    transform: Matrix4.identity()..rotateY(pi),
-                    alignment: Alignment.center,
-                    child: Text(
-                      amountText,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: accentColor,
+  Widget _buildSummaryCards() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Large card: Remaining Income
+        Card(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          color: Colors.green.shade50,
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Remaining income this month',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Colors.green.shade800,
+                        fontWeight: FontWeight.w500,
                       ),
-                    ),
-                  )
-                : Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _formatAmount(_remainingIncome),
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green.shade900,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Row of two smaller cards
+        Row(
+          children: [
+            Expanded(
+              child: Card(
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                color: Colors.blue.shade50,
+                margin: EdgeInsets.zero,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: accentColor.withValues(alpha: 0.15),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(icon, color: accentColor, size: 20),
+                      Text(
+                        'Total income',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Colors.grey.shade700,
+                            ),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: accentColor,
-                          letterSpacing: 0.5,
-                        ),
+                        _formatAmount(_totalIncome),
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue.shade800,
+                                ),
                       ),
                     ],
                   ),
-          ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Card(
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                color: Colors.red.shade50,
+                margin: EdgeInsets.zero,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Total expense',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Colors.grey.shade700,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _formatAmount(_totalExpense),
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red.shade700,
+                                ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
-      ),
+      ],
     );
   }
 
@@ -279,8 +326,8 @@ class HomeScreenState extends State<HomeScreen> {
     };
 
     return Container(
-      height: 140,
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
+      height: 150,
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
       decoration: BoxDecoration(
         color: const Color(0xFFF6F7F9),
         borderRadius: BorderRadius.circular(16),
@@ -288,7 +335,7 @@ class HomeScreenState extends State<HomeScreen> {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: _catMeta.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 4),
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (ctx, i) {
           final meta = _catMeta[i];
           final name = meta['name'] as String;
@@ -298,7 +345,7 @@ class HomeScreenState extends State<HomeScreen> {
           final icon = meta['icon'] as IconData;
 
           return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
             child: InkWell(
               borderRadius: BorderRadius.circular(16),
               onTap: () {
@@ -311,28 +358,39 @@ class HomeScreenState extends State<HomeScreen> {
               },
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Container(
-                    width: 56,
-                    height: 56,
+                    width: 64,
+                    height: 64,
                     decoration: BoxDecoration(
                       color: color,
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(16),
                     ),
                     child: Icon(icon, color: Colors.white, size: 32),
                   ),
                   const SizedBox(height: 8),
-                  Text(name,
+                  SizedBox(
+                    width: 64,
+                    child: Text(
+                      name,
+                      textAlign: TextAlign.center,
                       style: const TextStyle(
-                          fontSize: 11, fontWeight: FontWeight.w600),
+                          fontSize: 12, fontWeight: FontWeight.w600),
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Rs.${spent.toInt()}',
-                    style: const TextStyle(fontSize: 9, color: Colors.grey),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  SizedBox(
+                    width: 64,
+                    child: Text(
+                      'Rs.${spent.toInt()}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 9, color: Colors.grey),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ],
               ),
@@ -495,46 +553,50 @@ class HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 20),
 
-            // ── Income / Expense flip cards (real /monthly-report data) ───
-            Row(
-              children: [
-                _buildFlipCard(
-                  title: 'INCOME',
-                  icon: Icons.north_east,
-                  bgColor: const Color(0xFFF2FBF6),
-                  accentColor: _primary,
-                  amountText: showLoading ? '…' : 'Rs ${_totalIncome.toInt()}',
-                  isFlipped: _isIncomeFlipped,
-                  onTap: () =>
-                      setState(() => _isIncomeFlipped = !_isIncomeFlipped),
-                ),
-                const SizedBox(width: 14),
-                _buildFlipCard(
-                  title: 'EXPENSE',
-                  icon: Icons.south_east,
-                  bgColor: const Color(0xFFFFF4F4),
-                  accentColor: Colors.redAccent,
-                  amountText: showLoading ? '…' : 'Rs ${_totalExpense.toInt()}',
-                  isFlipped: _isExpenseFlipped,
-                  onTap: () =>
-                      setState(() => _isExpenseFlipped = !_isExpenseFlipped),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 28),
-
-            // ── Categories header + horizontal row ───────────────────────
+            // ── Summary Cards with hide/show toggle ──────────────────────
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Row(children: [
-                  Icon(Icons.trending_up, color: _primary, size: 18),
-                  SizedBox(width: 6),
-                  Text('Categories',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                ]),
+                const Text(
+                  'Financial Summary',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(
+                    _hideAmounts
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    color: Colors.grey[700],
+                    size: 22,
+                  ),
+                  onPressed: () => setState(() => _hideAmounts = !_hideAmounts),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            showLoading
+                ? const SizedBox(
+                    height: 200,
+                    child: Center(
+                        child: CircularProgressIndicator(color: _primary)))
+                : _buildSummaryCards(),
+
+            const SizedBox(height: 28),
+
+            // ── Categories header + horizontal row ────────────────────────
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Categories',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
                 TextButton(
                   onPressed: () => Navigator.push(
                     context,
