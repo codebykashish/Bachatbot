@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'signup_screen.dart';
+import 'email_signup_page.dart';
 import 'main_screen.dart';
 import '../api_service.dart';
 
@@ -45,7 +45,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
         // If profile doesn't exist (success: false or no data), create it
         if (profileRes['success'] != true || profileRes['data'] == null) {
-          debugPrint('[LoginScreen] Profile not found, attempting to create...');
+          debugPrint(
+              '[LoginScreen] Profile not found, attempting to create...');
           await _createProfileFallback(cred.user);
           firstName = (cred.user?.displayName ?? 'User').split(' ').first;
         } else {
@@ -105,7 +106,8 @@ class _LoginScreenState extends State<LoginScreen> {
       debugPrint('[LoginScreen] /complete-signup fallback result: $res');
     } catch (e) {
       // 409 conflict = profile already exists, which is fine
-      debugPrint('[LoginScreen] /complete-signup fallback error (may be 409): $e');
+      debugPrint(
+          '[LoginScreen] /complete-signup fallback error (may be 409): $e');
     }
   }
 
@@ -136,7 +138,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 const Text(
                   'BachatBot',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFF2DBE7F)),
+                  style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF2DBE7F)),
                 ),
                 const Text(
                   'Your AI expense tracker',
@@ -144,7 +149,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(fontSize: 14, color: Colors.grey),
                 ),
                 const SizedBox(height: 48),
-
                 TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
@@ -153,10 +157,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     prefixIcon: Icon(Icons.email_outlined),
                     border: OutlineInputBorder(),
                   ),
-                  validator: (value) => (value == null || value.trim().isEmpty) ? 'Please enter your email' : null,
+                  validator: (value) => (value == null || value.trim().isEmpty)
+                      ? 'Please enter your email'
+                      : null,
                 ),
                 const SizedBox(height: 16),
-
                 TextFormField(
                   controller: _passwordController,
                   obscureText: !_showPassword,
@@ -165,14 +170,18 @@ class _LoginScreenState extends State<LoginScreen> {
                     prefixIcon: const Icon(Icons.lock_outlined),
                     border: const OutlineInputBorder(),
                     suffixIcon: IconButton(
-                      icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined),
-                      onPressed: () => setState(() => _showPassword = !_showPassword),
+                      icon: Icon(_showPassword
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined),
+                      onPressed: () =>
+                          setState(() => _showPassword = !_showPassword),
                     ),
                   ),
-                  validator: (value) => (value == null || value.isEmpty) ? 'Please enter your password' : null,
+                  validator: (value) => (value == null || value.isEmpty)
+                      ? 'Please enter your password'
+                      : null,
                 ),
                 const SizedBox(height: 28),
-
                 SizedBox(
                   height: 52,
                   child: ElevatedButton(
@@ -182,26 +191,33 @@ class _LoginScreenState extends State<LoginScreen> {
                       foregroundColor: Colors.white,
                     ),
                     child: _isLoading
-                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2.5))
                         : const Text('Login', style: TextStyle(fontSize: 16)),
                   ),
                 ),
                 const SizedBox(height: 20),
-
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text("Don't have an account? ", style: TextStyle(color: Colors.grey)),
+                    const Text("Don't have an account? ",
+                        style: TextStyle(color: Colors.grey)),
                     GestureDetector(
                       onTap: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => const SignupScreen()),
+                          MaterialPageRoute(
+                              builder: (_) => const EmailSignupPage()),
                         );
                       },
                       child: const Text(
                         'Create Account',
-                        style: TextStyle(color: Color(0xFF2DBE7F), fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                            color: Color(0xFF2DBE7F),
+                            fontWeight: FontWeight.bold),
                       ),
                     ),
                   ],
