@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../api_service.dart';
 import '../widgets/report_chart.dart';
+import '../widgets/balance_card.dart';
 import 'categories_screen.dart';
 import 'reports_screen.dart';
 
@@ -209,112 +210,14 @@ class HomeScreenState extends State<HomeScreen> {
     return 'User';
   }
 
-  // ── Summary Cards (Remaining Income + Income/Expense) ────────────────────
+  // ── Summary Cards (using new BalanceCard widget) ───────────────────────
 
   Widget _buildSummaryCards() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // Large card: Remaining Income
-        Card(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          color: Colors.green.shade50,
-          margin: EdgeInsets.zero,
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Remaining income this month',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.green.shade800,
-                        fontWeight: FontWeight.w500,
-                      ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  _formatAmount(_remainingIncome),
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green.shade900,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        // Row of two smaller cards
-        Row(
-          children: [
-            Expanded(
-              child: Card(
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                color: Colors.blue.shade50,
-                margin: EdgeInsets.zero,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Total income',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Colors.grey.shade700,
-                            ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _formatAmount(_totalIncome),
-                        style:
-                            Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.blue.shade800,
-                                ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Card(
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                color: Colors.red.shade50,
-                margin: EdgeInsets.zero,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Total expense',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Colors.grey.shade700,
-                            ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _formatAmount(_totalExpense),
-                        style:
-                            Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.red.shade700,
-                                ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
+    return BalanceCard(
+      currentBalance: _remainingIncome,
+      spendingThisMonth: _totalExpense,
+      incomeThisMonth: _totalIncome,
+      hideAmounts: _hideAmounts,
     );
   }
 
