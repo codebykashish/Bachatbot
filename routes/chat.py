@@ -426,6 +426,23 @@ async def chat(
 
     print(f"[CHAT] uid={uid} actions={[a.get('intent') for a in actions]}")
 
+    # ── Rent category fallback ───────────────────────────────────────────
+    # If Gemini returned "Other" but the user clearly mentioned rent,
+    # correct the category to "Rent" for expense_log / set_budget actions.
+    _RENT_KEYWORDS = ["rent", "room rent", "flat rent", "house rent",
+                       "bhada", "ghar bhada", "kotha bhada", "kiraya"]
+    text_lower = user_message.lower()
+    for action in actions:
+        act_intent = action.get("intent", "")
+        act_cat = action.get("category") or ""
+        if act_intent in ("expense_log", "income_log", "set_budget",
+                          "query_category_spend", "query_budget_status"):
+            if act_cat.lower() in ("other", "others", ""):
+                if any(kw in text_lower for kw in _RENT_KEYWORDS):
+                    print(f"[CHAT] Rent fallback: overriding category "
+                          f"'{act_cat}' → 'Rent' (matched keyword in message)")
+                    action["category"] = "Rent"
+
     # ── Accumulators ─────────────────────────────────────────────────────
     last_transaction = None
     last_budget_update = None

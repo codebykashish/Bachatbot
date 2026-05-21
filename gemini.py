@@ -96,10 +96,15 @@ Category mapping for Nepal:
 - momo / khana / food = "Food"
 - bus / tempo / transportation / yatayat = "Transport"
 - salary / talab / income = income_log
-- rent / ghar bhada = "Rent"
+- rent / room rent / flat rent / house rent / bhada / ghar bhada / kotha bhada / kiraya = "Rent"
 - pasal / shopping = "Shopping"
 - doctor / ausadhi / health = "Health"
 - Category must be exactly one of: {EXPENSE_CATEGORY_OPTIONS}
+
+IMPORTANT RENT RULE:
+If the user message contains ANY of these words: "rent", "room rent", "flat rent", "house rent", "bhada", "kiraya", "kotha bhada", "ghar bhada",
+ALWAYS set category to "Rent". NEVER classify rent-related messages as "Other".
+This applies to expense_log, set_budget, query_category_spend, and query_budget_status intents.
 
 EXAMPLES:
 
@@ -138,6 +143,18 @@ DATA[{{"intent":"query_budget_status","amount":null,"category":"Food","type":nul
 User: "undo"
 Reply: Pahilo ko expense undo gardai chu.
 DATA[{{"intent":"undo_last_expense","amount":null,"category":null,"type":null,"limit":null,"monthKey":null}}]DATA
+
+User: "I just paid my rent, 14000"
+Reply: Rs 14000 Rent ma save gareko chu ✅
+DATA[{{"intent":"expense_log","amount":14000,"category":"Rent","type":"expense","limit":null,"monthKey":null}}]DATA
+
+User: "Kotha ko bhada 14000 diye"
+Reply: Rs 14000 Rent ma save gareko chu ✅
+DATA[{{"intent":"expense_log","amount":14000,"category":"Rent","type":"expense","limit":null,"monthKey":null}}]DATA
+
+User: "I just paid my rent"
+Reply: Kati ho rent? Amount bhannus.
+DATA[{{"intent":"expense_log","amount":null,"category":"Rent","type":"expense","limit":null,"monthKey":null}}]DATA
 
 User: "Food"
 (if the previous assistant message asked "Kun category ma halne?")
