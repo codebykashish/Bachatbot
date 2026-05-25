@@ -22,7 +22,6 @@ class HomeScreenState extends State<HomeScreen> {
   bool _isLoading = true;
   List<dynamic> _budgets = [];
   Map<String, dynamic>? _report;
-  List<dynamic> _trendData = [];
   Map<String, double> _categoryBreakdown = {};
 
   bool _hideAmounts = true;
@@ -150,7 +149,7 @@ class HomeScreenState extends State<HomeScreen> {
             res['data']?['trend'] ??
             res['data']?['dailySummary'] ??
             [];
-        setState(() => _trendData = raw);
+        debugPrint('[HomeScreen] fetched trend count: ${raw.length}');
       }
     } catch (_) {}
   }
@@ -184,11 +183,6 @@ class HomeScreenState extends State<HomeScreen> {
     final net = _report?['netSavings'];
     if (net != null) return (net as num).toDouble();
     return _totalIncome - _totalExpense;
-  }
-
-  String _formatAmount(double value) {
-    if (_hideAmounts) return 'Rs ****';
-    return 'Rs ${value.toStringAsFixed(0)}';
   }
 
   String get _greetingName {
