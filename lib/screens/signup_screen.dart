@@ -17,6 +17,7 @@ class _SignupScreenState extends State<SignupScreen> {
   int _currentStep = 0;
   bool _isLoading = false;
 
+  final _emailFormKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _codeController = TextEditingController();
   final _firstNameController = TextEditingController();
@@ -27,6 +28,23 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _showPassword = false;
   Timer? _timer;
   int _start = 300; // 5 minutes
+
+  // ── Email Validation ────────────────────────────────────────────────────
+  final _emailRegex = RegExp(r'^[^@]+@[^@]+\.[^@]+$');
+
+  String? _validateEmail(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Please enter your email';
+    }
+    if (!_emailRegex.hasMatch(value)) {
+      return 'Please enter a valid email address';
+    }
+    // Check for common typo: @gnail.com instead of @gmail.com
+    if (value.toLowerCase().endsWith('@gnail.com')) {
+      return 'Domain looks incorrect (did you mean @gmail.com?)';
+    }
+    return null;
+  }
 
   @override
   void dispose() {
@@ -81,11 +99,11 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   Future<void> _sendCode() async {
-    final email = _emailController.text.trim();
-    if (email.isEmpty || !email.contains('@')) {
-      _showError('Please enter a valid email address.');
-      return;
+    // Validate email using form validator
+    if (!_emailFormKey.currentState!.validate()) {
+      return; // Validation error message already shown by TextFormField
     }
+    final email = _emailController.text.trim();
 
     setState(() => _isLoading = true);
     try {
@@ -150,18 +168,20 @@ class _SignupScreenState extends State<SignupScreen> {
     final password = _passwordController.text.trim();
 
     if (firstName.isEmpty || lastName.isEmpty || password.length < 6) {
-      _showError('Please fill all required fields and ensure password is at least 6 characters.');
+      _showError(
+          'Please fill all required fields and ensure password is at least 6 characters.');
       return;
     }
 
     setState(() => _isLoading = true);
     try {
       // 1. Firebase create user
-      final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      final userCredential =
+          await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
-      
+
       // Save the first name to Firebase Auth profile
       await userCredential.user?.updateDisplayName(firstName);
 
@@ -192,7 +212,10 @@ class _SignupScreenState extends State<SignupScreen> {
 
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => MainScreen(firstName: firstName,)),
+        MaterialPageRoute(
+            builder: (_) => MainScreen(
+                  firstName: firstName,
+                )),
         (route) => false,
       );
     } on FirebaseAuthException catch (e) {
@@ -212,6 +235,20 @@ class _SignupScreenState extends State<SignupScreen> {
         title: const Text('Create Account'),
         backgroundColor: const Color(0xFF2DBE7F),
         foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (_currentStep > 0) {
+              // Go back one step instead of exiting
+              setState(() {
+                _currentStep -= 1;
+              });
+            } else {
+              // On first step, exit to login
+              Navigator.pop(context);
+            }
+          },
+        ),
       ),
       body: Stepper(
         type: StepperType.vertical,
@@ -224,29 +261,37 @@ class _SignupScreenState extends State<SignupScreen> {
             title: const Text('Email Verification'),
             isActive: _currentStep >= 0,
             state: _currentStep > 0 ? StepState.complete : StepState.editing,
-            content: Column(
-              children: [
-                TextField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'Email Address',
-                    prefixIcon: Icon(Icons.email),
+            content: Form(
+              key: _emailFormKey,
+              child: Column(
+                children: [
+                  TextFormField(
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    validator: _validateEmail,
+                    decoration: const InputDecoration(
+                      labelText: 'Email Address',
+                      prefixIcon: Icon(Icons.email),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _sendCode,
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                    backgroundColor: const Color(0xFF2DBE7F),
-                    foregroundColor: Colors.white,
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : _sendCode,
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      backgroundColor: const Color(0xFF2DBE7F),
+                      foregroundColor: Colors.white,
+                    ),
+                    child: _isLoading && _currentStep == 0
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2))
+                        : const Text('Send Verification Code'),
                   ),
-                  child: _isLoading && _currentStep == 0
-                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Text('Send Verification Code'),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           Step(
@@ -255,7 +300,8 @@ class _SignupScreenState extends State<SignupScreen> {
             state: _currentStep > 1 ? StepState.complete : StepState.editing,
             content: Column(
               children: [
-                Text('Code sent to: ${_emailController.text}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text('Code sent to: ${_emailController.text}',
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 16),
                 TextField(
                   controller: _codeController,
@@ -270,9 +316,14 @@ class _SignupScreenState extends State<SignupScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(_start > 0 ? 'Expires in $_formattedTime' : 'Code expired', style: const TextStyle(color: Colors.red)),
+                    Text(
+                        _start > 0
+                            ? 'Expires in $_formattedTime'
+                            : 'Code expired',
+                        style: const TextStyle(color: Colors.red)),
                     TextButton(
-                      onPressed: (_start == 0 && !_isLoading) ? _sendCode : null,
+                      onPressed:
+                          (_start == 0 && !_isLoading) ? _sendCode : null,
                       child: const Text('Resend Code'),
                     ),
                   ],
@@ -286,7 +337,11 @@ class _SignupScreenState extends State<SignupScreen> {
                     foregroundColor: Colors.white,
                   ),
                   child: _isLoading && _currentStep == 1
-                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
                       : const Text('Verify Code'),
                 ),
               ],
@@ -311,7 +366,8 @@ class _SignupScreenState extends State<SignupScreen> {
                 TextField(
                   controller: _phoneController,
                   keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(labelText: 'Phone (Optional)'),
+                  decoration:
+                      const InputDecoration(labelText: 'Phone (Optional)'),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -320,8 +376,11 @@ class _SignupScreenState extends State<SignupScreen> {
                   decoration: InputDecoration(
                     labelText: 'Password',
                     suffixIcon: IconButton(
-                      icon: Icon(_showPassword ? Icons.visibility_off : Icons.visibility),
-                      onPressed: () => setState(() => _showPassword = !_showPassword),
+                      icon: Icon(_showPassword
+                          ? Icons.visibility_off
+                          : Icons.visibility),
+                      onPressed: () =>
+                          setState(() => _showPassword = !_showPassword),
                     ),
                   ),
                 ),
@@ -334,7 +393,11 @@ class _SignupScreenState extends State<SignupScreen> {
                     foregroundColor: Colors.white,
                   ),
                   child: _isLoading && _currentStep == 2
-                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
                       : const Text('Complete Signup'),
                 ),
               ],

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../api_service.dart';
 import 'home_screen.dart';
 import 'categories_screen.dart';
 import 'chatbot_page.dart';
 import 'login_screen.dart';
 import 'notification_screen.dart';
+import 'mock_notification_screen.dart';
+import 'reports_screen.dart';
 
 class MainScreen extends StatefulWidget {
   final String firstName;
@@ -28,9 +29,12 @@ class _MainScreenState extends State<MainScreen> {
 
   String get _appBarTitle {
     switch (_currentIndex) {
-      case 0: return 'BachatBot';
-      case 1: return 'Categories';
-      default: return 'BachatBot';
+      case 0:
+        return 'BachatBot';
+      case 1:
+        return 'Categories';
+      default:
+        return 'BachatBot';
     }
   }
 
@@ -77,7 +81,8 @@ class _MainScreenState extends State<MainScreen> {
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Logout failed.'), backgroundColor: Colors.red),
+        const SnackBar(
+            content: Text('Logout failed.'), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isLoggingOut = false);
@@ -131,11 +136,13 @@ class _MainScreenState extends State<MainScreen> {
                 backgroundColor: Colors.white,
                 child: Icon(Icons.person, size: 40, color: _primary),
               ),
-              accountName: Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
+              accountName: Text(displayName,
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
               accountEmail: Text(email),
             ),
             ListTile(
-              leading: Icon(Icons.home, color: _currentIndex == 0 ? _primary : null),
+              leading:
+                  Icon(Icons.home, color: _currentIndex == 0 ? _primary : null),
               title: const Text('Home'),
               selected: _currentIndex == 0,
               selectedColor: _primary,
@@ -145,7 +152,8 @@ class _MainScreenState extends State<MainScreen> {
               },
             ),
             ListTile(
-              leading: Icon(Icons.grid_view, color: _currentIndex == 1 ? _primary : null),
+              leading: Icon(Icons.grid_view,
+                  color: _currentIndex == 1 ? _primary : null),
               title: const Text('Categories'),
               selected: _currentIndex == 1,
               selectedColor: _primary,
@@ -156,8 +164,27 @@ class _MainScreenState extends State<MainScreen> {
             ),
             const Divider(),
             ListTile(
+              leading: const Icon(Icons.bug_report_outlined,
+                  color: Color(0xFF2DBE7F)),
+              title: const Text('Test Mock Notification',
+                  style: TextStyle(color: Color(0xFF2DBE7F))),
+              subtitle: const Text('Dev only', style: TextStyle(fontSize: 11)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const MockNotificationScreen()),
+                );
+              },
+            ),
+            const Divider(),
+            ListTile(
               leading: _isLoggingOut
-                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.logout, color: Colors.red),
               title: const Text('Logout', style: TextStyle(color: Colors.red)),
               onTap: _isLoggingOut ? null : _logout,
@@ -205,7 +232,7 @@ class _MainScreenState extends State<MainScreen> {
         children: [
           HomeScreen(key: _homeKey, firstName: widget.firstName),
           CategoriesScreen(key: _categoriesKey),
-          const Center(child: Text('Reports Coming Soon')),
+          const ReportsScreen(),
         ],
       ),
       // ── FAB → chat ────────────────────────────────────────────────────────
@@ -224,9 +251,18 @@ class _MainScreenState extends State<MainScreen> {
         elevation: 8,
         onTap: (i) => setState(() => _currentIndex = i),
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.grid_view_outlined), activeIcon: Icon(Icons.grid_view), label: 'Categories'),
-          BottomNavigationBarItem(icon: Icon(Icons.insert_chart_outlined), activeIcon: Icon(Icons.insert_chart), label: 'Reports'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.home_outlined),
+              activeIcon: Icon(Icons.home),
+              label: 'Home'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.grid_view_outlined),
+              activeIcon: Icon(Icons.grid_view),
+              label: 'Categories'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.insert_chart_outlined),
+              activeIcon: Icon(Icons.insert_chart),
+              label: 'Reports'),
         ],
       ),
     );
