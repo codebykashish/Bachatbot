@@ -67,7 +67,7 @@ Each element is an action object with these possible fields:
   - "intent": REQUIRED. One of:
       "expense_log", "income_log", "set_budget",
       "query_month_total", "query_category_spend", "query_budget_status",
-      "undo_last_expense", "general_chat", "greeting"
+      "undo_last_expense", "set_notification_category", "general_chat", "greeting"
   - "amount": number or null (for expense_log / income_log)
   - "category": one of {EXPENSE_CATEGORY_OPTIONS} or null
   - "type": "expense" | "income" | null
@@ -82,7 +82,11 @@ RULES:
 5. If user asks category spending → intent = "query_category_spend", fill category.
 6. If user asks budget status → intent = "query_budget_status", fill category.
 7. If user says "undo" / "pahila ko expense hata" / "tyo galat thiyo" → intent = "undo_last_expense".
-8. General chat / greetings → intent = "general_chat" or "greeting".
+8. If user replies with a SINGLE CATEGORY NAME (like "Food", "Transport", "Shopping") as an answer
+   to a previous question about which category a notification expense belongs to
+   → intent = "set_notification_category", fill category with the chosen one.
+   Reply: "Thik cha, [category] ma rakheko chu ✅"
+9. General chat / greetings → intent = "general_chat" or "greeting".
 
 MULTI-ACTION RULE (VERY IMPORTANT):
 If the user mentions MULTIPLE actions in ONE message (e.g. two expenses, or an expense AND a budget set),
@@ -92,10 +96,15 @@ Category mapping for Nepal:
 - momo / khana / food = "Food"
 - bus / tempo / transportation / yatayat = "Transport"
 - salary / talab / income = income_log
-- rent / ghar bhada = "Rent"
+- rent / room rent / flat rent / house rent / bhada / ghar bhada / kotha bhada / kiraya = "Rent"
 - pasal / shopping = "Shopping"
 - doctor / ausadhi / health = "Health"
 - Category must be exactly one of: {EXPENSE_CATEGORY_OPTIONS}
+
+IMPORTANT RENT RULE:
+If the user message contains ANY of these words: "rent", "room rent", "flat rent", "house rent", "bhada", "kiraya", "kotha bhada", "ghar bhada",
+ALWAYS set category to "Rent". NEVER classify rent-related messages as "Other".
+This applies to expense_log, set_budget, query_category_spend, and query_budget_status intents.
 
 EXAMPLES:
 
@@ -134,6 +143,28 @@ DATA[{{"intent":"query_budget_status","amount":null,"category":"Food","type":nul
 User: "undo"
 Reply: Pahilo ko expense undo gardai chu.
 DATA[{{"intent":"undo_last_expense","amount":null,"category":null,"type":null,"limit":null,"monthKey":null}}]DATA
+
+User: "I just paid my rent, 14000"
+Reply: Rs 14000 Rent ma save gareko chu ✅
+DATA[{{"intent":"expense_log","amount":14000,"category":"Rent","type":"expense","limit":null,"monthKey":null}}]DATA
+
+User: "Kotha ko bhada 14000 diye"
+Reply: Rs 14000 Rent ma save gareko chu ✅
+DATA[{{"intent":"expense_log","amount":14000,"category":"Rent","type":"expense","limit":null,"monthKey":null}}]DATA
+
+User: "I just paid my rent"
+Reply: Kati ho rent? Amount bhannus.
+DATA[{{"intent":"expense_log","amount":null,"category":"Rent","type":"expense","limit":null,"monthKey":null}}]DATA
+
+User: "Food"
+(if the previous assistant message asked "Kun category ma halne?")
+Reply: Thik cha, Food ma rakheko chu ✅
+DATA[{{"intent":"set_notification_category","amount":null,"category":"Food","type":null,"limit":null,"monthKey":null}}]DATA
+
+User: "Transport ho"
+(if the previous assistant message asked about category)
+Reply: Thik cha, Transport ma rakheko chu ✅
+DATA[{{"intent":"set_notification_category","amount":null,"category":"Transport","type":null,"limit":null,"monthKey":null}}]DATA
 
 User: "Hello"
 Reply: Namaste! Ma BachatBot chu. Timro kharcha track garna ready chu 😊
@@ -261,3 +292,98 @@ async def process_chat_message(user_message: str) -> dict:
             "actions": [{"intent": "general_chat", "amount": None, "category": None,
                          "type": None, "limit": None, "monthKey": None}],
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NOTIFICATION PARSER — separate from main chat flow
+# Used ONLY by the source=="notification" branch in routes/chat.py.
+# Does NOT affect normal chat logic at all.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_NOTIFICATION_PROMPT = f"""
+You are a financial notification parser for Nepal.
+Parse the raw wallet/bank notification text and return ONLY a JSON object.
+
+Output format (strict JSON, no markdown, no extra text):
+{{"amount": <number>, "category": "<category>" or null, "type": "expense" | "income"}}
+
+Categories allowed: {EXPENSE_CATEGORY_OPTIONS}
+
+Rules:
+- Payment / transferred / debited / kharcha → type = "expense"
+- Received / credited / income / deposit    → type = "income"
+- Infer category from merchant or context:
+    - Bhatbhateni / Food / restaurant / coffee / momo / khana → "Food"
+    - Bus / taxi / Pathao / InDrive / yatayat               → "Transport"
+    - Hospital / pharmacy / ausadhi / clinic                 → "Health"
+    - Rent / ghar bhada                                       → "Rent"
+    - Shopping / pasal / cloth                                → "Shopping"
+    - Salary / talab / payroll                                → "Salary"
+    - If you are CONFIDENT about the category, use it.
+    - If unsure or no clear merchant/context clue, set category to null.
+      Do NOT guess. Only assign a category if the text gives clear evidence.
+- amount must be a plain number (no "Rs", no commas).
+- If amount cannot be determined, use 0.
+
+Examples:
+Input:  "eSewa: Payment of Rs 500 to Bhatbhateni"
+Output: {{"amount": 500, "category": "Food", "type": "expense"}}
+
+Input:  "Khalti: Rs 1200 paid to Pathao"
+Output: {{"amount": 1200, "category": "Transport", "type": "expense"}}
+
+Input:  "NabilBank: Salary credited Rs 45000"
+Output: {{"amount": 45000, "category": "Salary", "type": "income"}}
+
+Input:  "eSewa: Rs 500 transferred successfully"
+Output: {{"amount": 500, "category": null, "type": "expense"}}
+
+Input:  "Khalti: Payment of Rs 3000 successful"
+Output: {{"amount": 3000, "category": null, "type": "expense"}}
+"""
+
+
+async def parse_notification_text(notification_text: str) -> dict:
+    """
+    Parse a raw wallet/bank notification string using a dedicated Gemini prompt.
+    Returns dict with keys: amount (float), category (str), type (str).
+    Falls back gracefully on any error.
+    """
+    default = {"amount": 0.0, "category": "Other", "type": "expense"}
+    try:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            print("[NOTIF_PARSE] No API key — returning default")
+            return default
+
+        prompt = f"{_NOTIFICATION_PROMPT}\n\nInput: \"{notification_text}\"\nOutput:"
+        response = model.generate_content(prompt)
+        raw = response.text.strip()
+
+        # Strip accidental markdown fences
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+
+        parsed = json.loads(raw)
+        amount   = float(parsed.get("amount", 0))
+        category = parsed.get("category")  # can be None now
+        tx_type  = parsed.get("type", "expense")
+
+        # Normalise category through existing mapping (only if present)
+        if category and category not in ("null", "None", "unknown", "Unknown"):
+            category = normalize_expense_category(category)
+        else:
+            category = None  # explicitly None for uncertain
+
+        print(
+            f"[NOTIF_PARSE] '{notification_text}' → "
+            f"amount={amount} category={category} type={tx_type}"
+        )
+        return {"amount": amount, "category": category, "type": tx_type}
+
+    except json.JSONDecodeError as e:
+        print(f"[NOTIF_PARSE] JSON parse error: {e} | raw='{raw}'")
+        return default
+    except Exception as e:
+        print(f"[NOTIF_PARSE] Error: {e}")
+        return default

@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from firebase_config import get_firestore
 from auth import get_current_user
-from gemini import process_chat_message
+from gemini import process_chat_message, parse_notification_text
+from schemas.categories import EXPENSE_CATEGORIES
 from utils import (
     get_current_month_key, serialize_doc,
     sum_month_expense, sum_category_expense, fetch_budget,
@@ -261,12 +262,186 @@ async def chat(
         "createdAt": SERVER_TIMESTAMP,
     })
 
+    # ════════════════════════════════════════════════════════════════════
+    # NOTIFICATION BRANCH — source == "notification"
+    # Creates a PENDING transaction + notification doc.
+    # Does NOT update budgets or confirm the transaction.
+    # Returns early with needsConfirmation = true.
+    # ════════════════════════════════════════════════════════════════════
+    if source == "notification":
+        source_app = body.get("sourceApp", "Unknown")
+        original_message_id = body.get("originalMessageId", None)
+        month_key = get_current_month_key()
+
+        # A. Parse via Gemini (notification-specific prompt)
+        parsed = await parse_notification_text(user_message)
+        amount    = parsed.get("amount", 0.0)
+        category  = parsed.get("category")   # can be None now
+        tx_type   = parsed.get("type", "expense")
+
+        # Determine if category is uncertain
+        category_uncertain = (
+            category is None
+            or category in ("Other", "Unknown", "other", "unknown")
+        )
+
+        print(
+            f"[CHAT][NOTIF] uid={uid} app={source_app} "
+            f"amount={amount} category={category} type={tx_type} "
+            f"uncertain={category_uncertain}"
+        )
+
+        # B. Create PENDING transaction
+        tx_ref = (
+            db.collection("users").document(uid)
+            .collection("transactions").document()
+        )
+        tx_data = {
+            "amount":            float(amount),
+            "category":          category if not category_uncertain else None,
+            "type":              tx_type,
+            "status":            "pending",
+            "source":            "notification",
+            "description":       user_message,
+            "monthKey":          month_key,
+            "isDeleted":         False,
+            "deletedAt":         None,
+            "originalMessageId": original_message_id,
+            "createdAt":         SERVER_TIMESTAMP,
+            "updatedAt":         SERVER_TIMESTAMP,
+        }
+        tx_ref.set(tx_data)
+        print(f"[CHAT][NOTIF] Pending transaction created: id={tx_ref.id}")
+
+        transaction_out = {
+            "id":                tx_ref.id,
+            "amount":            float(amount),
+            "category":          category if not category_uncertain else None,
+            "type":              tx_type,
+            "status":            "pending",
+            "source":            "notification",
+            "description":       user_message,
+            "monthKey":          month_key,
+            "isDeleted":         False,
+            "deletedAt":         None,
+            "originalMessageId": original_message_id,
+        }
+
+        # C. Create notification doc
+        notif_ref = (
+            db.collection("users").document(uid)
+            .collection("notifications").document()
+        )
+        notif_data = {
+            "rawText":        user_message,
+            "parsedAmount":   float(amount),
+            "parsedCategory": category if not category_uncertain else None,
+            "parsedType":     tx_type,
+            "sourceApp":      source_app,
+            "status":         "pending",
+            "transactionId":  tx_ref.id,
+            "createdAt":      SERVER_TIMESTAMP,
+        }
+        notif_ref.set(notif_data)
+        print(f"[CHAT][NOTIF] Notification doc created: id={notif_ref.id}")
+
+        notification_out = {
+            "id":             notif_ref.id,
+            "rawText":        user_message,
+            "parsedAmount":   float(amount),
+            "parsedCategory": category if not category_uncertain else None,
+            "parsedType":     tx_type,
+            "sourceApp":      source_app,
+            "status":         "pending",
+            "transactionId":  tx_ref.id,
+        }
+
+        # D. Build reply — different for certain vs uncertain category
+        if category_uncertain:
+            # Category unknown → ask the user
+            cat_options = "/".join(c for c in EXPENSE_CATEGORIES if c != "Other")
+            if tx_type == "expense":
+                reply = (
+                    f"{source_app} bata Rs {int(amount)} expense detect bhayo. "
+                    f"Kun category ma halne? ({cat_options}/Other)"
+                )
+            else:
+                reply = (
+                    f"{source_app} bata Rs {int(amount)} income detect bhayo. "
+                    f"Kun category ma halne? ({cat_options}/Other)"
+                )
+            reply_intent = "notification_parse_ask_category"
+        else:
+            # Category is confident
+            if tx_type == "expense":
+                reply = (
+                    f"{source_app} bata Rs {int(amount)} {category} ma "
+                    f"kharcha bhako jasto cha. Thik cha?"
+                )
+            else:
+                reply = (
+                    f"{source_app} bata Rs {int(amount)} income aayeko "
+                    f"jasto cha. Thik cha?"
+                )
+            reply_intent = "notification_parse"
+
+        # Save assistant message
+        assistant_msg_ref = messages_ref.document()
+        assistant_msg_ref.set({
+            "role":                 "assistant",
+            "content":              reply,
+            "intent":               reply_intent,
+            "extractedData":        [{
+                "intent": reply_intent,
+                "amount": float(amount),
+                "category": category if not category_uncertain else None,
+                "type": tx_type,
+            }],
+            "relatedTransactionId": tx_ref.id,
+            "createdAt":            SERVER_TIMESTAMP,
+        })
+
+        # E. Return notification-style response
+        return {
+            "success": True,
+            "data": {
+                "reply":             reply,
+                "intent":            reply_intent,
+                "needsConfirmation": True,
+                "categoryUncertain": category_uncertain,
+                "transaction":       transaction_out,
+                "notification":      notification_out,
+                "budgetUpdate":      None,
+                "alerts":            [],
+            },
+        }
+    # ════════════════════════════════════════════════════════════════════
+    # END NOTIFICATION BRANCH — normal chat flow continues below
+    # ════════════════════════════════════════════════════════════════════
+
     # ── Call Gemini ──────────────────────────────────────────────────────
     gemini_result = await process_chat_message(user_message)
     gemini_reply = gemini_result["reply"]
     actions = gemini_result["actions"]
 
     print(f"[CHAT] uid={uid} actions={[a.get('intent') for a in actions]}")
+
+    # ── Rent category fallback ───────────────────────────────────────────
+    # If Gemini returned "Other" but the user clearly mentioned rent,
+    # correct the category to "Rent" for expense_log / set_budget actions.
+    _RENT_KEYWORDS = ["rent", "room rent", "flat rent", "house rent",
+                       "bhada", "ghar bhada", "kotha bhada", "kiraya"]
+    text_lower = user_message.lower()
+    for action in actions:
+        act_intent = action.get("intent", "")
+        act_cat = action.get("category") or ""
+        if act_intent in ("expense_log", "income_log", "set_budget",
+                          "query_category_spend", "query_budget_status"):
+            if act_cat.lower() in ("other", "others", ""):
+                if any(kw in text_lower for kw in _RENT_KEYWORDS):
+                    print(f"[CHAT] Rent fallback: overriding category "
+                          f"'{act_cat}' → 'Rent' (matched keyword in message)")
+                    action["category"] = "Rent"
 
     # ── Accumulators ─────────────────────────────────────────────────────
     last_transaction = None
@@ -291,6 +466,71 @@ async def chat(
             if alt:
                 alerts_created.append(alt)
             reply_parts.append(rp)
+
+        # ── SET NOTIFICATION CATEGORY ────────────────────────────────────
+        elif intent == "set_notification_category" and action.get("category"):
+            chosen_cat = action["category"]
+            print(f"[CHAT] set_notification_category: {chosen_cat}")
+
+            # Find most recent pending notification transaction with null category
+            tx_col = db.collection("users").document(uid).collection("transactions")
+            candidates = list(
+                tx_col
+                .where("source", "==", "notification")
+                .where("status", "==", "pending")
+                .order_by("createdAt", direction="DESCENDING")
+                .limit(5)
+                .stream()
+            )
+
+            target = None
+            for doc in candidates:
+                d = doc.to_dict()
+                cat = d.get("category")
+                if cat is None or cat in ("Other", "Unknown", ""):
+                    target = doc
+                    break
+
+            if target:
+                td = target.to_dict()
+                t_amt = td.get("amount", 0)
+
+                # Update transaction category
+                target.reference.update({
+                    "category": chosen_cat,
+                    "updatedAt": SERVER_TIMESTAMP,
+                })
+
+                # Also update matching notification doc
+                notif_docs = list(
+                    db.collection("users").document(uid)
+                    .collection("notifications")
+                    .where("transactionId", "==", target.id)
+                    .limit(1)
+                    .stream()
+                )
+                for nd in notif_docs:
+                    nd.reference.update({"parsedCategory": chosen_cat})
+
+                reply_parts.append(
+                    f"Thik cha, Rs {int(t_amt)} {chosen_cat} ma rakheko chu ✅"
+                )
+                last_transaction = {
+                    "id": target.id,
+                    "amount": t_amt,
+                    "category": chosen_cat,
+                    "type": td.get("type", "expense"),
+                    "status": "pending",
+                    "source": "notification",
+                }
+                print(
+                    f"[CHAT] Updated pending tx {target.id} category → {chosen_cat}"
+                )
+            else:
+                reply_parts.append(
+                    f"Category set garna pending notification transaction bhetiyena."
+                )
+                print("[CHAT] No pending notification tx with null category found")
 
         # ── SET BUDGET ───────────────────────────────────────────────────
         elif intent == "set_budget" and action.get("limit") is not None and action.get("category"):

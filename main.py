@@ -40,6 +40,14 @@ from auth import get_current_user
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    # ── Fix 1: Normalize double-slash paths (//chat → /chat) ─────────────
+    # Happens when Flutter baseUrl ends with "/" and endpoint starts with "/".
+    raw_path = request.scope.get("path", "")
+    if raw_path.startswith("//"):
+        fixed_path = "/" + raw_path.lstrip("/")
+        request.scope["path"] = fixed_path
+        print(f"[MIDDLEWARE] Normalised path: '{raw_path}' → '{fixed_path}'")
+
     uid = "anonymous"
     try:
         current_user = await get_current_user(request)
@@ -48,21 +56,21 @@ async def log_requests(request: Request, call_next):
         pass
 
     if request.method == "POST":
-        body_bytes = await request.body()
-        # Re-inject the body so downstream handlers can read it
-        async def receive():
-            return {"type": "http.request", "body": body_bytes}
-        request._receive = receive
+        # ── Fix 2: Use request.body() which caches in request._body ──────
+        # Do NOT set request._receive manually — that custom closure always
+        # returns http.request, breaking Starlette's disconnect detection
+        # and causing: RuntimeError: Unexpected message received: http.request
+        body_bytes = await request.body()   # safe to call; result is cached
         try:
             body_str = body_bytes.decode("utf-8")[:500]
         except Exception:
             body_str = str(body_bytes)[:500]
-        print(f"[REQ] {request.method} {request.url.path} uid={uid} body={body_str}")
+        print(f"[REQ] {request.method} {request.scope['path']} uid={uid} body={body_str}")
     else:
-        print(f"[REQ] {request.method} {request.url.path} uid={uid}")
+        print(f"[REQ] {request.method} {request.scope['path']} uid={uid}")
 
     response = await call_next(request)
-    print(f"[RES] {response.status_code} {request.url.path} uid={uid}")
+    print(f"[RES] {response.status_code} {request.scope['path']} uid={uid}")
     return response
 
 
