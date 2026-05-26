@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from firebase_config import get_firestore
 from auth import get_current_user
-from utils import get_current_month_key
+from utils import get_current_month_key, sum_category_expense
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 
 router = APIRouter()
@@ -44,6 +44,29 @@ async def create_or_update_budget(
     month_key = body.monthKey or get_current_month_key()
     threshold = body.alertThreshold if body.alertThreshold is not None else 80
     print(f"[BUDGET] uid={uid} category={body.category} limit={body.limit} monthKey={month_key}")
+
+    # ── Spent-floor validation ────────────────────────────────────────────
+    actual_spent = sum_category_expense(db, uid, body.category, month_key)
+    if body.limit < actual_spent:
+        print(
+            f"[BUDGET] REJECTED: {body.category} limit Rs {body.limit} "
+            f"< already spent Rs {actual_spent}"
+        )
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "BUDGET_BELOW_SPENT",
+                    "message": (
+                        f"Cannot set {body.category} budget to Rs {int(body.limit)}. "
+                        f"You have already spent Rs {int(actual_spent)} this month. "
+                        f"Budget must be at least Rs {int(actual_spent)}."
+                    ),
+                    "currentSpent": actual_spent,
+                },
+            },
+        )
 
     budgets_ref = (
         db.collection("users")

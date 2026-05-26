@@ -193,11 +193,28 @@ def _handle_set_budget(db, uid, action, month_key):
     """
     Upsert budget: overwrite limit, keep spent.
     Returns (budget_update_dict, alert_or_None, reply_part).
+
+    Rejects the update if the new limit is below the amount already spent
+    in this category for the given month.
     """
     category = action.get("category")
     limit_val = float(action["limit"])
 
     print(f"[CHAT] Setting budget: {category} limit=Rs {limit_val} monthKey={month_key}")
+
+    # ── Spent-floor validation ────────────────────────────────────────────
+    actual_spent = sum_category_expense(db, uid, category, month_key)
+    if limit_val < actual_spent:
+        print(
+            f"[CHAT] [BUDGET] REJECTED: {category} limit Rs {limit_val} "
+            f"< already spent Rs {actual_spent}"
+        )
+        reply_part = (
+            f"{category} budget Rs {int(limit_val)} set garna mildaina — "
+            f"timi yesma Rs {int(actual_spent)} kharcha garisakeko chau yo mahina. "
+            f"Budget Rs {int(actual_spent)} bhanda mathi set gara."
+        )
+        return None, None, reply_part
 
     budgets_ref = db.collection("users").document(uid).collection("budgets")
     matching = list(
