@@ -19,23 +19,67 @@ router = APIRouter()
 # Helpers — one function per action type
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _handle_expense_or_income(db, uid, action, source, month_key):
+def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_key=None):
     """
     Save transaction, increment budget.spent (if expense + budget exists),
     create a transaction_saved alert.
     Returns (transaction_dict, budget_update_or_None, alert_or_None, reply_part).
+
+    If idempotency_key is provided, checks for an existing transaction with
+    that key first and skips the write if found (prevents duplicates during
+    offline sync recovery).
     """
     amount = float(action["amount"])
     category = action.get("category")
     tx_type = action.get("type", "expense")
     description = action.get("description", "")
 
+    # ── Idempotency check — skip if transaction already exists ───────────
+    existing_tx = None
+    if idempotency_key:
+        try:
+            existing_docs = list(
+                db.collection("users").document(uid)
+                .collection("transactions")
+                .where("idempotencyKey", "==", idempotency_key)
+                .limit(1)
+                .stream()
+            )
+            if existing_docs:
+                existing_tx = existing_docs[0]
+                print(f"[CHAT] Idempotency hit: key={idempotency_key} tx={existing_tx.id} — skipping duplicate write")
+        except Exception as e:
+            print(f"[CHAT] Idempotency check failed (proceeding with write): {e}")
+
+    if existing_tx:
+        # Return the existing record without creating a duplicate
+        ed = existing_tx.to_dict()
+        tx_ref_id = existing_tx.id
+        transaction_out = {
+            "id": tx_ref_id,
+            "amount": ed.get("amount", amount),
+            "category": ed.get("category", category),
+            "type": ed.get("type", tx_type),
+            "status": ed.get("status", "confirmed"),
+            "source": ed.get("source", source),
+            "description": ed.get("description", description),
+            "monthKey": ed.get("monthKey", month_key),
+            "isDeleted": ed.get("isDeleted", False),
+            "deletedAt": None,
+            "originalMessageId": None,
+            "deduplicated": True,
+        }
+        cat_display = category or "Income"
+        reply_part = f"Rs {int(amount)} {cat_display}"
+        # Still check budget status for the reply but don't increment
+        return transaction_out, None, None, reply_part
+
     # ── Save transaction ─────────────────────────────────────────────────
     tx_ref = (
         db.collection("users").document(uid)
         .collection("transactions").document()
     )
-    tx_ref.set({
+    tx_data = {
         "amount": amount,
         "category": category,
         "type": tx_type,
@@ -48,7 +92,10 @@ def _handle_expense_or_income(db, uid, action, source, month_key):
         "originalMessageId": None,
         "createdAt": SERVER_TIMESTAMP,
         "updatedAt": SERVER_TIMESTAMP,
-    })
+    }
+    if idempotency_key:
+        tx_data["idempotencyKey"] = idempotency_key
+    tx_ref.set(tx_data)
     print(f"[CHAT] Transaction saved: id={tx_ref.id} {tx_type} {category} Rs {amount}")
 
     transaction_out = {
@@ -238,6 +285,7 @@ async def chat(
     body = await request.json()
     user_message = body.get("message", "").strip()
     source = body.get("source", "chat")
+    idempotency_key = body.get("idempotencyKey") or None
 
     print(f"\n{'='*60}")
     print(f"[CHAT] uid={uid} message='{user_message}'")
@@ -461,6 +509,7 @@ async def chat(
         if intent in ("expense_log", "income_log") and action.get("amount"):
             txn, bud, alt, rp = _handle_expense_or_income(
                 db, uid, action, source, month_key,
+                idempotency_key=idempotency_key,
             )
             last_transaction = txn
             if bud:
@@ -830,6 +879,533 @@ async def chat(
             "transaction": last_transaction,
             "budgetUpdate": last_budget_update,
             "alerts": alerts_created,
+        },
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /chat/sync  — process batched offline messages
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/chat/sync")
+async def chat_sync(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Process a batch of messages that were queued while the user was offline.
+    Messages are sorted by clientTimestamp and processed sequentially through
+    the same pipeline as POST /chat.
+
+    Request body:
+    {
+        "messages": [
+            {"message": "...", "source": "chat", "clientTimestamp": "ISO-8601"},
+            ...
+        ]
+    }
+    """
+    uid = current_user["uid"]
+    db = get_firestore()
+
+    body = await request.json()
+    queued_messages = body.get("messages", [])
+
+    if not queued_messages or not isinstance(queued_messages, list):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {"code": "EMPTY_BATCH", "message": "No messages provided."},
+            },
+        )
+
+    # ── Enforce batch limit ──────────────────────────────────────────────
+    MAX_BATCH = 20
+    if len(queued_messages) > MAX_BATCH:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "BATCH_TOO_LARGE",
+                    "message": f"Maximum {MAX_BATCH} messages per sync call.",
+                },
+            },
+        )
+
+    print(f"\n{'='*60}")
+    print(f"[SYNC] uid={uid}  batch_size={len(queued_messages)}")
+    print(f"{'='*60}")
+
+    # ── Sort by clientTimestamp (chronological order) ─────────────────────
+    from datetime import datetime as _dt, timezone as _tz
+
+    def _parse_ts(msg):
+        ts_str = msg.get("clientTimestamp", "")
+        if not ts_str:
+            return _dt.min.replace(tzinfo=_tz.utc)
+        try:
+            ts = _dt.fromisoformat(ts_str.replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=_tz.utc)
+            return ts
+        except Exception:
+            return _dt.min.replace(tzinfo=_tz.utc)
+
+    queued_messages.sort(key=_parse_ts)
+
+    messages_ref = db.collection("users").document(uid).collection("messages")
+
+    results = []
+    total_processed = 0
+    total_skipped = 0
+
+    # ── Process each message sequentially ─────────────────────────────────
+    for idx, msg_payload in enumerate(queued_messages):
+        user_message = (msg_payload.get("message") or "").strip()
+        source = msg_payload.get("source", "chat")
+        client_ts_str = msg_payload.get("clientTimestamp", "")
+        sync_idempotency_key = msg_payload.get("idempotencyKey") or None
+
+        if not user_message:
+            results.append({
+                "clientTimestamp": client_ts_str,
+                "status": "skipped",
+                "reason": "empty_message",
+                "reply": None,
+                "intent": None,
+                "transaction": None,
+                "budgetUpdate": None,
+                "alerts": [],
+            })
+            total_skipped += 1
+            continue
+
+        # Skip notification-sourced messages (notifications are real-time only)
+        if source == "notification":
+            results.append({
+                "clientTimestamp": client_ts_str,
+                "status": "skipped",
+                "reason": "notification_not_supported_in_sync",
+                "reply": None,
+                "intent": None,
+                "transaction": None,
+                "budgetUpdate": None,
+                "alerts": [],
+            })
+            total_skipped += 1
+            continue
+
+        print(f"[SYNC] [{idx+1}/{len(queued_messages)}] message='{user_message}' ts={client_ts_str}")
+
+        # ── Deduplication check ──────────────────────────────────────────
+        try:
+            if client_ts_str:
+                dup_query = list(
+                    messages_ref
+                    .where("role", "==", "user")
+                    .where("content", "==", user_message)
+                    .where("clientTimestamp", "==", client_ts_str)
+                    .limit(1)
+                    .stream()
+                )
+                if dup_query:
+                    print(f"[SYNC] Duplicate detected — skipping")
+                    results.append({
+                        "clientTimestamp": client_ts_str,
+                        "status": "already_processed",
+                        "reply": None,
+                        "intent": None,
+                        "transaction": None,
+                        "budgetUpdate": None,
+                        "alerts": [],
+                    })
+                    total_skipped += 1
+                    continue
+        except Exception as dedup_err:
+            # If dedup check fails (e.g. missing index), continue processing
+            print(f"[SYNC] Dedup check failed (proceeding): {dedup_err}")
+
+        # ── Derive monthKey from clientTimestamp ──────────────────────────
+        parsed_client_ts = _parse_ts(msg_payload)
+        if parsed_client_ts.year > 2000:
+            derived_month_key = parsed_client_ts.strftime("%Y-%m")
+        else:
+            derived_month_key = get_current_month_key()
+
+        try:
+            # ── Save user message ────────────────────────────────────────
+            user_msg_ref = messages_ref.document()
+            user_msg_ref.set({
+                "role": "user",
+                "content": user_message,
+                "intent": None,
+                "extractedData": None,
+                "relatedTransactionId": None,
+                "clientTimestamp": client_ts_str,
+                "source": "offline_sync",
+                "createdAt": SERVER_TIMESTAMP,
+            })
+
+            # ── Call Gemini ──────────────────────────────────────────────
+            gemini_result = await process_chat_message(user_message)
+            gemini_reply = gemini_result["reply"]
+            actions = gemini_result["actions"]
+
+            print(f"[SYNC] actions={[a.get('intent') for a in actions]}")
+
+            # ── Rent keyword fallback (same as POST /chat) ───────────────
+            _RENT_KEYWORDS = ["rent", "room rent", "flat rent", "house rent",
+                               "bhada", "ghar bhada", "kotha bhada", "kiraya"]
+            text_lower = user_message.lower()
+            for action in actions:
+                act_intent = action.get("intent", "")
+                act_cat = action.get("category") or ""
+                if act_intent in ("expense_log", "income_log", "set_budget",
+                                  "query_category_spend", "query_budget_status"):
+                    if act_cat.lower() in ("other", "others", ""):
+                        if any(kw in text_lower for kw in _RENT_KEYWORDS):
+                            action["category"] = "Rent"
+
+            # ── Accumulators ─────────────────────────────────────────────
+            last_transaction = None
+            last_budget_update = None
+            alerts_created = []
+            reply_parts = []
+            primary_intent = actions[0].get("intent", "general_chat") if actions else "general_chat"
+
+            # ── Process each action ──────────────────────────────────────
+            for action in actions:
+                intent = action.get("intent", "general_chat")
+                # Use derived monthKey from clientTimestamp, not server time
+                month_key = action.get("monthKey") or derived_month_key
+
+                # ── EXPENSE / INCOME ─────────────────────────────────────
+                if intent in ("expense_log", "income_log") and action.get("amount"):
+                    txn, bud, alt, rp = _handle_expense_or_income(
+                        db, uid, action, source, month_key,
+                        idempotency_key=sync_idempotency_key,
+                    )
+                    last_transaction = txn
+                    if bud:
+                        last_budget_update = bud
+                    if alt:
+                        alerts_created.append(alt)
+                    reply_parts.append(rp)
+
+                # ── SET NOTIFICATION CATEGORY ────────────────────────────
+                elif intent == "set_notification_category" and action.get("category"):
+                    chosen_cat = action["category"]
+                    tx_col = db.collection("users").document(uid).collection("transactions")
+                    candidates = list(
+                        tx_col
+                        .where("source", "==", "notification")
+                        .where("status", "==", "pending")
+                        .order_by("createdAt", direction="DESCENDING")
+                        .limit(5)
+                        .stream()
+                    )
+                    target = None
+                    for doc in candidates:
+                        d = doc.to_dict()
+                        cat = d.get("category")
+                        if cat is None or cat in ("Other", "Unknown", ""):
+                            target = doc
+                            break
+                    if target:
+                        td = target.to_dict()
+                        t_amt = td.get("amount", 0)
+                        target.reference.update({
+                            "category": chosen_cat,
+                            "updatedAt": SERVER_TIMESTAMP,
+                        })
+                        notif_docs = list(
+                            db.collection("users").document(uid)
+                            .collection("notifications")
+                            .where("transactionId", "==", target.id)
+                            .limit(1)
+                            .stream()
+                        )
+                        for nd in notif_docs:
+                            nd.reference.update({"parsedCategory": chosen_cat})
+                        reply_parts.append(
+                            f"Thik cha, Rs {int(t_amt)} {chosen_cat} ma rakheko chu ✅"
+                        )
+                        last_transaction = {
+                            "id": target.id, "amount": t_amt,
+                            "category": chosen_cat,
+                            "type": td.get("type", "expense"),
+                            "status": "pending", "source": "notification",
+                        }
+                    else:
+                        reply_parts.append(
+                            "Category set garna pending notification transaction bhetiyena."
+                        )
+
+                # ── SET BUDGET ───────────────────────────────────────────
+                elif intent == "set_budget" and action.get("limit") is not None and action.get("category"):
+                    bud, alt, rp = _handle_set_budget(db, uid, action, month_key)
+                    last_budget_update = bud
+                    if alt:
+                        alerts_created.append(alt)
+                    reply_parts.append(rp)
+
+                # ── QUERY MONTH TOTAL ────────────────────────────────────
+                elif intent == "query_month_total":
+                    total = sum_month_expense(db, uid, month_key)
+                    reply_parts.append(f"Yo mahina total kharcha Rs {int(total)} cha")
+
+                # ── QUERY REPORT ─────────────────────────────────────────
+                elif intent == "query_report":
+                    report_period = (action.get("reportPeriod") or "monthly").strip().lower()
+                    tx_docs = list(
+                        db.collection("users").document(uid).collection("transactions")
+                        .where("monthKey", "==", month_key)
+                        .where("status", "==", "confirmed")
+                        .stream()
+                    )
+                    r_expense = 0.0
+                    r_income = 0.0
+                    r_categories = {}
+
+                    if report_period == "daily":
+                        for doc in tx_docs:
+                            data = doc.to_dict()
+                            if data.get("isDeleted", False):
+                                continue
+                            if not is_today(data.get("createdAt")):
+                                continue
+                            amount = data.get("amount", 0.0)
+                            if data.get("type") == "expense":
+                                r_expense += amount
+                                cat = data.get("category")
+                                if cat:
+                                    r_categories[cat] = r_categories.get(cat, 0.0) + amount
+                            elif data.get("type") == "income":
+                                r_income += amount
+                        cat_parts = ", ".join(f"{c}: Rs {int(v)}" for c, v in sorted(r_categories.items(), key=lambda x: -x[1]))
+                        if r_expense > 0 and cat_parts:
+                            reply_parts.append(f"Aaja ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income. {cat_parts}")
+                        elif r_expense > 0:
+                            reply_parts.append(f"Aaja ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income")
+                        else:
+                            reply_parts.append("Aaja kei kharcha bhayena")
+
+                    elif report_period == "weekly":
+                        week_start, _ = get_week_date_range()
+                        for doc in tx_docs:
+                            data = doc.to_dict()
+                            if data.get("isDeleted", False):
+                                continue
+                            created_at = data.get("createdAt")
+                            if created_at:
+                                try:
+                                    ts = created_at if (hasattr(created_at, 'tzinfo') and created_at.tzinfo) else created_at.replace(tzinfo=_tz.utc)
+                                    if ts < week_start:
+                                        continue
+                                except Exception:
+                                    pass
+                            else:
+                                continue
+                            amount = data.get("amount", 0.0)
+                            if data.get("type") == "expense":
+                                r_expense += amount
+                                cat = data.get("category")
+                                if cat:
+                                    r_categories[cat] = r_categories.get(cat, 0.0) + amount
+                            elif data.get("type") == "income":
+                                r_income += amount
+                        cat_parts = ", ".join(f"{c}: Rs {int(v)}" for c, v in sorted(r_categories.items(), key=lambda x: -x[1]))
+                        if r_expense > 0 and cat_parts:
+                            reply_parts.append(f"Yo hapta ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income. {cat_parts}")
+                        elif r_expense > 0:
+                            reply_parts.append(f"Yo hapta ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income")
+                        else:
+                            reply_parts.append("Yo hapta ma kei kharcha bhayena")
+
+                    else:
+                        for doc in tx_docs:
+                            data = doc.to_dict()
+                            if data.get("isDeleted", False):
+                                continue
+                            amount = data.get("amount", 0.0)
+                            if data.get("type") == "expense":
+                                r_expense += amount
+                                cat = data.get("category")
+                                if cat:
+                                    r_categories[cat] = r_categories.get(cat, 0.0) + amount
+                            elif data.get("type") == "income":
+                                r_income += amount
+                        net = r_income - r_expense
+                        cat_parts = ", ".join(f"{c}: Rs {int(v)}" for c, v in sorted(r_categories.items(), key=lambda x: -x[1]))
+                        if r_expense > 0 and cat_parts:
+                            reply_parts.append(f"Yo mahina ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income. Net savings: Rs {int(net)}. {cat_parts}")
+                        elif r_expense > 0:
+                            reply_parts.append(f"Yo mahina ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income. Net savings: Rs {int(net)}")
+                        else:
+                            reply_parts.append("Yo mahina ma kei kharcha bhayena")
+
+                # ── QUERY CATEGORY SPEND ─────────────────────────────────
+                elif intent == "query_category_spend" and action.get("category"):
+                    cat = action["category"]
+                    total = sum_category_expense(db, uid, cat, month_key)
+                    reply_parts.append(f"{cat} ma Rs {int(total)} kharcha gareko chau yo mahina")
+
+                # ── QUERY BUDGET STATUS ──────────────────────────────────
+                elif intent == "query_budget_status" and action.get("category"):
+                    cat = action["category"]
+                    b = fetch_budget(db, uid, cat, month_key)
+                    if b:
+                        bl = b.get("limit", 0)
+                        bs = b.get("spent", 0)
+                        br = max(0, bl - bs)
+                        bp = round((bs / bl * 100), 1) if bl > 0 else 0
+                        reply_parts.append(f"{cat} budget Rs {int(bl)}, spent Rs {int(bs)}, baki Rs {int(br)} ({bp}%)")
+                    else:
+                        reply_parts.append(f"{cat} ko lagi budget set gareko chaina yo mahina")
+
+                # ── UNDO LAST EXPENSE ────────────────────────────────────
+                elif intent == "undo_last_expense":
+                    cat_filter = action.get("category")
+                    tx_col = db.collection("users").document(uid).collection("transactions")
+                    q = (
+                        tx_col
+                        .where("type", "==", "expense")
+                        .where("status", "==", "confirmed")
+                        .where("isDeleted", "==", False)
+                        .order_by("createdAt", direction="DESCENDING")
+                        .limit(5)
+                    )
+                    candidates = list(q.stream())
+                    target = None
+                    for doc in candidates:
+                        d = doc.to_dict()
+                        if cat_filter and d.get("category") != cat_filter:
+                            continue
+                        target = doc
+                        break
+                    if target:
+                        td = target.to_dict()
+                        t_amt = td.get("amount", 0)
+                        t_cat = td.get("category", "Unknown")
+                        target.reference.update({
+                            "isDeleted": True,
+                            "deletedAt": SERVER_TIMESTAMP,
+                            "updatedAt": SERVER_TIMESTAMP,
+                        })
+                        if t_cat:
+                            t_mk = td.get("monthKey", month_key)
+                            bud_docs = list(
+                                db.collection("users").document(uid).collection("budgets")
+                                .where("category", "==", t_cat)
+                                .where("monthKey", "==", t_mk)
+                                .limit(1)
+                                .stream()
+                            )
+                            if bud_docs:
+                                bud_docs[0].reference.update({
+                                    "spent": Increment(-float(t_amt)),
+                                    "updatedAt": SERVER_TIMESTAMP,
+                                })
+                        reply_parts.append(f"Rs {int(t_amt)} {t_cat} expense undo gareko chu")
+                        last_transaction = {
+                            "id": target.id, "amount": t_amt, "category": t_cat,
+                            "type": "expense", "status": "confirmed", "isDeleted": True,
+                        }
+                    else:
+                        reply_parts.append("Kei expense fela parena undo garna lai")
+
+                # ── GENERAL CHAT / GREETING ──────────────────────────────
+                else:
+                    pass
+
+            # ── Build final reply (same logic as POST /chat) ─────────────
+            if reply_parts:
+                has_expense = any(a.get("intent") in ("expense_log", "income_log") for a in actions)
+                has_budget = any(a.get("intent") == "set_budget" for a in actions)
+
+                if has_expense and has_budget:
+                    expense_parts = []
+                    budget_parts = []
+                    for a, rp in zip(actions, reply_parts):
+                        if a.get("intent") in ("expense_log", "income_log"):
+                            expense_parts.append(rp)
+                        elif a.get("intent") == "set_budget":
+                            budget_parts.append(rp)
+                    pieces = []
+                    if expense_parts:
+                        pieces.append(", ".join(expense_parts) + " ma save gareko chu")
+                    if budget_parts:
+                        pieces.append(" ra ".join(budget_parts) + " gareko chu")
+                    reply = " ra ".join(pieces) + " ✅"
+                elif has_expense:
+                    if len(reply_parts) > 1:
+                        reply = ", ".join(reply_parts) + " ma save gareko chu ✅"
+                    else:
+                        reply = reply_parts[0] + " ma save gareko chu ✅"
+                elif has_budget:
+                    reply = " ra ".join(reply_parts) + " gareko chu ✅"
+                else:
+                    reply = ". ".join(reply_parts) + "."
+            else:
+                reply = gemini_reply
+
+            # ── Save assistant message ───────────────────────────────────
+            assistant_msg_ref = messages_ref.document()
+            extracted = None
+            if primary_intent not in ("general_chat", "greeting"):
+                extracted = [
+                    {k: a.get(k) for k in ("intent", "amount", "category", "type", "limit", "monthKey")}
+                    for a in actions
+                ]
+            assistant_msg_ref.set({
+                "role": "assistant",
+                "content": reply,
+                "intent": primary_intent,
+                "extractedData": extracted,
+                "relatedTransactionId": last_transaction["id"] if last_transaction else None,
+                "clientTimestamp": client_ts_str,
+                "source": "offline_sync",
+                "createdAt": SERVER_TIMESTAMP,
+            })
+
+            print(f"[SYNC] [{idx+1}] DONE: intent={primary_intent} reply='{reply[:60]}...'")
+
+            results.append({
+                "clientTimestamp": client_ts_str,
+                "status": "processed",
+                "reply": reply,
+                "intent": primary_intent,
+                "transaction": last_transaction,
+                "budgetUpdate": last_budget_update,
+                "alerts": alerts_created,
+            })
+            total_processed += 1
+
+        except Exception as e:
+            print(f"[SYNC] [{idx+1}] ERROR: {e}")
+            results.append({
+                "clientTimestamp": client_ts_str,
+                "status": "error",
+                "reason": str(e),
+                "reply": None,
+                "intent": None,
+                "transaction": None,
+                "budgetUpdate": None,
+                "alerts": [],
+            })
+            total_skipped += 1
+
+    print(f"[SYNC] COMPLETE: processed={total_processed} skipped={total_skipped}")
+    print(f"{'='*60}\n")
+
+    return {
+        "success": True,
+        "data": {
+            "results": results,
+            "totalProcessed": total_processed,
+            "totalSkipped": total_skipped,
         },
     }
 
