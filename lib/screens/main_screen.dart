@@ -250,7 +250,18 @@ class _MainScreenState extends State<MainScreen> {
         unselectedItemColor: Colors.grey,
         backgroundColor: Colors.white,
         elevation: 8,
-        onTap: (i) => setState(() => _currentIndex = i),
+        onTap: (i) {
+          setState(() => _currentIndex = i);
+          // LIVE UPDATES SYNCHRONIZATION:
+          // When switching tabs, we trigger a real-time data refresh on the active screen
+          // to ensure that the monthly bar chart and financial summary cards are always
+          // perfectly in sync with the latest transaction/budget database records.
+          if (i == 0) {
+            _homeKey.currentState?.refresh();
+          } else if (i == 1) {
+            _categoriesKey.currentState?.refresh();
+          }
+        },
         items: const [
           BottomNavigationBarItem(
               icon: Icon(Icons.home_outlined),

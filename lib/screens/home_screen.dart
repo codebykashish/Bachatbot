@@ -563,9 +563,14 @@ class HomeScreenState extends State<HomeScreen> {
                       );
                     },
                     child: ReportChart(
+                      // SHARED COMPONENT REUSE:
+                      // We are reusing the exact same `ReportChart` widget used in `ReportsScreen`.
                       categoryBreakdown: _categoryBreakdown,
                       isCompact: false,
-                      useLineChart: true,
+                      // BAR GRAPH REPLACEMENT:
+                      // Changed from `useLineChart: true` to `useLineChart: false` (default)
+                      // to render the identical, modern bar graph as the Report Page.
+                      useLineChart: false,
                     ),
                   ),
 
