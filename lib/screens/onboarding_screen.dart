@@ -263,7 +263,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
           color: isSelected
-              ? const Color(0xFF2E7D32).withOpacity(0.08)
+              ? const Color(0xFF2E7D32).withValues(alpha: 0.08)
               : Colors.grey.shade50,
           border: Border.all(
             color: isSelected ? const Color(0xFF2E7D32) : Colors.grey.shade300,
