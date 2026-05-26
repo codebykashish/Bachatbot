@@ -15,7 +15,8 @@ class BalanceCard extends StatelessWidget {
   });
 
   String _formatAmount(double amount) {
-    return '\$${amount.toStringAsFixed(2)}';
+    if (hideAmounts) return 'Rs ****';
+    return 'Rs ${amount.toStringAsFixed(0)}';
   }
 
   @override
@@ -52,7 +53,7 @@ class BalanceCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    hideAmounts ? '••••••' : _formatAmount(currentBalance),
+                    _formatAmount(currentBalance),
                     style: Theme.of(context).textTheme.displaySmall?.copyWith(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -87,10 +88,66 @@ class BalanceCard extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 20),
-        // Spending and Income Cards Row
+        // Income and Expense Cards Row (swapped: Income LEFT, Expense RIGHT)
         Row(
           children: [
-            // Spending Card
+            // ── Income Card (LEFT) ──────────────────────────────────────
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.08),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1B8B8E).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.account_balance_wallet,
+                        color: Color(0xFF1B8B8E),
+                        size: 28,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Income this\nMonth',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF5A5A5A),
+                            fontWeight: FontWeight.w500,
+                            fontSize: 12,
+                            height: 1.4,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _formatAmount(incomeThisMonth),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: const Color(0xFF1B8B8E),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            // ── Expense Card (RIGHT) ────────────────────────────────────
             Expanded(
               child: Container(
                 padding: const EdgeInsets.all(18),
@@ -122,7 +179,7 @@ class BalanceCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 14),
                     Text(
-                      'Spending this\nMonth',
+                      'Expense this\nMonth',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: const Color(0xFF5A5A5A),
@@ -133,66 +190,10 @@ class BalanceCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      hideAmounts ? '••••••' : _formatAmount(spendingThisMonth),
+                      _formatAmount(spendingThisMonth),
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             color: const Color(0xFFD85E5E),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 16),
-            // Income Card
-            Expanded(
-              child: Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.08),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1B8B8E).withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.trending_up,
-                        color: Color(0xFF1B8B8E),
-                        size: 28,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      'Income this\nMonth',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFF5A5A5A),
-                            fontWeight: FontWeight.w500,
-                            fontSize: 12,
-                            height: 1.4,
-                          ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      hideAmounts ? '••••••' : _formatAmount(incomeThisMonth),
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: const Color(0xFF1B8B8E),
                             fontWeight: FontWeight.bold,
                             fontSize: 18,
                           ),

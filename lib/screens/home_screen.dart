@@ -210,7 +210,7 @@ class HomeScreenState extends State<HomeScreen> {
     return BalanceCard(
       currentBalance: _remainingIncome,
       spendingThisMonth: _totalExpense,
-      incomeThisMonth: _totalIncome,
+      incomeThisMonth: _totalIncome, // Changed: real income from /monthly-report
       hideAmounts: _hideAmounts,
     );
   }
