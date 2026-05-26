@@ -44,11 +44,9 @@ class HomeScreenState extends State<HomeScreen> {
     {'name': 'Health', 'icon': Icons.favorite, 'color': Color(0xFFEF5350)},
     {'name': 'Entertainment', 'icon': Icons.tv, 'color': Color(0xFF8D6E63)},
     {'name': 'Bills', 'icon': Icons.receipt_long, 'color': Color(0xFF78909C)},
-    {
-      'name': 'Salary',
-      'icon': Icons.account_balance_wallet,
-      'color': Color(0xFF66BB6A)
-    },
+    // SALARY CATEGORY REMOVED:
+    // Excluded from metadata here to keep the dashboard category carousel consistent
+    // with the main categories screen.
     {'name': 'Other', 'icon': Icons.category, 'color': Color(0xFFFFCA28)},
   ];
 
@@ -113,7 +111,14 @@ class HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       debugPrint('[HomeScreen] /budgets response keys: ${res.keys}');
       if (res['success'] == true) {
-        setState(() => _budgets = res['data']?['budgets'] ?? []);
+        final budgetsList = (res['data']?['budgets'] as List? ?? []);
+        setState(() {
+          // SALARY BUDGETS FILTERING:
+          // Exclude Salary budget items at the data-fetch layer so they do not impact total budget metrics.
+          _budgets = budgetsList
+              .where((b) => b['category']?.toString().toLowerCase() != 'salary')
+              .toList();
+        });
       }
     } catch (e) {
       debugPrint('[HomeScreen] /budgets error: $e');

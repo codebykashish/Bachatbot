@@ -25,7 +25,9 @@ class CategoriesScreenState extends State<CategoriesScreen> {
     {'name': 'Health',        'icon': Icons.favorite,          'color': Color(0xFFEF5350)},
     {'name': 'Entertainment', 'icon': Icons.tv,                'color': Color(0xFF8D6E63)},
     {'name': 'Bills',         'icon': Icons.receipt_long,      'color': Color(0xFF78909C)},
-    {'name': 'Salary',        'icon': Icons.account_balance_wallet, 'color': Color(0xFF66BB6A)},
+    // SALARY CATEGORY REMOVED:
+    // Salary category has been excluded from the metadata list to completely remove
+    // its card from all list views, grid alignments, and categories selector UI.
     {'name': 'Other',         'icon': Icons.category,          'color': Color(0xFFFFCA28)},
   ];
 
@@ -45,7 +47,18 @@ class CategoriesScreenState extends State<CategoriesScreen> {
       final monthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
       final res = await ApiService.get('/budgets?monthKey=$monthKey');
       if (!mounted) return;
-      if (res['success'] == true) setState(() => _budgets = res['data']?['budgets'] ?? []);
+      if (res['success'] == true) {
+        final budgetsList = (res['data']?['budgets'] as List? ?? []);
+        setState(() {
+          // SALARY DATA FILTERING:
+          // We filter out the 'Salary' category budget at the data layer. This guarantees
+          // that even if 'Salary' budget limits/spent data exists in the backend database,
+          // it will be excluded from all dashboard metric aggregations and budget lists.
+          _budgets = budgetsList
+              .where((b) => b['category']?.toString().toLowerCase() != 'salary')
+              .toList();
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -22,7 +22,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
   static const List<String> _categories = [
     'All', 'Food', 'Transport', 'Rent', 'Education',
-    'Shopping', 'Health', 'Entertainment', 'Bills', 'Salary', 'Other',
+    'Shopping', 'Health', 'Entertainment', 'Bills', 'Other',
   ];
 
   static const List<String> _dateFilters = ['All', 'Today', 'This Week', 'This Month'];
