@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 import '../api_service.dart';
 import 'notification_screen.dart';
 
@@ -29,6 +32,13 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isLoading = false;
   bool _isHistoryLoaded = false;
 
+  // OFFLINE SYNC SYSTEM:
+  // _chatSubscription listens to the Firestore message snapshots in real time.
+  // _myPendingSentMessageIds keeps track of messages sent locally in this session while offline,
+  // so we can automatically sync them to the REST chatbot API the moment connection is restored.
+  StreamSubscription<QuerySnapshot>? _chatSubscription;
+  final Set<String> _myPendingSentMessageIds = {};
+
   static const Color _primary = Color(0xFF2DBE7F);
   static const Color _pageBg = Color(0xFFF6F7F9);
 
@@ -57,51 +67,129 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _controller.dispose();
     _scrollController.dispose();
+    _chatSubscription?.cancel(); // Cancel active Firestore snapshot subscription
     super.dispose();
   }
 
   Future<void> _loadHistory() async {
     try {
+      // 1. Fetch historical messages from the REST API backend
       final response = await ApiService.get('/messages?limit=50');
       if (!mounted) return;
 
       final msgs = response['data']?['messages'] as List? ?? [];
       final reversed = msgs.reversed.toList();
 
+      // 2. Cache historical messages to Firestore so they are immediately available offline
+      final userId = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
+      final messagesColl = FirebaseFirestore.instance
+          .collection('chats')
+          .doc(userId)
+          .collection('messages');
+
+      // Retrieve cached local documents first to avoid duplicates
+      final existingDocs = await messagesColl.get(const GetOptions(source: Source.cache)).catchError((_) => messagesColl.get());
+      final existingContents = existingDocs.docs.map((d) => d.data()['content'] as String?).toSet();
+
+      final batch = FirebaseFirestore.instance.batch();
+      int count = 0;
+
+      for (final msg in reversed) {
+        final content = msg['content'] as String?;
+        if (content != null && !existingContents.contains(content)) {
+          final newDocRef = messagesColl.doc();
+          batch.set(newDocRef, {
+            'role': msg['role'],
+            'content': content,
+            'intent': msg['intent'] ?? 'general_chat',
+            'timestamp': msg['createdAt'] != null
+                ? Timestamp.fromDate(DateTime.parse(msg['createdAt']))
+                : FieldValue.serverTimestamp(),
+          });
+          count++;
+        }
+      }
+
+      if (count > 0) {
+        await batch.commit();
+      }
+    } catch (e) {
+      debugPrint('[ChatScreen] REST API history load failed (offline/network failure): $e');
+    } finally {
+      // 3. Fall back to listening to persistent Firestore cache snapshots reactively
+      _listenToMessages();
+    }
+  }
+
+  /// Real-time listener for Firestore messages. Handles pending statuses and triggers re-sync.
+  void _listenToMessages() {
+    final userId = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
+    final messagesColl = FirebaseFirestore.instance
+        .collection('chats')
+        .doc(userId)
+        .collection('messages');
+
+    _chatSubscription?.cancel();
+    _chatSubscription = messagesColl
+        .orderBy('timestamp', descending: false)
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+
+      final docs = snapshot.docs.toList();
+      // Sort in-memory to place pending writes with null server timestamps chronologically at the bottom
+      docs.sort((a, b) {
+        final aData = a.data();
+        final bData = b.data();
+        final aTime = aData['timestamp'] as Timestamp?;
+        final bTime = bData['timestamp'] as Timestamp?;
+        if (aTime == null && bTime == null) return 0;
+        if (aTime == null) return 1;
+        if (bTime == null) return -1;
+        return aTime.compareTo(bTime);
+      });
+
       setState(() {
         _messages.clear();
-        for (final msg in reversed) {
+        for (final doc in docs) {
+          final data = doc.data();
+          final docId = doc.id;
+          final isPending = doc.metadata.hasPendingWrites;
+
           _messages.add({
-            'role': msg['role'],
-            'content': msg['content'],
-            'intent': msg['intent'],
+            'role': data['role'],
+            'content': data['content'],
+            'intent': data['intent'] ?? 'general_chat',
+            'isPending': isPending,
+            'id': docId,
           });
+
+          // OFFLINE AUTOMATIC RE-SYNC TO CHATBOT BACKEND:
+          // When a message sent while offline transitions from pending (metadata.hasPendingWrites == true)
+          // to synced (metadata.hasPendingWrites == false), we trigger the REST chatbot endpoint call to get replies.
+          if (data['role'] == 'user' && !isPending && _myPendingSentMessageIds.contains(docId)) {
+            _myPendingSentMessageIds.remove(docId);
+            _sendOfflineMessageToChatbot(data['content'] ?? '', docId, messagesColl);
+          }
         }
         _isHistoryLoaded = true;
       });
 
       _scrollToBottom();
-    } catch (e) {
+    }, onError: (e) {
+      debugPrint('[ChatScreen] Firestore snapshots error: $e');
       setState(() => _isHistoryLoaded = true);
-    }
+    });
   }
 
-  Future<void> _send() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty || _isLoading) return;
-
-    _controller.clear();
-    setState(() {
-      _messages.add({'role': 'user', 'content': text});
-      _isLoading = true;
-    });
-
-    _scrollToBottom();
-
+  /// REST api callback for auto-syncing messages sent while offline
+  Future<void> _sendOfflineMessageToChatbot(String text, String docId, CollectionReference messagesColl) async {
     try {
       final response = await ApiService.post('/chat', {
         'message': text,
         'source': 'chat',
+        'transaction_id': docId,
+        'uuid': docId,
       });
 
       if (!mounted) return;
@@ -111,37 +199,111 @@ class _ChatScreenState extends State<ChatScreen> {
       final intent = data?['intent'] ?? 'general_chat';
       final alerts = data?['alerts'] as List?;
 
+      // Write assistant response to Firestore
+      await messagesColl.add({
+        'role': 'assistant',
+        'content': reply,
+        'intent': intent,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      // Update badge if alerts were returned
+      if (alerts != null && alerts.isNotEmpty) {
+        NotificationScreen.unreadCount.value += alerts.length;
+      }
+
+      _triggerRefreshForIntent(intent);
+      ChatScreen.messageSent = true;
+      _scrollToBottom();
+    } catch (e) {
+      debugPrint('[ChatScreen] Failed to send synced message to chatbot: $e');
+    }
+  }
+
+  Future<void> _send() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty || _isLoading) return;
+
+    _controller.clear();
+
+    final userId = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
+    final messagesColl = FirebaseFirestore.instance
+        .collection('chats')
+        .doc(userId)
+        .collection('messages');
+
+    // Generate a new document reference with a unique ID
+    final userDocRef = messagesColl.doc();
+    final docId = userDocRef.id;
+
+    // 1. Immediately write to Firestore (local cache handles queuing and UI updates)
+    await userDocRef.set({
+      'role': 'user',
+      'content': text,
+      'intent': 'general_chat',
+      'timestamp': FieldValue.serverTimestamp(),
+      'transaction_id': docId,
+      'uuid': docId,
+    });
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    _scrollToBottom();
+
+    try {
+      // 2. Call the REST API to get the reply (will fail immediately if offline)
+      final response = await ApiService.post('/chat', {
+        'message': text,
+        'source': 'chat',
+        'transaction_id': docId,
+        'uuid': docId,
+      });
+
+      if (!mounted) return;
+
+      final data = response['data'];
+      final reply = data?['reply'] ?? 'Sorry, I could not understand that.';
+      final intent = data?['intent'] ?? 'general_chat';
+      final alerts = data?['alerts'] as List?;
+
+      // Write assistant reply directly to Firestore
+      final assistantDocRef = messagesColl.doc();
+      await assistantDocRef.set({
+        'role': 'assistant',
+        'content': reply,
+        'intent': intent,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
       setState(() {
-        _messages.add({
-          'role': 'assistant',
-          'content': reply,
-          'intent': intent,
-        });
         _isLoading = false;
       });
 
-      // Update notification badge if alerts were returned
+      // Update badge if alerts were returned
       if (alerts != null && alerts.isNotEmpty) {
         NotificationScreen.unreadCount.value += alerts.length;
       }
 
       // Trigger intent-based refresh
       _triggerRefreshForIntent(intent);
-
-      ChatScreen.messageSent = true; // flag so MainScreen refreshes on pop
+      ChatScreen.messageSent = true;
       _scrollToBottom();
     } catch (e) {
+      debugPrint('[ChatScreen] API call error (expected if offline): $e');
       if (!mounted) return;
 
+      // Track this locally as a pending write from this session for offline sync
+      _myPendingSentMessageIds.add(docId);
+
       setState(() {
-        _messages.add({
-          'role': 'assistant',
-          'content': 'Something went wrong.',
-        });
         _isLoading = false;
       });
-
       _scrollToBottom();
+      // NOTE: We do not add a "Something went wrong" message here.
+      // Since we are offline, the user message remains pending in the UI
+      // and will sync and receive a response once connection is restored!
     }
   }
 
@@ -279,9 +441,10 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildMessageBubble(Map<String, dynamic> msg, {required String time}) {
     final isUser = msg['role'] == 'user';
     final content = (msg['content'] ?? '').toString();
+    final isPending = msg['isPending'] == true;
 
     if (isUser) {
-      return _userBubble(content: content, time: time);
+      return _userBubble(content: content, time: time, isPending: isPending);
     }
     return _assistantBubble(content: content, time: time);
   }
@@ -355,7 +518,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _userBubble({required String content, required String time}) {
+  Widget _userBubble({required String content, required String time, bool isPending = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
@@ -401,7 +564,15 @@ class _ChatScreenState extends State<ChatScreen> {
                           const TextStyle(fontSize: 10.5, color: Colors.grey),
                     ),
                     const SizedBox(width: 6),
-                    const Icon(Icons.done_all, size: 14, color: Colors.grey),
+                    // PENDING STATUS RENDERING:
+                    // We render a clock indicator if Firestore is still queuing the write locally.
+                    // Once connection is restored and Firestore completes the remote write,
+                    // doc.metadata.hasPendingWrites becomes false, instantly switching this icon to a double checkmark!
+                    Icon(
+                      isPending ? Icons.access_time_rounded : Icons.done_all,
+                      size: 14,
+                      color: Colors.grey,
+                    ),
                   ],
                 ),
               ],
