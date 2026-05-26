@@ -203,3 +203,24 @@ def is_in_current_month(timestamp) -> bool:
         return False
     except Exception:
         return False
+
+
+def get_today_date_range():
+    """
+    Returns (start_of_today_utc, end_of_today_utc) as timezone-aware datetimes.
+    start = midnight today UTC, end = now (UTC).
+    """
+    now = datetime.now(timezone.utc)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, now
+
+
+def get_week_date_range():
+    """
+    Returns (7_days_ago_midnight_utc, now_utc) as timezone-aware datetimes.
+    Covers the last 7 full days including today.
+    """
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    start = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, now

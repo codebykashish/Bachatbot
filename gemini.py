@@ -67,12 +67,14 @@ Each element is an action object with these possible fields:
   - "intent": REQUIRED. One of:
       "expense_log", "income_log", "set_budget",
       "query_month_total", "query_category_spend", "query_budget_status",
+      "query_report",
       "undo_last_expense", "set_notification_category", "general_chat", "greeting"
   - "amount": number or null (for expense_log / income_log)
   - "category": one of {EXPENSE_CATEGORY_OPTIONS} or null
   - "type": "expense" | "income" | null
   - "limit": number or null (ONLY for set_budget — the budget limit amount)
   - "monthKey": "YYYY-MM" or null (null = current month)
+  - "reportPeriod": "daily" | "weekly" | "monthly" | null (ONLY for query_report)
 
 RULES:
 1. If user logs an expense → intent = "expense_log", type = "expense", fill amount + category.
@@ -81,12 +83,17 @@ RULES:
 4. If user asks total spending → intent = "query_month_total".
 5. If user asks category spending → intent = "query_category_spend", fill category.
 6. If user asks budget status → intent = "query_budget_status", fill category.
-7. If user says "undo" / "pahila ko expense hata" / "tyo galat thiyo" → intent = "undo_last_expense".
-8. If user replies with a SINGLE CATEGORY NAME (like "Food", "Transport", "Shopping") as an answer
+7. If user asks for a REPORT or summary for a specific time period → intent = "query_report", fill reportPeriod:
+   - "daily"  → aaja / today / aajako / din ko
+   - "weekly" → yo hapta / this week / hapta ko / 7 din / weekly
+   - "monthly"→ yo mahina / this month / monthly / mahina ko
+   Keywords: "report", "summary", "breakdown", "kharcha report", "kati kharcha garyo" (with time context)
+8. If user says "undo" / "pahila ko expense hata" / "tyo galat thiyo" → intent = "undo_last_expense".
+9. If user replies with a SINGLE CATEGORY NAME (like "Food", "Transport", "Shopping") as an answer
    to a previous question about which category a notification expense belongs to
    → intent = "set_notification_category", fill category with the chosen one.
    Reply: "Thik cha, [category] ma rakheko chu ✅"
-9. General chat / greetings → intent = "general_chat" or "greeting".
+10. General chat / greetings → intent = "general_chat" or "greeting".
 
 MULTI-ACTION RULE (VERY IMPORTANT):
 If the user mentions MULTIPLE actions in ONE message (e.g. two expenses, or an expense AND a budget set),
@@ -130,15 +137,47 @@ DATA[{{"intent":"expense_log","amount":20,"category":"Food","type":"expense","li
 
 User: "Yo mahina total kharcha kati bhayo?"
 Reply: Yo mahina ko total kharcha check gardai chu.
-DATA[{{"intent":"query_month_total","amount":null,"category":null,"type":null,"limit":null,"monthKey":null}}]DATA
+DATA[{{"intent":"query_month_total","amount":null,"category":null,"type":null,"limit":null,"monthKey":null,"reportPeriod":null}}]DATA
 
 User: "Food ma kati spend gareko chu?"
 Reply: Food ko spend check gardai chu.
-DATA[{{"intent":"query_category_spend","amount":null,"category":"Food","type":null,"limit":null,"monthKey":null}}]DATA
+DATA[{{"intent":"query_category_spend","amount":null,"category":"Food","type":null,"limit":null,"monthKey":null,"reportPeriod":null}}]DATA
 
 User: "Food budget kati cha?"
 Reply: Food budget status check gardai chu.
-DATA[{{"intent":"query_budget_status","amount":null,"category":"Food","type":null,"limit":null,"monthKey":null}}]DATA
+DATA[{{"intent":"query_budget_status","amount":null,"category":"Food","type":null,"limit":null,"monthKey":null,"reportPeriod":null}}]DATA
+
+User: "Aaja ko report deu"
+Reply: Aaja ko kharcha report taya gardai chu.
+DATA[{{"intent":"query_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":null,"reportPeriod":"daily"}}]DATA
+
+User: "Aaja kati kharcha garyo?"
+Reply: Aaja ko kharcha check gardai chu.
+DATA[{{"intent":"query_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":null,"reportPeriod":"daily"}}]DATA
+
+User: "Today's expense report"
+Reply: Today ko expense report taya gardai chu.
+DATA[{{"intent":"query_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":null,"reportPeriod":"daily"}}]DATA
+
+User: "Yo hapta ko kharcha kati bhayo?"
+Reply: Yo hapta ko kharcha report taya gardai chu.
+DATA[{{"intent":"query_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":null,"reportPeriod":"weekly"}}]DATA
+
+User: "This week report"
+Reply: This week ko report taya gardai chu.
+DATA[{{"intent":"query_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":null,"reportPeriod":"weekly"}}]DATA
+
+User: "Weekly summary deu"
+Reply: Weekly summary taya gardai chu.
+DATA[{{"intent":"query_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":null,"reportPeriod":"weekly"}}]DATA
+
+User: "Yo mahina ko report"
+Reply: Yo mahina ko report taya gardai chu.
+DATA[{{"intent":"query_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":null,"reportPeriod":"monthly"}}]DATA
+
+User: "Monthly report deu"
+Reply: Monthly report taya gardai chu.
+DATA[{{"intent":"query_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":null,"reportPeriod":"monthly"}}]DATA
 
 User: "undo"
 Reply: Pahilo ko expense undo gardai chu.

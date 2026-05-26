@@ -6,6 +6,8 @@ from schemas.categories import EXPENSE_CATEGORIES
 from utils import (
     get_current_month_key, serialize_doc,
     sum_month_expense, sum_category_expense, fetch_budget,
+    get_today_date_range, get_week_date_range,
+    sum_month_income, is_today,
 )
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment
 from typing import Optional
@@ -545,6 +547,126 @@ async def chat(
             total = sum_month_expense(db, uid, month_key)
             reply_parts.append(f"Yo mahina total kharcha Rs {int(total)} cha")
             print(f"[CHAT] query_month_total: Rs {total}")
+
+        # ── QUERY REPORT (daily / weekly / monthly) ──────────────────────
+        elif intent == "query_report":
+            report_period = (action.get("reportPeriod") or "monthly").strip().lower()
+            print(f"[CHAT] query_report: period={report_period}")
+
+            # Fetch all confirmed, non-deleted transactions for this month
+            tx_docs = list(
+                db.collection("users").document(uid).collection("transactions")
+                .where("monthKey", "==", month_key)
+                .where("status", "==", "confirmed")
+                .stream()
+            )
+
+            r_expense = 0.0
+            r_income = 0.0
+            r_categories = {}
+
+            if report_period == "daily":
+                day_start, day_end = get_today_date_range()
+                for doc in tx_docs:
+                    data = doc.to_dict()
+                    if data.get("isDeleted", False):
+                        continue
+                    created_at = data.get("createdAt")
+                    if not is_today(created_at):
+                        continue
+                    amount = data.get("amount", 0.0)
+                    tx_type = data.get("type", "")
+                    category = data.get("category")
+                    if tx_type == "expense":
+                        r_expense += amount
+                        if category:
+                            r_categories[category] = r_categories.get(category, 0.0) + amount
+                    elif tx_type == "income":
+                        r_income += amount
+
+                # Build reply
+                cat_parts = ", ".join(f"{c}: Rs {int(v)}" for c, v in sorted(r_categories.items(), key=lambda x: -x[1]))
+                if r_expense > 0 and cat_parts:
+                    reply_parts.append(
+                        f"Aaja ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income. {cat_parts}"
+                    )
+                elif r_expense > 0:
+                    reply_parts.append(
+                        f"Aaja ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income"
+                    )
+                else:
+                    reply_parts.append("Aaja kei kharcha bhayena")
+
+            elif report_period == "weekly":
+                week_start, week_end = get_week_date_range()
+                for doc in tx_docs:
+                    data = doc.to_dict()
+                    if data.get("isDeleted", False):
+                        continue
+                    created_at = data.get("createdAt")
+                    # Filter to last 7 days
+                    if created_at:
+                        try:
+                            ts = created_at if (hasattr(created_at, 'tzinfo') and created_at.tzinfo) else created_at.replace(tzinfo=__import__('datetime').timezone.utc)
+                            if ts < week_start:
+                                continue
+                        except Exception:
+                            pass  # include if we can't determine date
+                    else:
+                        continue
+                    amount = data.get("amount", 0.0)
+                    tx_type = data.get("type", "")
+                    category = data.get("category")
+                    if tx_type == "expense":
+                        r_expense += amount
+                        if category:
+                            r_categories[category] = r_categories.get(category, 0.0) + amount
+                    elif tx_type == "income":
+                        r_income += amount
+
+                # Build reply
+                cat_parts = ", ".join(f"{c}: Rs {int(v)}" for c, v in sorted(r_categories.items(), key=lambda x: -x[1]))
+                if r_expense > 0 and cat_parts:
+                    reply_parts.append(
+                        f"Yo hapta ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income. {cat_parts}"
+                    )
+                elif r_expense > 0:
+                    reply_parts.append(
+                        f"Yo hapta ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income"
+                    )
+                else:
+                    reply_parts.append("Yo hapta ma kei kharcha bhayena")
+
+            else:
+                # monthly (default)
+                for doc in tx_docs:
+                    data = doc.to_dict()
+                    if data.get("isDeleted", False):
+                        continue
+                    amount = data.get("amount", 0.0)
+                    tx_type = data.get("type", "")
+                    category = data.get("category")
+                    if tx_type == "expense":
+                        r_expense += amount
+                        if category:
+                            r_categories[category] = r_categories.get(category, 0.0) + amount
+                    elif tx_type == "income":
+                        r_income += amount
+
+                net_savings = r_income - r_expense
+                cat_parts = ", ".join(f"{c}: Rs {int(v)}" for c, v in sorted(r_categories.items(), key=lambda x: -x[1]))
+                if r_expense > 0 and cat_parts:
+                    reply_parts.append(
+                        f"Yo mahina ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income. Net savings: Rs {int(net_savings)}. {cat_parts}"
+                    )
+                elif r_expense > 0:
+                    reply_parts.append(
+                        f"Yo mahina ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income. Net savings: Rs {int(net_savings)}"
+                    )
+                else:
+                    reply_parts.append("Yo mahina ma kei kharcha bhayena")
+
+            print(f"[CHAT] query_report result: expense={r_expense} income={r_income} cats={list(r_categories.keys())}")
 
         # ── QUERY CATEGORY SPEND ─────────────────────────────────────────
         elif intent == "query_category_spend" and action.get("category"):
