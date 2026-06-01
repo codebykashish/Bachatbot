@@ -329,6 +329,111 @@ async def chat(
         "createdAt": SERVER_TIMESTAMP,
     })
 
+    # ── Conversational Confirmation Check ────────────────────────────────
+    from utils import is_affirmative, is_denial
+    
+    pending_ref = db.collection("users").document(uid).collection("pendingAction").document("current")
+    pending_doc = pending_ref.get()
+    
+    if pending_doc.exists and source != "notification":
+        pending = pending_doc.to_dict()
+        text_lower = user_message.lower().strip()
+        
+        if is_affirmative(text_lower):
+            # COMMIT: process all pending actions
+            last_transaction = None
+            last_budget_update = None
+            alerts_created = []
+            reply_parts = []
+            
+            actions = pending.get("actions", [])
+            month_key = pending.get("monthKey") or get_current_month_key()
+            idempotency_key = pending.get("idempotencyKey")
+            pending_source = pending.get("source", "chat")
+            
+            for action in actions:
+                txn, bud, alt, rp = _handle_expense_or_income(
+                    db, uid, action, pending_source, month_key,
+                    idempotency_key=idempotency_key,
+                )
+                last_transaction = txn
+                if bud:
+                    last_budget_update = bud
+                if alt:
+                    alerts_created.append(alt)
+                reply_parts.append(rp)
+                
+            pending_ref.delete()
+            
+            # Save assistant message
+            assistant_msg_ref = messages_ref.document()
+            primary_intent = "confirm_expense"
+            
+            # Synthesize combined reply
+            if len(reply_parts) > 1:
+                reply = ", ".join(reply_parts) + " ma save gareko chu ✅"
+            elif reply_parts:
+                reply = reply_parts[0] + " ma save gareko chu ✅"
+            else:
+                reply = "Kharcha save gareko chu ✅"
+                
+            assistant_msg_ref.set({
+                "role": "assistant",
+                "content": reply,
+                "intent": primary_intent,
+                "extractedData": [
+                    {k: a.get(k) for k in ("intent", "amount", "category", "type", "limit", "monthKey")}
+                    for a in actions
+                ],
+                "relatedTransactionId": last_transaction["id"] if last_transaction else None,
+                "createdAt": SERVER_TIMESTAMP,
+            })
+            
+            return {
+                "success": True,
+                "data": {
+                    "reply": reply,
+                    "intent": primary_intent,
+                    "needsConfirmation": False,
+                    "transaction": last_transaction,
+                    "budgetUpdate": last_budget_update,
+                    "alerts": alerts_created,
+                },
+            }
+            
+        elif is_denial(text_lower):
+            # DISCARD
+            pending_ref.delete()
+            reply = "Thik cha, cancel gareko chu."
+            
+            # Save assistant message
+            assistant_msg_ref = messages_ref.document()
+            assistant_msg_ref.set({
+                "role": "assistant",
+                "content": reply,
+                "intent": "confirm_expense",
+                "extractedData": None,
+                "relatedTransactionId": None,
+                "createdAt": SERVER_TIMESTAMP,
+            })
+            
+            return {
+                "success": True,
+                "data": {
+                    "reply": reply,
+                    "intent": "confirm_expense",
+                    "needsConfirmation": False,
+                    "transaction": None,
+                    "budgetUpdate": None,
+                    "alerts": [],
+                },
+            }
+            
+        else:
+            # User ignored the confirmation and sent a new message -> discard pending action and continue
+            pending_ref.delete()
+            print("[CHAT] Pending action discarded due to new unrelated user message.")
+
     # ════════════════════════════════════════════════════════════════════
     # NOTIFICATION BRANCH — source == "notification"
     # Creates a PENDING transaction + notification doc.
@@ -516,6 +621,7 @@ async def chat(
     alerts_created = []
     reply_parts = []           # pieces like "Rs 150 Food", "Transport budget Rs 5000 set"
     primary_intent = actions[0].get("intent", "general_chat") if actions else "general_chat"
+    pending_actions = []
 
     # ── Process each action ──────────────────────────────────────────────
     for action in actions:
@@ -525,16 +631,21 @@ async def chat(
 
         # ── EXPENSE / INCOME ─────────────────────────────────────────────
         if intent in ("expense_log", "income_log") and action.get("amount"):
-            txn, bud, alt, rp = _handle_expense_or_income(
-                db, uid, action, source, month_key,
-                idempotency_key=idempotency_key,
-            )
-            last_transaction = txn
-            if bud:
-                last_budget_update = bud
-            if alt:
-                alerts_created.append(alt)
-            reply_parts.append(rp)
+            pending_actions.append(action)
+            # Build partial reply for verification question later
+            amt_val = int(float(action["amount"]))
+            cat_val = action.get("category") or "Income"
+            if intent == "expense_log":
+                if cat_val == "Rent":
+                    reply_parts.append(f"Rs {amt_val} Rent bhada ma")
+                elif cat_val == "Food":
+                    reply_parts.append(f"Rs {amt_val} Food ma")
+                elif cat_val == "Transport":
+                    reply_parts.append(f"Rs {amt_val} Transport ma")
+                else:
+                    reply_parts.append(f"Rs {amt_val} {cat_val} ma")
+            else:
+                reply_parts.append(f"Rs {amt_val} income")
 
         # ── SET NOTIFICATION CATEGORY ────────────────────────────────────
         elif intent == "set_notification_category" and action.get("category"):
@@ -872,6 +983,79 @@ async def chat(
         else:
             print(f"[CHAT] General/greeting — no DB writes")
 
+    # ── Conversational Confirmation Holding ──────────────────────────────
+    if pending_actions:
+        pending_ref = db.collection("users").document(uid).collection("pendingAction").document("current")
+        pending_ref.set({
+            "actions": pending_actions,
+            "source": source,
+            "monthKey": month_key,
+            "idempotencyKey": idempotency_key,
+            "createdAt": SERVER_TIMESTAMP,
+        })
+        
+        # Build bilingual question: e.g. "Rs 250 Food ma?" or "Rs 250 Food ma ra Rs 20 Transport ma?"
+        question_parts = []
+        for a in pending_actions:
+            amt = int(float(a["amount"]))
+            cat = a.get("category") or "Income"
+            
+            # Find a nice short label from user message
+            label = cat
+            words = [w.strip("?.!,") for w in user_message.lower().split()]
+            for word in words:
+                # Ignore numbers, amount itself, common verbs and prepositions
+                if (word not in ("spent", "khaye", "gayo", "diye", "aayo", "on", "in", "for", "yo", "ma", "ra", "le", "ko", "bata", "maile", "spent", "paid")
+                    and not word.isdigit()
+                    and len(word) >= 3):
+                    label = word
+                    break
+                    
+            if a.get("intent") == "expense_log":
+                question_parts.append(f"{amt} {label} ma")
+            else:
+                question_parts.append(f"{amt} {label}")
+                
+        question = " ra ".join(question_parts) + "?"
+        
+        # If there are other non-expense actions in the same message, we append their replies before the question
+        other_reply_parts = []
+        for a, rp in zip(actions, reply_parts):
+            if a.get("intent") not in ("expense_log", "income_log"):
+                other_reply_parts.append(rp)
+                
+        final_reply = question
+        if other_reply_parts:
+            final_reply = ". ".join(other_reply_parts) + ". " + question
+            
+        # Save assistant message
+        assistant_msg_ref = messages_ref.document()
+        assistant_msg_ref.set({
+            "role": "assistant",
+            "content": final_reply,
+            "intent": "confirm_expense_ask",
+            "extractedData": [
+                {k: a.get(k) for k in ("intent", "amount", "category", "type", "limit", "monthKey")}
+                for a in pending_actions
+            ],
+            "relatedTransactionId": None,
+            "createdAt": SERVER_TIMESTAMP,
+        })
+        
+        print(f"[CHAT] Stored pendingAction. Question: {final_reply}")
+        
+        return {
+            "success": True,
+            "data": {
+                "reply": final_reply,
+                "intent": "confirm_expense_ask",
+                "needsConfirmation": True,
+                "transaction": None,
+                "budgetUpdate": None,
+                "alerts": [],
+            },
+        }
+
     # ── Build final reply ────────────────────────────────────────────────
     if reply_parts:
         # Synthesize a combined reply from the action parts
@@ -1152,16 +1336,86 @@ async def chat_sync(
 
                 # ── EXPENSE / INCOME ─────────────────────────────────────
                 if intent in ("expense_log", "income_log") and action.get("amount"):
-                    txn, bud, alt, rp = _handle_expense_or_income(
-                        db, uid, action, source, month_key,
-                        idempotency_key=sync_idempotency_key,
-                    )
-                    last_transaction = txn
-                    if bud:
-                        last_budget_update = bud
-                    if alt:
-                        alerts_created.append(alt)
-                    reply_parts.append(rp)
+                    amount_val = float(action["amount"])
+                    category_val = action.get("category")
+                    tx_type_val = action.get("type", "expense")
+                    description_val = action.get("description", "")
+                    
+                    # ── Idempotency check ────────────────────────────────
+                    existing_tx = None
+                    if sync_idempotency_key:
+                        try:
+                            existing_docs = list(
+                                db.collection("users").document(uid)
+                                .collection("transactions")
+                                .where("idempotencyKey", "==", sync_idempotency_key)
+                                .limit(1)
+                                .stream()
+                            )
+                            if existing_docs:
+                                existing_tx = existing_docs[0]
+                                print(f"[SYNC] Idempotency hit: key={sync_idempotency_key} tx={existing_tx.id}")
+                        except Exception as e:
+                            print(f"[SYNC] Idempotency check failed: {e}")
+                            
+                    if existing_tx:
+                        ed = existing_tx.to_dict()
+                        last_transaction = {
+                            "id": existing_tx.id,
+                            "amount": ed.get("amount", amount_val),
+                            "category": ed.get("category", category_val),
+                            "type": ed.get("type", tx_type_val),
+                            "status": ed.get("status", "pending"),
+                            "source": ed.get("source", "offline_sync"),
+                            "description": ed.get("description", description_val),
+                            "monthKey": ed.get("monthKey", month_key),
+                            "isDeleted": ed.get("isDeleted", False),
+                            "deletedAt": None,
+                            "originalMessageId": None,
+                            "deduplicated": True,
+                        }
+                    else:
+                        # Create PENDING transaction
+                        tx_ref = (
+                            db.collection("users").document(uid)
+                            .collection("transactions").document()
+                        )
+                        tx_data = {
+                            "amount": amount_val,
+                            "category": category_val,
+                            "type": tx_type_val,
+                            "status": "pending",
+                            "source": "offline_sync",
+                            "description": description_val,
+                            "monthKey": month_key,
+                            "isDeleted": False,
+                            "deletedAt": None,
+                            "originalMessageId": None,
+                            "createdAt": SERVER_TIMESTAMP,
+                            "updatedAt": SERVER_TIMESTAMP,
+                        }
+                        if sync_idempotency_key:
+                            tx_data["idempotencyKey"] = sync_idempotency_key
+                        tx_ref.set(tx_data)
+                        
+                        last_transaction = {
+                            "id": tx_ref.id,
+                            "amount": amount_val,
+                            "category": category_val,
+                            "type": tx_type_val,
+                            "status": "pending",
+                            "source": "offline_sync",
+                            "description": description_val,
+                            "monthKey": month_key,
+                            "isDeleted": False,
+                            "deletedAt": None,
+                            "originalMessageId": None,
+                        }
+                        print(f"[SYNC] Pending transaction created: id={tx_ref.id} Rs {amount_val}")
+                        
+                    # Build reply part
+                    cat_disp = category_val or "Income"
+                    reply_parts.append(f"Rs {int(amount_val)} {cat_disp}")
 
                 # ── SET NOTIFICATION CATEGORY ────────────────────────────
                 elif intent == "set_notification_category" and action.get("category"):
@@ -1455,9 +1709,9 @@ async def chat_sync(
                     reply = " ra ".join(pieces) + " ✅"
                 elif has_expense:
                     if len(reply_parts) > 1:
-                        reply = ", ".join(reply_parts) + " ma save gareko chu ✅"
+                        reply = "Confirm garnuhos: " + ", ".join(reply_parts)
                     else:
-                        reply = reply_parts[0] + " ma save gareko chu ✅"
+                        reply = "Confirm garnuhos: " + reply_parts[0]
                 elif has_budget:
                     reply = " ra ".join(reply_parts) + " gareko chu ✅"
                 else:
@@ -1491,6 +1745,7 @@ async def chat_sync(
                 "status": "processed",
                 "reply": reply,
                 "intent": primary_intent,
+                "needsConfirmation": has_expense,
                 "transaction": last_transaction,
                 "budgetUpdate": last_budget_update,
                 "alerts": alerts_created,

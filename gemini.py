@@ -109,13 +109,14 @@ Each element in the array is an action object with possible fields:
       "query_month_total", "query_category_spend", "query_budget_status",
       "query_past_report",
       "undo_last_expense", "set_notification_category",
-      "general_chat", "greeting"
+      "confirm_expense", "general_chat", "greeting"
   - "amount": number or null            (for expense_log / income_log)
   - "category": one of {EXPENSE_CATEGORY_OPTIONS} or null
   - "type": "expense" | "income" | null
   - "limit": number or null            (ONLY for set_budget — the budget limit amount)
   - "monthKey": "YYYY-MM" or null      (null = current month)
   - "reportPeriod": "daily" | "weekly" | "monthly" | null (ONLY for query_report)
+  - "confirmed": boolean or null       (ONLY for confirm_expense — true/false)
 
 You NEVER include extra keys.
 
@@ -180,6 +181,11 @@ You NEVER include extra keys.
    - If a category is mentioned (e.g. "last month Food kati kharcha?"), fill category too.
    - This is different from query_month_total: query_past_report gives a FULL
      summary (income + expense + category breakdown + net savings).
+
+12) confirm_expense:
+   - When previous assistant message asked a confirmation question (like "Rs 250 Food ma?") and the user responds with an affirmative ("yes", "um", "ho", "confirm") or denial ("no", "nai", "cancel").
+   - Fill: intent="confirm_expense", confirmed=true (for yes/affirmative) or false (for no/denial).
+
 
 ──────── 4. MULTI-ACTION RULE (IMPORTANT) ────────
 
@@ -321,6 +327,20 @@ User: "Previous month ma total kati kharcha bhayo?"
 Reply: Previous month ko total kharcha herera bhanchu.
 DATA[
   {{"intent":"query_past_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":"2026-05"}}
+]DATA
+
+User: "yes"
+(when assistant previously asked "Rs 250 Food ma?")
+Reply: Rs 250 Food ma save gareko chu ✅
+DATA[
+  {{"intent":"confirm_expense","confirmed":true,"amount":null,"category":null,"type":null,"limit":null,"monthKey":null}}
+]DATA
+
+User: "nai"
+(when assistant previously asked "Rs 250 Food ma?")
+Reply: Thik cha, cancel gareko chu.
+DATA[
+  {{"intent":"confirm_expense","confirmed":false,"amount":null,"category":null,"type":null,"limit":null,"monthKey":null}}
 ]DATA
 
 User: "Hello"

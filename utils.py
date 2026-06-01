@@ -299,3 +299,51 @@ def resolve_month_key(raw: str) -> str:
 
     # ── Fallback: return as-is if it looks like a monthKey, else current ──
     return get_current_month_key()
+
+
+def is_affirmative(text: str) -> bool:
+    """
+    Checks if a user's text indicates a positive confirmation/affirmation.
+    Matches English and Nepali affirmative keywords.
+    """
+    if not text or not isinstance(text, str):
+        return False
+    # Strip common punctuation
+    cleaned = text.strip().lower().rstrip("?.!,")
+    affirmatives = {
+        "yes", "yeah", "yep", "ho", "um", "huss", "thik cha", "thik chha", 
+        "ok", "okay", "ha", "hunchha", "hunchha", "save gara", "confirm", "hau", "affirm",
+        "y", "sure", "done", "confirm gara", "save"
+    }
+    if cleaned in affirmatives:
+        return True
+    
+    # Also check if any affirmative word is exactly matched inside the text split by words
+    words = cleaned.split()
+    for w in words:
+        if w in affirmatives:
+            return True
+    return False
+
+
+def is_denial(text: str) -> bool:
+    """
+    Checks if a user's text indicates a denial/cancellation.
+    Matches English and Nepali denial keywords.
+    """
+    if not text or not isinstance(text, str):
+        return False
+    # Strip common punctuation
+    cleaned = text.strip().lower().rstrip("?.!,")
+    denials = {
+        "no", "nai", "nope", "cancel", "haina", "nahhos", "chhodau", "chhod", 
+        "drop", "hatau", "n", "dont save", "don't save", "cancel gara", "no thanks"
+    }
+    if cleaned in denials:
+        return True
+    
+    words = cleaned.split()
+    for w in words:
+        if w in denials:
+            return True
+    return False
