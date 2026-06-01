@@ -7,7 +7,7 @@ from utils import (
     get_current_month_key, serialize_doc,
     sum_month_expense, sum_category_expense, fetch_budget,
     get_today_date_range, get_week_date_range,
-    sum_month_income, is_today,
+    sum_month_income, is_today, resolve_month_key,
 )
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment
 from typing import Optional
@@ -520,7 +520,8 @@ async def chat(
     # ── Process each action ──────────────────────────────────────────────
     for action in actions:
         intent = action.get("intent", "general_chat")
-        month_key = action.get("monthKey") or get_current_month_key()
+        raw_mk = action.get("monthKey")
+        month_key = resolve_month_key(raw_mk) if raw_mk else get_current_month_key()
 
         # ── EXPENSE / INCOME ─────────────────────────────────────────────
         if intent in ("expense_log", "income_log") and action.get("amount"):
@@ -754,6 +755,56 @@ async def chat(
             else:
                 reply_parts.append(f"{cat} ko lagi budget set gareko chaina yo mahina")
             print(f"[CHAT] query_budget_status: {cat}")
+
+        # ── QUERY PAST REPORT ─────────────────────────────────────────────
+        elif intent == "query_past_report":
+            mk = month_key  # already resolved via resolve_month_key above
+            print(f"[CHAT] query_past_report: monthKey={mk} category={action.get('category')}")
+
+            # Fetch all confirmed, non-deleted transactions for that month
+            past_tx_docs = list(
+                db.collection("users").document(uid).collection("transactions")
+                .where("monthKey", "==", mk)
+                .where("status", "==", "confirmed")
+                .stream()
+            )
+            r_expense = 0.0
+            r_income = 0.0
+            r_categories = {}
+            for doc in past_tx_docs:
+                data = doc.to_dict()
+                if data.get("isDeleted", False):
+                    continue
+                amt = data.get("amount", 0.0)
+                tx_t = data.get("type", "")
+                cat = data.get("category")
+                if tx_t == "expense":
+                    r_expense += amt
+                    if cat:
+                        r_categories[cat] = r_categories.get(cat, 0.0) + amt
+                elif tx_t == "income":
+                    r_income += amt
+
+            target_cat = action.get("category")
+            if target_cat:
+                cat_total = r_categories.get(target_cat, 0.0)
+                reply_parts.append(
+                    f"{mk} ma {target_cat} ma Rs {int(cat_total)} kharcha gareko thiyo"
+                )
+            else:
+                net = r_income - r_expense
+                cat_parts = ", ".join(
+                    f"{c}: Rs {int(v)}"
+                    for c, v in sorted(r_categories.items(), key=lambda x: -x[1])
+                )
+                base = (f"{mk} ko report: Rs {int(r_expense)} kharcha, "
+                        f"Rs {int(r_income)} income. Net savings: Rs {int(net)}")
+                if cat_parts:
+                    reply_parts.append(f"{base}. {cat_parts}")
+                else:
+                    reply_parts.append(base)
+
+            print(f"[CHAT] query_past_report result: expense={r_expense} income={r_income} cats={list(r_categories.keys())}")
 
         # ── UNDO LAST EXPENSE ────────────────────────────────────────────
         elif intent == "undo_last_expense":
@@ -1096,7 +1147,8 @@ async def chat_sync(
             for action in actions:
                 intent = action.get("intent", "general_chat")
                 # Use derived monthKey from clientTimestamp, not server time
-                month_key = action.get("monthKey") or derived_month_key
+                raw_mk = action.get("monthKey")
+                month_key = resolve_month_key(raw_mk) if raw_mk else derived_month_key
 
                 # ── EXPENSE / INCOME ─────────────────────────────────────
                 if intent in ("expense_log", "income_log") and action.get("amount"):
@@ -1281,6 +1333,51 @@ async def chat_sync(
                         reply_parts.append(f"{cat} budget Rs {int(bl)}, spent Rs {int(bs)}, baki Rs {int(br)} ({bp}%)")
                     else:
                         reply_parts.append(f"{cat} ko lagi budget set gareko chaina yo mahina")
+
+                # ── QUERY PAST REPORT (sync) ─────────────────────────────
+                elif intent == "query_past_report":
+                    mk = month_key
+                    past_tx_docs = list(
+                        db.collection("users").document(uid).collection("transactions")
+                        .where("monthKey", "==", mk)
+                        .where("status", "==", "confirmed")
+                        .stream()
+                    )
+                    r_expense = 0.0
+                    r_income = 0.0
+                    r_categories = {}
+                    for doc in past_tx_docs:
+                        data = doc.to_dict()
+                        if data.get("isDeleted", False):
+                            continue
+                        amt = data.get("amount", 0.0)
+                        tx_t = data.get("type", "")
+                        cat = data.get("category")
+                        if tx_t == "expense":
+                            r_expense += amt
+                            if cat:
+                                r_categories[cat] = r_categories.get(cat, 0.0) + amt
+                        elif tx_t == "income":
+                            r_income += amt
+
+                    target_cat = action.get("category")
+                    if target_cat:
+                        cat_total = r_categories.get(target_cat, 0.0)
+                        reply_parts.append(
+                            f"{mk} ma {target_cat} ma Rs {int(cat_total)} kharcha gareko thiyo"
+                        )
+                    else:
+                        net = r_income - r_expense
+                        cat_parts = ", ".join(
+                            f"{c}: Rs {int(v)}"
+                            for c, v in sorted(r_categories.items(), key=lambda x: -x[1])
+                        )
+                        base = (f"{mk} ko report: Rs {int(r_expense)} kharcha, "
+                                f"Rs {int(r_income)} income. Net savings: Rs {int(net)}")
+                        if cat_parts:
+                            reply_parts.append(f"{base}. {cat_parts}")
+                        else:
+                            reply_parts.append(base)
 
                 # ── UNDO LAST EXPENSE ────────────────────────────────────
                 elif intent == "undo_last_expense":

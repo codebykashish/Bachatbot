@@ -224,3 +224,78 @@ def get_week_date_range():
     now = datetime.now(timezone.utc)
     start = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
     return start, now
+
+
+# ── Temporal month-key resolver ──────────────────────────────────────────────
+
+# Month-name lookup: English full/abbreviated + Nepali romanized
+_MONTH_NAME_MAP = {
+    "january": 1,   "jan": 1,
+    "february": 2,  "feb": 2,
+    "march": 3,     "mar": 3,
+    "april": 4,     "apr": 4,
+    "may": 5,
+    "june": 6,      "jun": 6,
+    "july": 7,      "jul": 7,
+    "august": 8,    "aug": 8,
+    "september": 9, "sep": 9,  "sept": 9,
+    "october": 10,  "oct": 10,
+    "november": 11, "nov": 11,
+    "december": 12, "dec": 12,
+}
+
+# Phrases that mean "previous month"
+_LAST_MONTH_KEYWORDS = [
+    "last month", "previous month", "prev month",
+    "pahila ko mahina", "aghillo mahina", "gata mahina",
+    "hijo ko mahina",
+]
+
+
+def resolve_month_key(raw: str) -> str:
+    """
+    Convert a temporal keyword, month name, or YYYY-MM string into a
+    valid 'YYYY-MM' month key.
+
+    Supported inputs:
+      - "last month" / "previous month" / Nepali equivalents → previous calendar month
+      - Month name ("January", "march", "apr") → that month in the current year
+        (or prior year if the month hasn't occurred yet this year)
+      - "YYYY-MM" pass-through (e.g. "2026-03")
+      - None / empty / unrecognized → current month
+
+    Returns:
+        str: A 'YYYY-MM' string.
+    """
+    if not raw or not isinstance(raw, str):
+        return get_current_month_key()
+
+    cleaned = raw.strip().lower()
+
+    # ── Direct YYYY-MM format ────────────────────────────────────────────
+    if len(cleaned) == 7 and cleaned[4] == "-":
+        try:
+            y, m = int(cleaned[:4]), int(cleaned[5:])
+            if 1 <= m <= 12 and 2000 <= y <= 2100:
+                return cleaned
+        except ValueError:
+            pass
+
+    # ── "Last month" / "previous month" keywords ─────────────────────────
+    for phrase in _LAST_MONTH_KEYWORDS:
+        if phrase in cleaned:
+            now = datetime.now(timezone.utc)
+            if now.month == 1:
+                return f"{now.year - 1}-12"
+            return f"{now.year}-{now.month - 1:02d}"
+
+    # ── Specific month name ("April", "jan", "march") ────────────────────
+    for name, month_num in _MONTH_NAME_MAP.items():
+        if name in cleaned:
+            now = datetime.now(timezone.utc)
+            # If the month hasn't occurred yet this year, use last year
+            year = now.year if month_num <= now.month else now.year - 1
+            return f"{year}-{month_num:02d}"
+
+    # ── Fallback: return as-is if it looks like a monthKey, else current ──
+    return get_current_month_key()

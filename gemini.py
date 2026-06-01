@@ -107,6 +107,7 @@ Each element in the array is an action object with possible fields:
   - "intent": REQUIRED. One of:
       "expense_log", "income_log", "set_budget",
       "query_month_total", "query_category_spend", "query_budget_status",
+      "query_past_report",
       "undo_last_expense", "set_notification_category",
       "general_chat", "greeting"
   - "amount": number or null            (for expense_log / income_log)
@@ -136,14 +137,17 @@ You NEVER include extra keys.
 4) query_month_total:
    - User asks: "Yo mahina total kharcha kati bhayo?", "Esai mahina kati paisa gayo?"
    - intent="query_month_total", others mostly null.
+   - If user specifies a past month (e.g. "last month total kharcha"), fill monthKey with that month's "YYYY-MM".
 
 5) query_category_spend:
    - User asks: "Food ma kati kharcha gareko chu?", "Bus ma yo mahina kati gayo?"
    - intent="query_category_spend", fill category.
+   - If user specifies a past month, fill monthKey accordingly.
 
 6) query_budget_status:
    - User asks: "Food budget kati cha?", "Transport budget ma kati baki cha?"
    - intent="query_budget_status", fill category.
+   - If user specifies a past month, fill monthKey accordingly.
 
 7) undo_last_expense:
    - User says: "undo", "pahila ko expense hata", "tyo galat thiyo".
@@ -161,6 +165,21 @@ You NEVER include extra keys.
 10) general_chat:
    - Small talk, thanks, or off‑topic: "how are you", "ramro app ho", "thank you", weather, politics, etc.
    - intent="general_chat".
+
+11) query_past_report:
+   - User asks about a PAST month's spending, income, or overall report.
+   - Temporal keywords: "last month", "previous month", "pahila ko mahina",
+     "aghillo mahina", "gata mahina", or a specific past month name like
+     "January", "March", "April", "February", etc.
+   - Examples:
+     "last month ko report", "April ma kati kharcha bhayo?",
+     "previous month report dekhau", "pahila ko mahina ko kharcha kati thiyo?"
+   - Fill: intent="query_past_report", monthKey="YYYY-MM" of the target month.
+   - For "last month" → previous calendar month's YYYY-MM.
+   - For a month name like "March" → "YYYY-03" (use current year).
+   - If a category is mentioned (e.g. "last month Food kati kharcha?"), fill category too.
+   - This is different from query_month_total: query_past_report gives a FULL
+     summary (income + expense + category breakdown + net savings).
 
 ──────── 4. MULTI-ACTION RULE (IMPORTANT) ────────
 
@@ -284,6 +303,24 @@ User: "Food"
 Reply: Thik cha, Food ma rakheko chu ✅
 DATA[
   {{"intent":"set_notification_category","amount":null,"category":"Food","type":null,"limit":null,"monthKey":null}}
+]DATA
+
+User: "Last month ko report dekhau"
+Reply: Pahila ko mahina ko report herera bhanchu.
+DATA[
+  {{"intent":"query_past_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":"2026-05"}}
+]DATA
+
+User: "April ma Food ma kati kharcha gareko thiye?"
+Reply: April ko Food kharcha herera bhanchu.
+DATA[
+  {{"intent":"query_past_report","amount":null,"category":"Food","type":null,"limit":null,"monthKey":"2026-04"}}
+]DATA
+
+User: "Previous month ma total kati kharcha bhayo?"
+Reply: Previous month ko total kharcha herera bhanchu.
+DATA[
+  {{"intent":"query_past_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":"2026-05"}}
 ]DATA
 
 User: "Hello"
