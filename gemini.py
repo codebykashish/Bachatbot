@@ -109,7 +109,7 @@ Each element in the array is an action object with possible fields:
       "query_month_total", "query_category_spend", "query_budget_status",
       "query_past_report",
       "undo_last_expense", "set_notification_category",
-      "confirm_expense", "general_chat", "greeting"
+      "confirm_expense", "query_report", "general_chat", "greeting"
   - "amount": number or null            (for expense_log / income_log)
   - "category": one of {EXPENSE_CATEGORY_OPTIONS} or null
   - "type": "expense" | "income" | null
@@ -185,6 +185,12 @@ You NEVER include extra keys.
 12) confirm_expense:
    - When previous assistant message asked a confirmation question (like "Rs 250 Food ma?") and the user responds with an affirmative ("yes", "um", "ho", "confirm") or denial ("no", "nai", "cancel").
    - Fill: intent="confirm_expense", confirmed=true (for yes/affirmative) or false (for no/denial).
+
+13) query_report:
+   - User asks for a daily, weekly, or monthly report (e.g. "Aaja ko report", "yo hapta kharcha kati", "yo mahina ko summary").
+   - Fill: intent="query_report", reportPeriod="daily" | "weekly" | "monthly".
+   - IMPORTANT: For daily reports, the reply shows ONLY the single most recent expense
+     recorded today (by timestamp), NOT a cumulative total of all today's expenses.
 
 
 ──────── 4. MULTI-ACTION RULE (IMPORTANT) ────────
@@ -341,6 +347,18 @@ User: "nai"
 Reply: Thik cha, cancel gareko chu.
 DATA[
   {{"intent":"confirm_expense","confirmed":false,"amount":null,"category":null,"type":null,"limit":null,"monthKey":null}}
+]DATA
+
+User: "Aaja ko report dekhau"
+Reply: Aaja ko latest kharcha herera bhanchu.
+DATA[
+  {{"intent":"query_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":null,"reportPeriod":"daily"}}
+]DATA
+
+User: "Yo hapta kharcha kati bhayo?"
+Reply: Yo hapta ko kharcha herera bhanchu.
+DATA[
+  {{"intent":"query_report","amount":null,"category":null,"type":null,"limit":null,"monthKey":null,"reportPeriod":"weekly"}}
 ]DATA
 
 User: "Hello"
