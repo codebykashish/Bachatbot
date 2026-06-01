@@ -133,7 +133,11 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 40),
-                const Icon(Icons.savings, size: 72, color: Color(0xFF2DBE7F)),
+                Image.asset(
+                  'assets/images/bachatbot_logo.png',
+                  height: 120,
+                  fit: BoxFit.contain,
+                ),
                 const SizedBox(height: 16),
                 const Text(
                   'BachatBot',
