@@ -79,36 +79,104 @@ class CategoriesScreenState extends State<CategoriesScreen> {
     catch (_) { return Icons.category; }
   }
 
-  void _showSetBudgetDialog(String category, double currentLimit) {
+  void _showSetBudgetDialog(String category, double currentLimit, double spent) {
     final controller = TextEditingController(text: currentLimit > 0 ? currentLimit.toInt().toString() : '');
+    String? errorMessage;
+    bool isSaving = false;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Set Budget – $category'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Monthly Limit (Rs)', prefixIcon: Icon(Icons.currency_rupee)),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              final v = int.tryParse(controller.text.trim());
-              if (v == null || v <= 0) return;
-              Navigator.pop(ctx);
-              await _setBudget(category, v);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: _primary),
-            child: const Text('Save', style: TextStyle(color: Colors.white)),
-          ),
-        ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Text('Set Budget – $category'),
+            content: TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: 'Monthly Limit (Rs)', 
+                prefixIcon: const Icon(Icons.currency_rupee),
+                errorText: errorMessage,
+              ),
+              onChanged: (val) {
+                if (errorMessage != null) {
+                  setDialogState(() {
+                    errorMessage = null;
+                  });
+                }
+              },
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(ctx), 
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        final valStr = controller.text.trim();
+                        final v = int.tryParse(valStr);
+                        if (v == null || v <= 0) {
+                          setDialogState(() {
+                            errorMessage = 'Please enter a valid amount';
+                          });
+                          return;
+                        }
+                        if (v < spent) {
+                          setDialogState(() {
+                            errorMessage = 'Budget cannot be less than current expenses';
+                          });
+                          return;
+                        }
+
+                        setDialogState(() {
+                          isSaving = true;
+                          errorMessage = null;
+                        });
+
+                        final error = await _setBudget(category, v);
+                        if (!ctx.mounted) return;
+
+                        if (error == null) {
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(
+                              content: Text('$category budget set to Rs $v'), 
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        } else {
+                          setDialogState(() {
+                            isSaving = false;
+                            errorMessage = error;
+                          });
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _primary,
+                  disabledBackgroundColor: _primary.withValues(alpha: 0.5),
+                ),
+                child: isSaving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Text('Save', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Future<void> _setBudget(String category, int limit) async {
+  Future<String?> _setBudget(String category, int limit) async {
     try {
       final now = DateTime.now();
       final monthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
@@ -118,18 +186,14 @@ class CategoriesScreenState extends State<CategoriesScreen> {
         'monthKey': monthKey,
         'alertThreshold': 80,
       });
-      if (!mounted) return;
       if (res['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$category budget set to Rs $limit'), backgroundColor: Colors.green),
-        );
         _fetchBudgets();
+        return null;
+      } else {
+        return res['message'] ?? 'Failed to set budget.';
       }
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to set budget.'), backgroundColor: Colors.red),
-      );
+    } catch (e) {
+      return e.toString().replaceAll('Exception: ', '');
     }
   }
 
@@ -353,7 +417,7 @@ class CategoriesScreenState extends State<CategoriesScreen> {
     final barColor = isOver ? Colors.red : (percent > 0.7 ? Colors.orange : _primary);
 
     return GestureDetector(
-      onTap: () => _showSetBudgetDialog(category, limit),
+      onTap: () => _showSetBudgetDialog(category, limit, spent),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
