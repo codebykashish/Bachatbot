@@ -652,12 +652,52 @@ class _ChatScreenState extends State<ChatScreen> {
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       child: Row(
         children: [
-          _quickActionButton(Icons.add, "Add expense"),
+          _greetingButton(emoji: "👋", label: "Hy", message: "Hy"),
           const SizedBox(width: 10),
           _quickActionButton(Icons.bar_chart, "Show report"),
           const SizedBox(width: 10),
-          _quickActionButton(Icons.undo, "Undo last"),
+          _greetingButton(emoji: "👋", label: "Hello", message: "Hello"),
         ],
+      ),
+    );
+  }
+
+  /// Sends [message] as a user message through the normal send flow.
+  Widget _greetingButton({
+    required String emoji,
+    required String label,
+    required String message,
+  }) {
+    return GestureDetector(
+      onTap: () {
+        if (_isLoading) return;
+        _controller.text = message;
+        _send();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFE6E8EE)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 15)),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 12.5, color: Color(0xFF22252A)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -665,15 +705,9 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _quickActionButton(IconData icon, String text) {
     return GestureDetector(
       onTap: () {
-        // Pre-fill the text field with the action text
-        _controller.text = text == "Add expense"
-            ? ""
-            : text == "Show report"
-                ? "Show my monthly report"
-                : "Undo last expense";
-        if (text != "Add expense") {
-          _send();
-        }
+        _controller.text =
+            text == "Show report" ? "Show my monthly report" : text;
+        _send();
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

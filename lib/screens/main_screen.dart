@@ -35,6 +35,8 @@ class _MainScreenState extends State<MainScreen> {
         return 'BachatBot';
       case 1:
         return 'Categories';
+      case 2:
+        return 'Reports';
       default:
         return 'BachatBot';
     }
@@ -163,6 +165,17 @@ class _MainScreenState extends State<MainScreen> {
               selectedColor: _primary,
               onTap: () {
                 setState(() => _currentIndex = 1);
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.insert_chart,
+                  color: _currentIndex == 2 ? _primary : null),
+              title: const Text('Reports'),
+              selected: _currentIndex == 2,
+              selectedColor: _primary,
+              onTap: () {
+                setState(() => _currentIndex = 2);
                 Navigator.pop(context);
               },
             ),
