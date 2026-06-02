@@ -43,9 +43,15 @@ class ApiService {
           Uri.parse("$baseUrl$endpoint"),
           headers: _headers(freshToken),
         );
+        if (retryResponse.statusCode < 200 || retryResponse.statusCode >= 300) {
+          throw Exception("HTTP ${retryResponse.statusCode}: ${retryResponse.body}");
+        }
         return jsonDecode(retryResponse.body);
       }
 
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception("HTTP ${response.statusCode}: ${response.body}");
+      }
       return jsonDecode(response.body);
     } catch (e) {
       rethrow;
@@ -70,9 +76,15 @@ class ApiService {
           headers: _headers(freshToken),
           body: jsonEncode(body),
         );
+        if (retryResponse.statusCode < 200 || retryResponse.statusCode >= 300) {
+          throw Exception("HTTP ${retryResponse.statusCode}: ${retryResponse.body}");
+        }
         return jsonDecode(retryResponse.body);
       }
 
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception("HTTP ${response.statusCode}: ${response.body}");
+      }
       return jsonDecode(response.body);
     } catch (e) {
       rethrow;
@@ -97,9 +109,15 @@ class ApiService {
           headers: _headers(freshToken),
           body: jsonEncode(body),
         );
+        if (retryResponse.statusCode < 200 || retryResponse.statusCode >= 300) {
+          throw Exception("HTTP ${retryResponse.statusCode}: ${retryResponse.body}");
+        }
         return jsonDecode(retryResponse.body);
       }
 
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception("HTTP ${response.statusCode}: ${response.body}");
+      }
       return jsonDecode(response.body);
     } catch (e) {
       rethrow;
@@ -140,9 +158,15 @@ class ApiService {
           Uri.parse("$baseUrl$endpoint"),
           headers: _headers(freshToken),
         );
+        if (retryResponse.statusCode < 200 || retryResponse.statusCode >= 300) {
+          throw Exception("HTTP ${retryResponse.statusCode}: ${retryResponse.body}");
+        }
         return jsonDecode(retryResponse.body);
       }
 
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception("HTTP ${response.statusCode}: ${response.body}");
+      }
       return jsonDecode(response.body);
     } catch (e) {
       rethrow;
