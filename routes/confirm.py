@@ -84,24 +84,30 @@ async def confirm_transaction(
             },
         )
 
-    # ── 2. Apply optional overrides + confirm ────────────────────────────
-    update_payload: dict = {
-        "status":    "confirmed",
-        "updatedAt": SERVER_TIMESTAMP,
-    }
-    if body.amount is not None:
-        update_payload["amount"] = float(body.amount)
-    if body.category is not None:
-        update_payload["category"] = body.category
-
-    tx_ref.update(update_payload)
-    print(f"[CONFIRM] Transaction {transaction_id} marked confirmed")
-
     # Use effective values (overridden or original)
     amount   = float(body.amount)   if body.amount   is not None else float(tx.get("amount", 0))
     category = body.category        if body.category is not None else tx.get("category")
     tx_type  = tx.get("type", "expense")
     month_key = tx.get("monthKey", get_current_month_key())
+
+    # ── 2a. ENFORCE CATEGORY for notifications ───────────────────────────
+    if tx.get("source") == "notification" and not category:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "CATEGORY_REQUIRED",
+                    "message": "Please select a category for this notification transaction.",
+                },
+            },
+        )
+
+    # ── 2b. Apply optional overrides + confirm ────────────────────────────
+    update_payload: dict = {
+        "status":    "confirmed",
+        "updatedAt": SERVER_TIMESTAMP,
+    }
 
     # ── 3. Update matching notification ─────────────────────────────────
     notif_query = (
@@ -358,6 +364,15 @@ async def bulk_confirm_transactions(
                 category = item.category        if item.category is not None else tx.get("category")
                 tx_type  = tx.get("type", "expense")
                 month_key = tx.get("monthKey", get_current_month_key())
+
+                # ENFORCE CATEGORY for notifications
+                if tx.get("source") == "notification" and not category:
+                    results.append({
+                        "id": tx_id,
+                        "status": "error",
+                        "reason": "Category is required for notification transactions.",
+                    })
+                    continue
 
                 update_payload: dict = {
                     "status":    "confirmed",

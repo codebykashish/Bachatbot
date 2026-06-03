@@ -341,9 +341,37 @@ def is_denial(text: str) -> bool:
     }
     if cleaned in denials:
         return True
-    
+
     words = cleaned.split()
     for w in words:
         if w in denials:
             return True
-    return False
+    return False
+
+
+def extract_amount(text: str) -> float:
+    """
+    Robustly extracts amount from strings like "Rs 500", "Rs. 1,250.50".
+    Returns float or 0.0 if not found.
+    """
+    if not text:
+        return 0.0
+
+    # Regex for Rs or Rs. followed by a number with optional commas and decimals
+    pattern = r'Rs\.?\s*([\d,]+(?:\.\d+)?)'
+    match = re.search(pattern, text, re.IGNORECASE)
+
+    if match:
+        try:
+            raw_val = match.group(1).replace(',', '')
+            return float(raw_val)
+        except (ValueError, IndexError):
+            pass
+
+    # Fallback: look for any number if Rs is not present
+    # (Optional, but let's stick to the requested pattern first)
+    return 0.0
+
+
+import re
+

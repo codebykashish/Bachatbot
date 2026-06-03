@@ -371,15 +371,42 @@ async def chat(
                             print(f"[CHAT][CONFIRM] tx {tx_id} already {tx.get('status')} — skipping")
                             continue
 
-                        tx_ref.update({
-                            "status":    "confirmed",
-                            "updatedAt": SERVER_TIMESTAMP,
-                        })
-
                         amount   = float(tx.get("amount", 0))
                         category = tx.get("category")
                         tx_type  = tx.get("type", "expense")
                         tx_mk    = tx.get("monthKey", month_key)
+
+                        if tx.get("source") == "notification" and not category:
+                            # ENFORCE CATEGORY: If it's a notification and we don't have a category yet,
+                            # we cannot confirm it. Ask the user for the category.
+                            cat_options = "/".join(c for c in EXPENSE_CATEGORIES if c != "Other")
+                            reply = f"Kun category ma halne? ({cat_options}/Other)"
+                            
+                            assistant_msg_ref = messages_ref.document()
+                            assistant_msg_ref.set({
+                                "role": "assistant",
+                                "content": reply,
+                                "intent": "notification_parse_ask_category",
+                                "extractedData": None,
+                                "relatedTransactionId": tx_id,
+                                "createdAt": SERVER_TIMESTAMP,
+                            })
+                            return {
+                                "success": True,
+                                "data": {
+                                    "reply": reply,
+                                    "intent": "notification_parse_ask_category",
+                                    "needsConfirmation": True,
+                                    "transaction": tx,
+                                    "budgetUpdate": None,
+                                    "alerts": [],
+                                },
+                            }
+
+                        tx_ref.update({
+                            "status":    "confirmed",
+                            "updatedAt": SERVER_TIMESTAMP,
+                        })
 
                         # Budget increment for expenses
                         budget_update = None
@@ -669,6 +696,21 @@ async def chat(
             "suggestedCategory": suggested_category,
         }
 
+        # Save pending action for conversational follow-up
+        pending_ref = db.collection("users").document(uid).collection("pendingAction").document("current")
+        pending_ref.set({
+            "actions": [{
+                "intent": "confirm_expense",
+                "amount": float(amount),
+                "category": category if not category_uncertain else None,
+                "type": tx_type,
+            }],
+            "pendingTxIds": [tx_ref.id],
+            "source": "notification",
+            "monthKey": month_key,
+            "createdAt": SERVER_TIMESTAMP,
+        })
+
         # E. Build reply — different for certain vs uncertain category
         if category_uncertain:
             # Category unknown → ask the user
@@ -733,8 +775,33 @@ async def chat(
     # END NOTIFICATION BRANCH — normal chat flow continues below
     # ════════════════════════════════════════════════════════════════════
 
+    # ── Fetch user context for personalized Gemini responses ────────────
+    first_name = "User"
+    is_first_message = False
+    try:
+        profile_doc = db.collection("users").document(uid).get()
+        if profile_doc.exists:
+            profile_data = profile_doc.to_dict()
+            first_name = profile_data.get("firstName") or profile_data.get("name") or "User"
+
+        # Check if this is the user's very first chat message
+        existing_msgs = list(
+            messages_ref
+            .where("role", "==", "user")
+            .limit(2)
+            .stream()
+        )
+        # Only the message we just saved exists → first message
+        is_first_message = len(existing_msgs) <= 1
+    except Exception as ctx_err:
+        print(f"[CHAT] Context lookup failed (non-critical): {ctx_err}")
+
     # ── Call Gemini ──────────────────────────────────────────────────────
-    gemini_result = await process_chat_message(user_message)
+    gemini_result = await process_chat_message(
+        user_message,
+        first_name=first_name,
+        is_first_message=is_first_message,
+    )
     gemini_reply = gemini_result["reply"]
     actions = gemini_result["actions"]
 
@@ -765,6 +832,9 @@ async def chat(
     primary_intent = actions[0].get("intent", "general_chat") if actions else "general_chat"
     pending_actions = []
 
+    # Track undone category to inherit it if a correction follows in same turn
+    undone_category = None
+
     # ── Process each action ──────────────────────────────────────────────
     for action in actions:
         intent = action.get("intent", "general_chat")
@@ -773,21 +843,26 @@ async def chat(
 
         # ── EXPENSE / INCOME ─────────────────────────────────────────────
         if intent in ("expense_log", "income_log") and action.get("amount"):
-            pending_actions.append(action)
-            # Build partial reply for verification question later
-            amt_val = int(float(action["amount"]))
-            cat_val = action.get("category") or "Income"
-            if intent == "expense_log":
-                if cat_val == "Rent":
-                    reply_parts.append(f"Rs {amt_val} Rent bhada ma")
-                elif cat_val == "Food":
-                    reply_parts.append(f"Rs {amt_val} Food ma")
-                elif cat_val == "Transport":
-                    reply_parts.append(f"Rs {amt_val} Transport ma")
-                else:
-                    reply_parts.append(f"Rs {amt_val} {cat_val} ma")
+            # Correction inheritance: if no category but we just did an undo
+            if not action.get("category") and undone_category:
+                print(f"[CHAT] Correction: inheriting category '{undone_category}' for new {intent}")
+                action["category"] = undone_category
+
+            if action.get("category"):
+                # IMMEDIATE LOG (No confirmation if category is clear)
+                txn, bud, alt, rp = _handle_expense_or_income(
+                    db, uid, action, source, month_key, idempotency_key
+                )
+                last_transaction = txn
+                if bud: last_budget_update = bud
+                if alt: alerts_created.append(alt)
+                reply_parts.append(rp)
             else:
-                reply_parts.append(f"Rs {amt_val} income")
+                # AMBIGUOUS -> PENDING (Confirmation/Category ask needed)
+                pending_actions.append(action)
+                # Build partial reply for verification question later
+                amt_val = int(float(action["amount"]))
+                reply_parts.append(f"Rs {amt_val}")
 
         # ── SET NOTIFICATION CATEGORY ────────────────────────────────────
         elif intent == "set_notification_category" and action.get("category"):
@@ -865,7 +940,7 @@ async def chat(
         # ── QUERY MONTH TOTAL ────────────────────────────────────────────
         elif intent == "query_month_total":
             total = sum_month_expense(db, uid, month_key)
-            reply_parts.append(f"Yo mahina total kharcha Rs {int(total)} cha")
+            reply_parts.append(f"Yo mahina Rs {int(total)} kharcha vayo")
             print(f"[CHAT] query_month_total: Rs {total}")
 
         # ── QUERY REPORT (daily / weekly / monthly) ──────────────────────
@@ -973,18 +1048,17 @@ async def chat(
                     elif tx_type == "income":
                         r_income += amount
 
-                net_savings = r_income - r_expense
-                cat_parts = ", ".join(f"{c}: Rs {int(v)}" for c, v in sorted(r_categories.items(), key=lambda x: -x[1]))
-                if r_expense > 0 and cat_parts:
-                    reply_parts.append(
-                        f"Yo mahina ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income. Net savings: Rs {int(net_savings)}. {cat_parts}"
-                    )
-                elif r_expense > 0:
-                    reply_parts.append(
-                        f"Yo mahina ko report: Rs {int(r_expense)} kharcha, Rs {int(r_income)} income. Net savings: Rs {int(net_savings)}"
-                    )
-                else:
-                    reply_parts.append("Yo mahina ma kei kharcha bhayena")
+                savings = r_income - r_expense
+                cat_breakdown = "\n".join(f"{c}: Rs {int(v)}" for c, v in sorted(r_categories.items(), key=lambda x: -x[1]))
+                
+                reply = (
+                    f"Yo mahina:\n\n"
+                    f"Total Expense: Rs {int(r_expense)}\n"
+                    f"Total Income: Rs {int(r_income)}\n"
+                    f"Savings: Rs {int(savings)}\n\n"
+                    f"{cat_breakdown}"
+                )
+                reply_parts.append(reply.strip())
 
             print(f"[CHAT] query_report result: expense={r_expense} income={r_income} cats={list(r_categories.keys())}")
 
