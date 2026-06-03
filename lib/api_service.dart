@@ -172,4 +172,26 @@ class ApiService {
       rethrow;
     }
   }
+
+  // ── Pending transaction helpers ────────────────────────────────────────────
+
+  /// Confirm one or more pending transactions.
+  /// [ids] — backend transaction IDs.
+  /// [amount] — optional updated amount (for edit flow).
+  /// [category] — optional category selected by user.
+  static Future<Map<String, dynamic>> confirmTransactions(
+    List<String> ids, {
+    double? amount,
+    String? category,
+  }) {
+    final body = <String, dynamic>{'ids': ids};
+    if (amount != null) body['amount'] = amount;
+    if (category != null) body['category'] = category;
+    return post('/transactions/confirm', body);
+  }
+
+  /// Cancel / discard one or more pending transactions.
+  static Future<Map<String, dynamic>> cancelTransactions(List<String> ids) {
+    return post('/transactions/cancel', {'ids': ids});
+  }
 }

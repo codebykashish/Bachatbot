@@ -33,16 +33,9 @@
             android:name="flutterEmbedding"
             android:value="2" />
         
-        <!-- Real notification listener service for Android -->
-        <service
-            android:name="io.flutter.plugins.notificationlistener.NotificationListenerService"
-            android:label="NotificationListener"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
+        <!-- NOTE: The notification_listener_service plugin auto-merges
+             its own service declaration via manifest merge.
+             Do NOT manually declare it here with a wrong class name. -->
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

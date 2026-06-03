@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../api_service.dart';
 import '../services/notification_sync_service.dart';
+import '../services/month_event_service.dart';
 import 'home_screen.dart';
 import 'categories_screen.dart';
 import 'chatbot_page.dart';
@@ -29,6 +30,10 @@ class _MainScreenState extends State<MainScreen> {
   final _homeKey = GlobalKey<HomeScreenState>();
   final _categoriesKey = GlobalKey<CategoriesScreenState>();
 
+  // ── Month event banner ──────────────────────────────────────────────────
+  MonthEvent? _activeBanner;
+  late final VoidCallback _monthBannerListener;
+
   String get _appBarTitle {
     switch (_currentIndex) {
       case 0:
@@ -47,6 +52,26 @@ class _MainScreenState extends State<MainScreen> {
     super.initState();
     // Initialize real notification sync listener (Android only)
     NotificationSyncService().init();
+    // Initialize month event polling service
+    MonthEventService().init();
+    // Listen for month events to show in-app banners
+    _monthBannerListener = () {
+      final event = MonthEventService.eventNotifier.value;
+      if (event != null && mounted) {
+        setState(() => _activeBanner = event);
+        // Auto-dismiss after 8 seconds
+        Future.delayed(const Duration(seconds: 8), () {
+          if (mounted) setState(() => _activeBanner = null);
+        });
+      }
+    };
+    MonthEventService.eventNotifier.addListener(_monthBannerListener);
+  }
+
+  @override
+  void dispose() {
+    MonthEventService.eventNotifier.removeListener(_monthBannerListener);
+    super.dispose();
   }
 
   Future<void> _logout() async {
@@ -244,12 +269,24 @@ class _MainScreenState extends State<MainScreen> {
         ],
       ),
       // ── IndexedStack keeps each tab's scroll/state alive ─────────────────
-      body: IndexedStack(
-        index: _currentIndex,
+      body: Stack(
         children: [
-          HomeScreen(key: _homeKey, firstName: widget.firstName),
-          CategoriesScreen(key: _categoriesKey),
-          const ReportsScreen(),
+          IndexedStack(
+            index: _currentIndex,
+            children: [
+              HomeScreen(key: _homeKey, firstName: widget.firstName),
+              CategoriesScreen(key: _categoriesKey),
+              const ReportsScreen(),
+            ],
+          ),
+          // ── Month event in-app banner ─────────────────────────────────
+          if (_activeBanner != null)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _buildMonthBanner(_activeBanner!),
+            ),
         ],
       ),
       // ── FAB → chat ────────────────────────────────────────────────────────
@@ -292,6 +329,80 @@ class _MainScreenState extends State<MainScreen> {
               activeIcon: Icon(Icons.insert_chart),
               label: 'Reports'),
         ],
+      ),
+    );
+  }
+
+  // ── Month event banner widget ───────────────────────────────────────────
+
+  Widget _buildMonthBanner(MonthEvent event) {
+    final isPreMonth = event.type == MonthEventType.preNewMonth;
+    final bannerColor =
+        isPreMonth ? const Color(0xFF4F6CFF) : const Color(0xFF2DBE7F);
+    final title = isPreMonth ? 'Naya mahina aaudaichha' : 'Naya mahina suru bhayo!';
+    final body = isPreMonth
+        ? 'Agami mahina ko budget herera set / update garnu hola.'
+        : 'Paila ko mahina ko kharcha ko base ma timro yo mahina ko budget set gariyeko chha.';
+
+    return Material(
+      color: Colors.transparent,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeOut,
+        margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: bannerColor,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: bannerColor.withValues(alpha: 0.3),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isPreMonth
+                  ? Icons.calendar_month_outlined
+                  : Icons.celebration_outlined,
+              color: Colors.white,
+              size: 22,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    body,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.88),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close, color: Colors.white, size: 18),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              onPressed: () => setState(() => _activeBanner = null),
+            ),
+          ],
+        ),
       ),
     );
   }
