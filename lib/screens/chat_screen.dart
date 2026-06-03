@@ -830,38 +830,96 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   )
-                : Row(
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Confirm
-                      Expanded(
-                        child: _actionButton(
-                          label: 'Confirm',
-                          icon: Icons.check,
-                          color: _primary,
-                          onTap: () => _confirmCard(card),
-                        ),
+                      Row(
+                        children: [
+                          // Confirm — with category guard for notification cards
+                          Expanded(
+                            child: Builder(builder: (ctx) {
+                              final needsCat = isNotification;
+                              final hasCat = card.items.isNotEmpty &&
+                                  (card.items.first.selectedCategory ?? '').isNotEmpty;
+                              final confirmColor =
+                                  (needsCat && !hasCat) ? Colors.grey.shade300 : _primary;
+                              return _actionButton(
+                                label: 'Confirm',
+                                icon: Icons.check,
+                                color: confirmColor,
+                                onTap: () {
+                                  if (needsCat && !hasCat) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: const Row(
+                                          children: [
+                                            Icon(Icons.warning_amber_rounded,
+                                                color: Colors.white, size: 16),
+                                            SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                'Please select a category before confirming this expense.',
+                                                style: TextStyle(fontSize: 12.5),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        backgroundColor: const Color(0xFFE08A00),
+                                        behavior: SnackBarBehavior.floating,
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(10)),
+                                        margin: const EdgeInsets.all(16),
+                                        duration: const Duration(seconds: 3),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  _confirmCard(card);
+                                },
+                              );
+                            }),
+                          ),
+                          const SizedBox(width: 8),
+                          // Edit
+                          Expanded(
+                            child: _actionButton(
+                              label: 'Edit',
+                              icon: Icons.edit_outlined,
+                              color: const Color(0xFF4F6CFF),
+                              onTap: () =>
+                                  setState(() => card.state = _PendingCardState.editing),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          // Discard
+                          Expanded(
+                            child: _actionButton(
+                              label: 'Discard',
+                              icon: Icons.close,
+                              color: Colors.grey,
+                              onTap: () => _cancelCard(card),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      // Edit
-                      Expanded(
-                        child: _actionButton(
-                          label: 'Edit',
-                          icon: Icons.edit_outlined,
-                          color: const Color(0xFF4F6CFF),
-                          onTap: () =>
-                              setState(() => card.state = _PendingCardState.editing),
+                      // Hint when category is missing for notification cards
+                      if (isNotification &&
+                          (card.items.isEmpty ||
+                              (card.items.first.selectedCategory ?? '').isEmpty)) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Icon(Icons.info_outline,
+                                size: 12, color: Colors.orange.shade700),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Select a category above to confirm.',
+                              style: TextStyle(
+                                  fontSize: 11, color: Colors.orange.shade700),
+                            ),
+                          ],
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      // Cancel
-                      Expanded(
-                        child: _actionButton(
-                          label: 'Discard',
-                          icon: Icons.close,
-                          color: Colors.grey,
-                          onTap: () => _cancelCard(card),
-                        ),
-                      ),
+                      ],
                     ],
                   ),
           ),
