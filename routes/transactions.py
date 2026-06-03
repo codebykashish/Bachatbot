@@ -9,6 +9,7 @@ router = APIRouter()
 @router.get("/transactions")
 async def get_transactions(
     monthKey: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
     limit: int = Query(50),
     current_user: dict = Depends(get_current_user)
 ):
@@ -25,10 +26,53 @@ async def get_transactions(
     if monthKey:
         query = query.where("monthKey", "==", monthKey)
     
+    # Filter by status if provided
+    if status:
+        query = query.where("status", "==", status)
+    
     # Order by newest first
     query = query.order_by("createdAt", direction="DESCENDING").limit(limit)
     
     # Execute query
+    docs = query.stream()
+    
+    transactions = []
+    for doc in docs:
+        data = doc.to_dict()
+        data["id"] = doc.id
+        transactions.append(serialize_doc(data))
+        
+    return {
+        "success": True,
+        "data": {
+            "transactions": transactions,
+            "count": len(transactions)
+        }
+    }
+
+
+@router.get("/transactions/pending/notifications")
+async def get_pending_notification_transactions(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    List pending transactions that originated from notifications.
+    Used by the frontend to show the user which notification-based 
+    expenses need category assignment and confirmation.
+    """
+    uid = current_user["uid"]
+    db = get_firestore()
+    
+    tx_ref = db.collection("users").document(uid).collection("transactions")
+    
+    # Filter for pending notification transactions
+    query = (
+        tx_ref.where("isDeleted", "==", False)
+        .where("status", "==", "pending")
+        .where("source", "==", "notification")
+        .order_by("createdAt", direction="DESCENDING")
+    )
+    
     docs = query.stream()
     
     transactions = []

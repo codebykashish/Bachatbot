@@ -1,25 +1,55 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from firebase_config import get_firestore
 from auth import get_current_user
 from utils import get_current_month_key
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment
+from typing import Optional, List
+from pydantic import BaseModel
 
 router = APIRouter()
 
 
+# ─── Request Schemas ─────────────────────────────────────────────────────────
+
+class ConfirmTransactionBody(BaseModel):
+    """Optional updates that can be applied while confirming a single transaction."""
+    amount: Optional[float] = None
+    category: Optional[str] = None
+
+
+class BulkConfirmItem(BaseModel):
+    """One item in a bulk confirm/cancel request."""
+    id: str
+    amount: Optional[float] = None
+    category: Optional[str] = None
+
+
+class BulkConfirmBody(BaseModel):
+    """
+    Body for POST /confirm-transactions (bulk).
+    action: "confirm" | "cancel"
+    transactions: list of items with optional field overrides.
+    """
+    action: str = "confirm"   # "confirm" or "cancel"
+    transactions: List[BulkConfirmItem]
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # POST /confirm-transaction/{transactionId}
+# Confirms a single pending transaction (notification OR chat-pending).
+# Now accepts optional body: { "amount": ..., "category": ... }
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/confirm-transaction/{transaction_id}")
 async def confirm_transaction(
     transaction_id: str,
+    body: ConfirmTransactionBody = Body(default=ConfirmTransactionBody()),
     current_user: dict = Depends(get_current_user),
 ):
     uid = current_user["uid"]
     db = get_firestore()
 
-    print(f"[CONFIRM] uid={uid} tx={transaction_id}")
+    print(f"[CONFIRM] uid={uid} tx={transaction_id} override_amount={body.amount} override_category={body.category}")
 
     # ── 1. Fetch transaction ─────────────────────────────────────────────
     tx_ref = (
@@ -54,12 +84,24 @@ async def confirm_transaction(
             },
         )
 
-    # ── 2. Confirm transaction ───────────────────────────────────────────
-    tx_ref.update({
+    # ── 2. Apply optional overrides + confirm ────────────────────────────
+    update_payload: dict = {
         "status":    "confirmed",
         "updatedAt": SERVER_TIMESTAMP,
-    })
+    }
+    if body.amount is not None:
+        update_payload["amount"] = float(body.amount)
+    if body.category is not None:
+        update_payload["category"] = body.category
+
+    tx_ref.update(update_payload)
     print(f"[CONFIRM] Transaction {transaction_id} marked confirmed")
+
+    # Use effective values (overridden or original)
+    amount   = float(body.amount)   if body.amount   is not None else float(tx.get("amount", 0))
+    category = body.category        if body.category is not None else tx.get("category")
+    tx_type  = tx.get("type", "expense")
+    month_key = tx.get("monthKey", get_current_month_key())
 
     # ── 3. Update matching notification ─────────────────────────────────
     notif_query = (
@@ -70,18 +112,18 @@ async def confirm_transaction(
         .stream()
     )
     for notif_doc in notif_query:
-        notif_doc.reference.update({"status": "confirmed"})
+        notif_update: dict = {"status": "confirmed"}
+        if body.category is not None:
+            notif_update["parsedCategory"] = body.category
+        if body.amount is not None:
+            notif_update["parsedAmount"] = float(body.amount)
+        notif_doc.reference.update(notif_update)
         print(f"[CONFIRM] Notification {notif_doc.id} marked confirmed")
         break
 
     # ── 4. Budget update (expenses only) ────────────────────────────────
     budget_update = None
     alerts_created = []
-
-    amount   = float(tx.get("amount", 0))
-    category = tx.get("category")
-    tx_type  = tx.get("type", "expense")
-    month_key = tx.get("monthKey", get_current_month_key())
 
     if tx_type == "expense" and category:
         budgets_ref = db.collection("users").document(uid).collection("budgets")
@@ -195,6 +237,225 @@ async def confirm_transaction(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# POST /confirm-transactions   — bulk confirm OR cancel chat-pending transactions
+#
+# Body:
+# {
+#   "action": "confirm" | "cancel",
+#   "transactions": [
+#     { "id": "txn_id_1", "amount": 100, "category": "Food" },
+#     { "id": "txn_id_2" }
+#   ]
+# }
+#
+# Returns per-item results.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/confirm-transactions")
+async def bulk_confirm_transactions(
+    body: BulkConfirmBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Bulk confirm or cancel a list of pending transactions.
+
+    Use this for:
+    - Confirming chat-parsed pending transactions (from /chat pendingTransactions list).
+    - Cancelling pending transactions the user does not want to log.
+
+    action = "confirm": sets status = "confirmed", increments budget.spent.
+    action = "cancel":  sets status = "cancelled", does NOT touch budgets.
+    """
+    uid = current_user["uid"]
+    db = get_firestore()
+
+    action = (body.action or "confirm").strip().lower()
+    if action not in ("confirm", "cancel"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "INVALID_ACTION",
+                    "message": "action must be 'confirm' or 'cancel'.",
+                },
+            },
+        )
+
+    if not body.transactions:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "EMPTY_LIST",
+                    "message": "transactions list cannot be empty.",
+                },
+            },
+        )
+
+    print(f"[BULK_CONFIRM] uid={uid} action={action} count={len(body.transactions)}")
+
+    results = []
+    for item in body.transactions:
+        tx_id = item.id
+        try:
+            tx_ref = (
+                db.collection("users").document(uid)
+                .collection("transactions").document(tx_id)
+            )
+            tx_doc = tx_ref.get()
+
+            if not tx_doc.exists:
+                results.append({
+                    "id": tx_id,
+                    "status": "error",
+                    "reason": "Transaction not found.",
+                })
+                continue
+
+            tx = tx_doc.to_dict()
+            if tx.get("status") != "pending":
+                results.append({
+                    "id": tx_id,
+                    "status": "skipped",
+                    "reason": f"Transaction is already '{tx.get('status')}'.",
+                })
+                continue
+
+            if action == "cancel":
+                # ── Cancel: mark as cancelled, no budget changes ─────────
+                tx_ref.update({
+                    "status":    "cancelled",
+                    "updatedAt": SERVER_TIMESTAMP,
+                })
+                # Update matching notification doc if any
+                notif_docs = list(
+                    db.collection("users").document(uid)
+                    .collection("notifications")
+                    .where("transactionId", "==", tx_id)
+                    .limit(1)
+                    .stream()
+                )
+                for nd in notif_docs:
+                    nd.reference.update({"status": "cancelled"})
+
+                results.append({
+                    "id": tx_id,
+                    "status": "cancelled",
+                    "transaction": {
+                        "id":       tx_id,
+                        "status":   "cancelled",
+                        "amount":   tx.get("amount"),
+                        "category": tx.get("category"),
+                    },
+                })
+                print(f"[BULK_CONFIRM] Cancelled tx={tx_id}")
+
+            else:
+                # ── Confirm: apply overrides then confirm ────────────────
+                amount   = float(item.amount)   if item.amount   is not None else float(tx.get("amount", 0))
+                category = item.category        if item.category is not None else tx.get("category")
+                tx_type  = tx.get("type", "expense")
+                month_key = tx.get("monthKey", get_current_month_key())
+
+                update_payload: dict = {
+                    "status":    "confirmed",
+                    "updatedAt": SERVER_TIMESTAMP,
+                }
+                if item.amount is not None:
+                    update_payload["amount"] = amount
+                if item.category is not None:
+                    update_payload["category"] = category
+                tx_ref.update(update_payload)
+
+                # Update matching notification
+                notif_docs = list(
+                    db.collection("users").document(uid)
+                    .collection("notifications")
+                    .where("transactionId", "==", tx_id)
+                    .limit(1)
+                    .stream()
+                )
+                for nd in notif_docs:
+                    notif_upd: dict = {"status": "confirmed"}
+                    if item.category is not None:
+                        notif_upd["parsedCategory"] = category
+                    if item.amount is not None:
+                        notif_upd["parsedAmount"] = amount
+                    nd.reference.update(notif_upd)
+
+                # Budget increment (expenses only)
+                budget_update = None
+                if tx_type == "expense" and category:
+                    budgets_ref = db.collection("users").document(uid).collection("budgets")
+                    matching = list(
+                        budgets_ref
+                        .where("category", "==", category)
+                        .where("monthKey", "==", month_key)
+                        .limit(1)
+                        .stream()
+                    )
+                    if matching:
+                        bref = matching[0].reference
+                        bref.update({
+                            "spent":     Increment(amount),
+                            "updatedAt": SERVER_TIMESTAMP,
+                        })
+                        updated_budget = bref.get().to_dict()
+                        new_spent    = updated_budget.get("spent", 0.0)
+                        blimit       = updated_budget.get("limit", 0.0)
+                        remaining    = max(0.0, blimit - new_spent)
+                        percent_used = round((new_spent / blimit) * 100, 2) if blimit > 0 else 0.0
+                        budget_update = {
+                            "id":          matching[0].id,
+                            "category":    category,
+                            "limit":       blimit,
+                            "spent":       new_spent,
+                            "remaining":   remaining,
+                            "percentUsed": percent_used,
+                            "monthKey":    month_key,
+                        }
+
+                results.append({
+                    "id": tx_id,
+                    "status": "confirmed",
+                    "transaction": {
+                        "id":       tx_id,
+                        "amount":   amount,
+                        "category": category,
+                        "type":     tx_type,
+                        "status":   "confirmed",
+                        "monthKey": month_key,
+                    },
+                    "budgetUpdate": budget_update,
+                })
+                print(f"[BULK_CONFIRM] Confirmed tx={tx_id} Rs {amount} {category}")
+
+        except Exception as e:
+            print(f"[BULK_CONFIRM] Error tx={tx_id}: {e}")
+            results.append({
+                "id": tx_id,
+                "status": "error",
+                "reason": str(e),
+            })
+
+    total_confirmed = sum(1 for r in results if r.get("status") == "confirmed")
+    total_cancelled = sum(1 for r in results if r.get("status") == "cancelled")
+    total_errors    = sum(1 for r in results if r.get("status") == "error")
+
+    return {
+        "success": True,
+        "data": {
+            "results":        results,
+            "totalConfirmed": total_confirmed,
+            "totalCancelled": total_cancelled,
+            "totalErrors":    total_errors,
+        },
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # POST /reject-transaction/{transactionId}
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -241,12 +502,12 @@ async def reject_transaction(
             },
         )
 
-    # ── 2. Reject transaction ────────────────────────────────────────────
+    # ── 2. Cancel transaction ────────────────────────────────────────────
     tx_ref.update({
-        "status":    "rejected",
+        "status":    "cancelled",
         "updatedAt": SERVER_TIMESTAMP,
     })
-    print(f"[REJECT] Transaction {transaction_id} marked rejected")
+    print(f"[REJECT] Transaction {transaction_id} marked cancelled")
 
     # ── 3. Update matching notification ─────────────────────────────────
     notif_query = (
@@ -257,13 +518,13 @@ async def reject_transaction(
         .stream()
     )
     for notif_doc in notif_query:
-        notif_doc.reference.update({"status": "rejected"})
-        print(f"[REJECT] Notification {notif_doc.id} marked rejected")
+        notif_doc.reference.update({"status": "cancelled"})
+        print(f"[REJECT] Notification {notif_doc.id} marked cancelled")
         break
 
-    # ── 4. No budget changes on rejection ────────────────────────────────
+    # ── 4. No budget changes on cancellation ──────────────────────────────
 
-    # ── 5. Create assistant message so Chat UI shows the rejection ───────
+    # ── 5. Create assistant message so Chat UI shows the cancellation ─────
     amount   = float(tx.get("amount", 0))
     category = tx.get("category", "")
     source_app = tx.get("description", "").split(":")[0] if ":" in tx.get("description", "") else "Notification"
@@ -274,7 +535,7 @@ async def reject_transaction(
         msg_ref.set({
             "role":                 "assistant",
             "content":              reject_reply,
-            "intent":               "notification_rejected",
+            "intent":               "notification_cancelled",
             "extractedData":        None,
             "relatedTransactionId": transaction_id,
             "createdAt":            SERVER_TIMESTAMP,
@@ -285,14 +546,14 @@ async def reject_transaction(
 
     return {
         "success": True,
-        "message": "Transaction rejected.",
+        "message": "Transaction cancelled.",
         "data": {
             "transaction": {
                 "id":       transaction_id,
                 "amount":   amount,
                 "category": category,
                 "type":     tx.get("type"),
-                "status":   "rejected",
+                "status":   "cancelled",
                 "source":   tx.get("source"),
                 "monthKey": tx.get("monthKey"),
             },

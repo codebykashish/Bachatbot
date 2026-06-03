@@ -17,6 +17,36 @@ logger = logging.getLogger("bachatbot")
 # Initialize Firebase when app starts
 initialize_firebase()
 
+# ── Scheduler Setup ──────────────────────────────────────────────────────────
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from services.budget_service import run_month_rollover, run_pre_month_end_reminder
+
+scheduler = BackgroundScheduler()
+
+# 1. Monthly Rollover: Run at 00:01 on the 1st day of every month
+scheduler.add_job(
+    run_month_rollover,
+    CronTrigger(day=1, hour=0, minute=1),
+    id="monthly_rollover",
+    name="Compute last month spend and set new budgets",
+    replace_existing=True
+)
+
+# 2. Pre-month-end Reminder: Run at 10:00 AM on the 28th of every month
+# (Simple approximation of 1-2 days before month end)
+scheduler.add_job(
+    run_pre_month_end_reminder,
+    CronTrigger(day=28, hour=10, minute=0),
+    id="pre_month_reminder",
+    name="Remind users to set upcoming budget",
+    replace_existing=True
+)
+
+scheduler.start()
+logger.info("[SCHEDULER] Started BackgroundScheduler with 2 jobs")
+
+
 # Create FastAPI app
 app = FastAPI(
     title="BachatBot API",

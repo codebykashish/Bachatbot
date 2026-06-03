@@ -11,6 +11,7 @@ from utils import (
 )
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment
 from typing import Optional
+from services.notification_service import resolve_category_from_receiver_name, parse_receiver_name
 
 router = APIRouter()
 
@@ -340,7 +341,8 @@ async def chat(
         text_lower = user_message.lower().strip()
         
         if is_affirmative(text_lower):
-            # COMMIT: process all pending actions
+            # COMMIT: confirm the pending Firestore transactions that were
+            # already saved when the user first typed the expense message.
             last_transaction = None
             last_budget_update = None
             alerts_created = []
@@ -348,20 +350,127 @@ async def chat(
             
             actions = pending.get("actions", [])
             month_key = pending.get("monthKey") or get_current_month_key()
-            idempotency_key = pending.get("idempotencyKey")
             pending_source = pending.get("source", "chat")
+            # IDs of the pending transactions already stored in Firestore
+            pending_tx_ids = pending.get("pendingTxIds", [])
             
-            for action in actions:
-                txn, bud, alt, rp = _handle_expense_or_income(
-                    db, uid, action, pending_source, month_key,
-                    idempotency_key=idempotency_key,
-                )
-                last_transaction = txn
-                if bud:
-                    last_budget_update = bud
-                if alt:
-                    alerts_created.append(alt)
-                reply_parts.append(rp)
+            if pending_tx_ids:
+                # ── Confirm each pre-saved pending transaction ───────────
+                for tx_id in pending_tx_ids:
+                    try:
+                        tx_ref = (
+                            db.collection("users").document(uid)
+                            .collection("transactions").document(tx_id)
+                        )
+                        tx_doc = tx_ref.get()
+                        if not tx_doc.exists:
+                            print(f"[CHAT][CONFIRM] Pending tx {tx_id} not found — skipping")
+                            continue
+                        tx = tx_doc.to_dict()
+                        if tx.get("status") != "pending":
+                            print(f"[CHAT][CONFIRM] tx {tx_id} already {tx.get('status')} — skipping")
+                            continue
+
+                        tx_ref.update({
+                            "status":    "confirmed",
+                            "updatedAt": SERVER_TIMESTAMP,
+                        })
+
+                        amount   = float(tx.get("amount", 0))
+                        category = tx.get("category")
+                        tx_type  = tx.get("type", "expense")
+                        tx_mk    = tx.get("monthKey", month_key)
+
+                        # Budget increment for expenses
+                        budget_update = None
+                        percent_used  = 0.0
+                        if tx_type == "expense" and category:
+                            bud_docs = list(
+                                db.collection("users").document(uid).collection("budgets")
+                                .where("category", "==", category)
+                                .where("monthKey", "==", tx_mk)
+                                .limit(1)
+                                .stream()
+                            )
+                            if bud_docs:
+                                bref = bud_docs[0].reference
+                                bref.update({
+                                    "spent":     Increment(amount),
+                                    "updatedAt": SERVER_TIMESTAMP,
+                                })
+                                upd = bref.get().to_dict()
+                                new_spent    = upd.get("spent", 0.0)
+                                blimit       = upd.get("limit", 0.0)
+                                remaining    = max(0.0, blimit - new_spent)
+                                percent_used = round((new_spent / blimit) * 100, 2) if blimit > 0 else 0.0
+                                budget_update = {
+                                    "id":          bud_docs[0].id,
+                                    "category":    category,
+                                    "limit":       blimit,
+                                    "spent":       new_spent,
+                                    "remaining":   remaining,
+                                    "percentUsed": percent_used,
+                                    "monthKey":    tx_mk,
+                                }
+                                print(f"[CHAT][CONFIRM] Budget {category}: spent={new_spent} ({percent_used}%)")
+
+                        if budget_update:
+                            last_budget_update = budget_update
+
+                        # Alert
+                        try:
+                            cat_label = f"{category} " if category else ""
+                            msg = f"Rs {int(amount)} {cat_label}expense saved."
+                            if tx_type == "expense" and budget_update and percent_used >= 80:
+                                msg = f"{category} Rs {int(amount)} saved, {int(percent_used)}% budget used!"
+                            aref = db.collection("users").document(uid).collection("alerts").document()
+                            aref.set({
+                                "type":                  "transaction_saved",
+                                "message":               msg,
+                                "category":              category,
+                                "severity":              "medium" if percent_used >= 80 else "low",
+                                "isRead":                False,
+                                "isDeleted":             False,
+                                "monthKey":              tx_mk,
+                                "relatedTransactionId":  tx_id,
+                                "createdAt":             SERVER_TIMESTAMP,
+                            })
+                            alerts_created.append({
+                                "id":       aref.id, "type": "transaction_saved",
+                                "message":  msg,     "category": category,
+                                "severity": "medium" if percent_used >= 80 else "low",
+                                "isRead":   False,   "monthKey": tx_mk,
+                                "relatedTransactionId": tx_id,
+                            })
+                        except Exception as ae:
+                            print(f"[CHAT][CONFIRM] Alert FAILED: {ae}")
+
+                        cat_display = category or "Income"
+                        reply_parts.append(f"Rs {int(amount)} {cat_display}")
+                        last_transaction = {
+                            "id":       tx_id,
+                            "amount":   amount,
+                            "category": category,
+                            "type":     tx_type,
+                            "status":   "confirmed",
+                            "source":   tx.get("source", pending_source),
+                            "monthKey": tx_mk,
+                        }
+                        print(f"[CHAT][CONFIRM] Confirmed tx {tx_id} Rs {amount} {category}")
+                    except Exception as ce:
+                        print(f"[CHAT][CONFIRM] Error confirming tx {tx_id}: {ce}")
+            else:
+                # Fallback: no stored IDs (old pending format) — create new confirmed transactions
+                for action in actions:
+                    txn, bud, alt, rp = _handle_expense_or_income(
+                        db, uid, action, pending_source, month_key,
+                    )
+                    last_transaction = txn
+                    if bud:
+                        last_budget_update = bud
+                    if alt:
+                        alerts_created.append(alt)
+                    reply_parts.append(rp)
                 
             pending_ref.delete()
             
@@ -402,7 +511,18 @@ async def chat(
             }
             
         elif is_denial(text_lower):
-            # DISCARD
+            # DISCARD: mark pending transactions as cancelled
+            pending_tx_ids = pending.get("pendingTxIds", [])
+            for tx_id in pending_tx_ids:
+                try:
+                    db.collection("users").document(uid).collection("transactions").document(tx_id).update({
+                        "status": "cancelled",
+                        "updatedAt": SERVER_TIMESTAMP
+                    })
+                    print(f"[CHAT][CANCEL] Marked tx {tx_id} as cancelled")
+                except Exception as ce:
+                    print(f"[CHAT][CANCEL] Error cancelling tx {tx_id}: {ce}")
+
             pending_ref.delete()
             reply = "Thik cha, cancel gareko chu."
             
@@ -463,24 +583,38 @@ async def chat(
             f"uncertain={category_uncertain}"
         )
 
-        # B. Create PENDING transaction
+        # B. Parse receiver name + resolve suggested category
+        receiver_name = parse_receiver_name(user_message)
+        suggested_category = resolve_category_from_receiver_name(receiver_name)
+        # If resolver gives a category, use it (overrides uncertain flag)
+        if suggested_category and category_uncertain:
+            category = suggested_category
+            category_uncertain = False
+            print(f"[CHAT][NOTIF] receiver_name='{receiver_name}' resolved → category='{category}'")
+        else:
+            print(f"[CHAT][NOTIF] receiver_name='{receiver_name}' suggestedCategory='{suggested_category}'")
+
+        # C. Create PENDING transaction
         tx_ref = (
             db.collection("users").document(uid)
             .collection("transactions").document()
         )
         tx_data = {
-            "amount":            float(amount),
-            "category":          category if not category_uncertain else None,
-            "type":              tx_type,
-            "status":            "pending",
-            "source":            "notification",
-            "description":       user_message,
-            "monthKey":          month_key,
-            "isDeleted":         False,
-            "deletedAt":         None,
-            "originalMessageId": original_message_id,
-            "createdAt":         SERVER_TIMESTAMP,
-            "updatedAt":         SERVER_TIMESTAMP,
+            "amount":             float(amount),
+            "category":           category if not category_uncertain else None,
+            "type":               tx_type,
+            "status":             "pending",
+            "source":             "notification",
+            "description":        user_message,
+            "monthKey":           month_key,
+            "isDeleted":          False,
+            "deletedAt":          None,
+            "originalMessageId":  original_message_id,
+            # New fields for notification-based transactions
+            "receiverName":       receiver_name,
+            "suggestedCategory":  suggested_category,
+            "createdAt":          SERVER_TIMESTAMP,
+            "updatedAt":          SERVER_TIMESTAMP,
         }
         tx_ref.set(tx_data)
         print(f"[CHAT][NOTIF] Pending transaction created: id={tx_ref.id}")
@@ -497,49 +631,57 @@ async def chat(
             "isDeleted":         False,
             "deletedAt":         None,
             "originalMessageId": original_message_id,
+            "receiverName":      receiver_name,
+            "suggestedCategory": suggested_category,
         }
 
-        # C. Create notification doc
+        # D. Create notification doc
         notif_ref = (
             db.collection("users").document(uid)
             .collection("notifications").document()
         )
         notif_data = {
-            "rawText":        user_message,
-            "parsedAmount":   float(amount),
-            "parsedCategory": category if not category_uncertain else None,
-            "parsedType":     tx_type,
-            "sourceApp":      source_app,
-            "status":         "pending",
-            "transactionId":  tx_ref.id,
-            "createdAt":      SERVER_TIMESTAMP,
+            "rawText":           user_message,
+            "parsedAmount":      float(amount),
+            "parsedCategory":    category if not category_uncertain else None,
+            "parsedType":        tx_type,
+            "sourceApp":         source_app,
+            "status":            "pending",
+            "transactionId":     tx_ref.id,
+            # New fields
+            "receiverName":      receiver_name,
+            "suggestedCategory": suggested_category,
+            "createdAt":         SERVER_TIMESTAMP,
         }
         notif_ref.set(notif_data)
         print(f"[CHAT][NOTIF] Notification doc created: id={notif_ref.id}")
 
         notification_out = {
-            "id":             notif_ref.id,
-            "rawText":        user_message,
-            "parsedAmount":   float(amount),
-            "parsedCategory": category if not category_uncertain else None,
-            "parsedType":     tx_type,
-            "sourceApp":      source_app,
-            "status":         "pending",
-            "transactionId":  tx_ref.id,
+            "id":                notif_ref.id,
+            "rawText":           user_message,
+            "parsedAmount":      float(amount),
+            "parsedCategory":    category if not category_uncertain else None,
+            "parsedType":        tx_type,
+            "sourceApp":         source_app,
+            "status":            "pending",
+            "transactionId":     tx_ref.id,
+            "receiverName":      receiver_name,
+            "suggestedCategory": suggested_category,
         }
 
-        # D. Build reply — different for certain vs uncertain category
+        # E. Build reply — different for certain vs uncertain category
         if category_uncertain:
             # Category unknown → ask the user
             cat_options = "/".join(c for c in EXPENSE_CATEGORIES if c != "Other")
+            receiver_hint = f" ({receiver_name})" if receiver_name else ""
             if tx_type == "expense":
                 reply = (
-                    f"{source_app} bata Rs {int(amount)} expense detect bhayo. "
+                    f"{source_app} bata Rs {int(amount)} expense detect bhayo{receiver_hint}. "
                     f"Kun category ma halne? ({cat_options}/Other)"
                 )
             else:
                 reply = (
-                    f"{source_app} bata Rs {int(amount)} income detect bhayo. "
+                    f"{source_app} bata Rs {int(amount)} income detect bhayo{receiver_hint}. "
                     f"Kun category ma halne? ({cat_options}/Other)"
                 )
             reply_intent = "notification_parse_ask_category"
@@ -985,9 +1127,41 @@ async def chat(
 
     # ── Conversational Confirmation Holding ──────────────────────────────
     if pending_actions:
+        # ── Save each pending action as a PENDING transaction in Firestore ──
+        # Status = pending so they are excluded from all budget/report calculations
+        # until the user confirms via the chat or the /confirm-transactions endpoint.
+        pending_tx_ids = []
+        for a in pending_actions:
+            p_tx_ref = (
+                db.collection("users").document(uid)
+                .collection("transactions").document()
+            )
+            p_tx_data = {
+                "amount":            float(a["amount"]),
+                "category":          a.get("category"),
+                "type":              a.get("type", "expense"),
+                "status":            "pending",
+                "source":            source,
+                "description":       a.get("description", user_message),
+                "monthKey":          resolve_month_key(a.get("monthKey")) if a.get("monthKey") else get_current_month_key(),
+                "isDeleted":         False,
+                "deletedAt":         None,
+                "originalMessageId": None,
+                "createdAt":         SERVER_TIMESTAMP,
+                "updatedAt":         SERVER_TIMESTAMP,
+            }
+            if idempotency_key:
+                p_tx_data["idempotencyKey"] = idempotency_key
+            p_tx_ref.set(p_tx_data)
+            pending_tx_ids.append(p_tx_ref.id)
+            print(f"[CHAT] Pending transaction saved: id={p_tx_ref.id} Rs {a['amount']} {a.get('category')}")
+
+        # Store the pending action doc (for conversational yes/no resolution)
+        # Now also store the transaction IDs so the confirm path can look them up.
         pending_ref = db.collection("users").document(uid).collection("pendingAction").document("current")
         pending_ref.set({
             "actions": pending_actions,
+            "pendingTxIds": pending_tx_ids,
             "source": source,
             "monthKey": month_key,
             "idempotencyKey": idempotency_key,
@@ -996,7 +1170,8 @@ async def chat(
         
         # Build bilingual question: e.g. "Rs 250 Food ma?" or "Rs 250 Food ma ra Rs 20 Transport ma?"
         question_parts = []
-        for a in pending_actions:
+        pending_transactions_out = []
+        for a, tx_id in zip(pending_actions, pending_tx_ids):
             amt = int(float(a["amount"]))
             cat = a.get("category") or "Income"
             
@@ -1015,6 +1190,15 @@ async def chat(
                 question_parts.append(f"{amt} {label} ma")
             else:
                 question_parts.append(f"{amt} {label}")
+
+            # Structured pending transaction info for frontend
+            pending_transactions_out.append({
+                "id":       tx_id,
+                "amount":   float(a["amount"]),
+                "label":    label,
+                "category": a.get("category"),
+                "status":   "pending",
+            })
                 
         question = " ra ".join(question_parts) + "?"
         
@@ -1042,7 +1226,7 @@ async def chat(
             "createdAt": SERVER_TIMESTAMP,
         })
         
-        print(f"[CHAT] Stored pendingAction. Question: {final_reply}")
+        print(f"[CHAT] Stored pendingAction with {len(pending_tx_ids)} pending txs. Question: {final_reply}")
         
         return {
             "success": True,
@@ -1050,6 +1234,8 @@ async def chat(
                 "reply": final_reply,
                 "intent": "confirm_expense_ask",
                 "needsConfirmation": True,
+                # pendingTransactions gives frontend the IDs to confirm/cancel via API
+                "pendingTransactions": pending_transactions_out,
                 "transaction": None,
                 "budgetUpdate": None,
                 "alerts": [],

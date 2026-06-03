@@ -13,6 +13,7 @@ class TransactionStatusEnum(str, Enum):
     CONFIRMED = "confirmed"
     PENDING = "pending"
     REJECTED = "rejected"
+    CANCELLED = "cancelled"
 
 
 class TransactionSourceEnum(str, Enum):

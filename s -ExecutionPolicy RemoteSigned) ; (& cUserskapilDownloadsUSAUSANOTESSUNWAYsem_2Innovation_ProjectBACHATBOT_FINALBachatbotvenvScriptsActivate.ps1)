@@ -1,0 +1,152 @@
+[33mcommit 358389d866f078a1d2e3afb75552e91c3fac2e9d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32msync[m[33m, [m[1;31morigin/sync[m[33m)[m
+Author: codebykashish <kashdhami74@gmail.com>
+Date:   Thu May 21 07:59:26 2026 +0545
+
+    Add report
+
+[33mcommit 1d8d34cb33b5b79fff75def73e95c2a9efe6f651[m
+Author: codebykashish <kashdhami74@gmail.com>
+Date:   Tue May 19 07:30:50 2026 +0545
+
+    Add report
+
+[33mcommit a9e00e2b3dc27cc1b7441d7036e444692dd96a80[m
+Author: codebykashish <kashdhami74@gmail.com>
+Date:   Fri May 15 18:47:08 2026 +0545
+
+    improve transaction flow
+
+[33mcommit 74ff026d3917fd40e846bb3d9a24a26d6b56726d[m
+Author: codebykashish <kashdhami74@gmail.com>
+Date:   Fri May 15 18:11:53 2026 +0545
+
+    Add noti-sync
+
+[33mcommit c30d57c4e7ef37a76efdf2da4c41d1d284144fa5[m
+Author: codebykashish <kashdhami74@gmail.com>
+Date:   Wed May 13 15:28:45 2026 +0545
+
+    Retrieve code
+
+[33mcommit a691efd52cb9e48f2f39eab0af1b13ce642bdbec[m[33m ([m[1;32mnsync[m[33m)[m
+Author: codebykashish <kashdhami74@gmail.com>
+Date:   Wed May 13 11:42:38 2026 +0545
+
+    Add sync
+
+[33mcommit 12521a0d48bcf8081f4ab0eb7025d3b01783f2eb[m
+Author: Luniva Shrestha <shresthaluns@gmail.com>
+Date:   Wed May 6 10:20:41 2026 +0545
+
+    Add categories
+
+[33mcommit ed9452bb2f9d9bcb36573cf7b5cb64a7e948bb3e[m
+Author: Luniva Shrestha <shresthaluns@gmail.com>
+Date:   Wed Apr 29 15:55:45 2026 +0545
+
+    add logout system and categories
+
+[33mcommit 052eca99c9e9b54c0bc39b28bb8d0ee1c35aa8cf[m
+Author: Luniva Shrestha <shresthaluns@gmail.com>
+Date:   Mon Apr 27 13:34:15 2026 +0545
+
+    modify gemini main and profile and chat: work
+
+[33mcommit f21cc6b33c0ab0b891d7ae15ba1843d2c7e22998[m
+Author: Luniva Shrestha <shresthaluns@gmail.com>
+Date:   Mon Apr 27 13:31:55 2026 +0545
+
+    fix: correctly add .token to .gitignore
+
+[33mcommit 904c96b882311a33da713c885c3d20c5f8cbc41c[m
+Author: Luniva Shrestha <shresthaluns@gmail.com>
+Date:   Mon Apr 27 08:58:29 2026 +0545
+
+    Before signup change
+
+[33mcommit 4847224e547e94689fc087cb606d21f47e62658f[m
+Merge: 3795dbd 3fc82f7
+Author: Luniva Shrestha <shresthaluns@gmail.com>
+Date:   Sun Apr 26 15:34:21 2026 +0545
+
+    Firebase
+
+[33mcommit 3795dbdf5315c4522214a4439de68a8ff37c87d3[m
+Author: Luniva Shrestha <shresthaluns@gmail.com>
+Date:   Sun Apr 26 15:29:04 2026 +0545
+
+    Luniva
+
+[33mcommit 3fc82f733d77e7f3b08879fd14c8e2ef058e8a40[m[33m ([m[1;31morigin/chatbot[m[33m)[m
+Author: codebykashish <kashdhami74@gmail.com>
+Date:   Sun Apr 26 15:07:45 2026 +0545
+
+    delete
+
+[33mcommit b9fe91d0137ec170489385246bc5e70206ad42f8[m
+Author: Luniva Shrestha <shresthaluns@gmail.com>
+Date:   Sun Apr 26 14:01:44 2026 +0545
+
+    Change schema
+
+[33mcommit fe643f8b307b683c4b799f8bf7a0855984192df5[m
+Author: codebykashish <kashdhami74@gmail.com>
+Date:   Sat Apr 25 15:55:36 2026 +0545
+
+    Week 1 Backend complete: auth + profile + chat + transactions
+
+[33mcommit f491532874076517f842273ecd01398151c34e04[m
+Author: Kashish Dhami <kashdhami74@gmail.com>
+Date:   Sat Apr 25 11:59:26 2026 +0545
+
+    Revise README for BachatBot project details
+    
+    Updated README to reflect project scope, features, and architecture.
+
+[33mcommit bfd39e5bee4199fd69a04320c3bb0a89d8c3c816[m
+Author: Kashish Dhami <kashdhami74@gmail.com>
+Date:   Sat Apr 25 11:58:47 2026 +0545
+
+    Add final README for BachatBot MVP
+
+[33mcommit 9fc809354e6826afd2a6b04feb420d4b50fd428a[m
+Author: Kashish Dhami <kashdhami74@gmail.com>
+Date:   Sat Apr 25 11:58:05 2026 +0545
+
+    Delete readme_new
+
+[33mcommit 7edc683e4939eb6d4fd5d2c276ed5ae4410df71c[m
+Author: Kashish Dhami <kashdhami74@gmail.com>
+Date:   Sat Apr 25 11:57:24 2026 +0545
+
+    Create README for BachatBot project
+    
+    Added a comprehensive README for BachatBot, detailing its features, architecture, tech stack, and project status.
+
+[33mcommit 465570a164dfb99f34afc4db832373dd9a998bc4[m
+Author: Kashish Dhami <kashdhami74@gmail.com>
+Date:   Sat Apr 25 11:56:03 2026 +0545
+
+    Revise README with final project details and scope
+    
+    Expanded README to include detailed project features, database schema, and API endpoints.
+
+[33mcommit e1d4aa7f10898b0db9714815317a209799fa0976[m
+Author: Kashish Dhami <kashdhami74@gmail.com>
+Date:   Sat Apr 25 11:49:28 2026 +0545
+
+    define endpoints
+
+[33mcommit 9ffd5cd1318447142f8002be0feb48adc02cba29[m
+Author: Kashish Dhami <kashdhami74@gmail.com>
+Date:   Sat Apr 25 11:47:18 2026 +0545
+
+    Create schema.md for user data structure
+    
+    Added detailed schema for user data structure including collections and subcollections.
+
+[33mcommit 7092f1049e9a49bfd224d12d7c98ca8c2141cd1c[m
+Author: Kashish Dhami <kashdhami74@gmail.com>
+Date:   Sat Apr 25 11:46:17 2026 +0545
+
+    Initial commit

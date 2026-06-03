@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from pydantic import BaseModel, Field
 from typing import Optional
 from firebase_config import get_firestore
@@ -184,11 +184,38 @@ async def get_budgets(
             "monthKey": data.get("monthKey"),
         })
 
+    # Also fetch confirmation status
+    from services.budget_service import get_budget_month_meta
+    meta = get_budget_month_meta(db, uid, month_key)
+
     return {
         "success": True,
         "data": {
             "budgets": budgets,
             "monthKey": month_key,
+            "budgetConfirmedForMonth": meta.get("budgetConfirmedForMonth", False),
             "count": len(budgets),
         },
+    }
+
+
+@router.post("/budgets/confirm")
+async def confirm_monthly_budget(
+    monthKey: Optional[str] = Body(None, embed=True),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Mark the budgets for a given month as 'confirmed' by the user.
+    This stops the pre-month-end reminders for that month.
+    """
+    uid = current_user["uid"]
+    db = get_firestore()
+    month_key = monthKey or get_current_month_key()
+
+    from services.budget_service import set_budget_confirmed_for_month
+    set_budget_confirmed_for_month(db, uid, month_key, confirmed=True)
+
+    return {
+        "success": True,
+        "message": f"Budgets for {month_key} confirmed."
     }
