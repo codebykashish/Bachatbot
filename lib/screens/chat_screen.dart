@@ -216,70 +216,12 @@ class _ChatScreenState extends State<ChatScreen> {
         await batch.commit();
       }
 
-      // 3. Also load any notification-based pending transactions
-      _loadNotificationPendingTransactions();
     } catch (e) {
       debugPrint(
           '[ChatScreen] REST API history load failed (offline/network failure): $e');
     } finally {
       // 4. Fall back to listening to persistent Firestore cache snapshots reactively
       _listenToMessages();
-    }
-  }
-
-  /// Fetches notification-based pending transactions and injects them as
-  /// assistant cards into the chat (if not already present).
-  Future<void> _loadNotificationPendingTransactions() async {
-    try {
-      final res = await ApiService.get('/transactions/pending');
-      if (!mounted) return;
-
-      final rawList = res['data']?['transactions'] as List? ?? [];
-      if (rawList.isEmpty) return;
-
-      final pending = rawList
-          .map((e) => PendingTransaction.fromJson(e as Map<String, dynamic>))
-          .where((t) => t.source == 'notification')
-          .toList();
-
-      if (pending.isEmpty) return;
-
-      // Each notification pending transaction gets its own card in the chat.
-      final userId = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
-      final messagesColl = FirebaseFirestore.instance
-          .collection('chats')
-          .doc(userId)
-          .collection('messages');
-
-      for (final t in pending) {
-        // Check not already shown
-        final existing = await messagesColl
-            .where('pendingTransactionId', isEqualTo: t.id)
-            .limit(1)
-            .get();
-        if (existing.docs.isNotEmpty) continue;
-
-        final docRef = messagesColl.doc();
-        final cardLocalId = docRef.id;
-
-        await docRef.set({
-          'role': 'assistant',
-          'content':
-              'eSewa bata Rs ${t.amount.toStringAsFixed(0)} \'${t.receiverName ?? t.label}\' lai pathaunu bhayo.\n\nYo kharcha lai kun category ma rakhne?\n\nPlease confirm garnu hola.',
-          'intent': 'notification_pending',
-          'timestamp': FieldValue.serverTimestamp(),
-          'pendingTransactionId': t.id,
-          'pendingCardLocalId': cardLocalId,
-        });
-
-        // Register in memory
-        _pendingCards[docRef.id] = _PendingCard(
-          localId: cardLocalId,
-          items: [t],
-        );
-      }
-    } catch (e) {
-      debugPrint('[ChatScreen] Could not load notification pending: $e');
     }
   }
 
