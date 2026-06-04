@@ -793,14 +793,28 @@ async def chat(
         )
         # Only the message we just saved exists → first message
         is_first_message = len(existing_msgs) <= 1
+
+        # Compute missing budget categories for current month
+        curr_month = get_current_month_key()
+        budget_docs = (
+            db.collection("users").document(uid)
+            .collection("budgets")
+            .where("monthKey", "==", curr_month)
+            .stream()
+        )
+        existing_cats = {d.to_dict().get("category") for d in budget_docs if d.to_dict().get("limit", 0) > 0}
+        missing_budget_categories = [c for c in EXPENSE_CATEGORIES if c not in existing_cats]
+
     except Exception as ctx_err:
         print(f"[CHAT] Context lookup failed (non-critical): {ctx_err}")
+        missing_budget_categories = []
 
     # ── Call Gemini ──────────────────────────────────────────────────────
     gemini_result = await process_chat_message(
         user_message,
         first_name=first_name,
         is_first_message=is_first_message,
+        missing_budget_categories=missing_budget_categories,
     )
     gemini_reply = gemini_result["reply"]
     actions = gemini_result["actions"]
@@ -1561,7 +1575,20 @@ async def chat_sync(
             })
 
             # ── Call Gemini ──────────────────────────────────────────────
-            gemini_result = await process_chat_message(user_message)
+            # Compute missing budget categories for the derived month
+            budget_docs = (
+                db.collection("users").document(uid)
+                .collection("budgets")
+                .where("monthKey", "==", derived_month_key)
+                .stream()
+            )
+            existing_cats = {d.to_dict().get("category") for d in budget_docs if d.to_dict().get("limit", 0) > 0}
+            missing_budget_categories = [c for c in EXPENSE_CATEGORIES if c not in existing_cats]
+
+            gemini_result = await process_chat_message(
+                user_message,
+                missing_budget_categories=missing_budget_categories
+            )
             gemini_reply = gemini_result["reply"]
             actions = gemini_result["actions"]
 
