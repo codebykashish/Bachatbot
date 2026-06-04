@@ -16,6 +16,9 @@ class _EmailSignupPageState extends State<EmailSignupPage> {
   final _emailController = TextEditingController();
   bool _isLoading = false;
 
+  // Inline error shown below the email field
+  String? _emailError;
+
   // Email validation regex
   final _emailRegex = RegExp(r'^[^@]+@[^@]+\.[^@]+$');
 
@@ -25,20 +28,37 @@ class _EmailSignupPageState extends State<EmailSignupPage> {
     super.dispose();
   }
 
-  String? _validateEmail(String? value) {
-    if (value == null || value.isEmpty) {
+  void _onEmailChanged(String _) {
+    // Clear error as soon as user starts typing to enable the button again
+    if (_emailError != null) {
+      setState(() => _emailError = null);
+    }
+  }
+
+  String? _getLocalError(String value) {
+    if (value.isEmpty) {
       return 'Please enter your email';
     }
     if (!_emailRegex.hasMatch(value)) {
       return 'Please enter a valid email address';
     }
-    if (value.toLowerCase().contains('@gnail.com')) {
-      return 'Domain looks wrong. Did you mean @gmail.com?';
+    
+    // Domain check: Only allow @gmail.com
+    final parts = value.split('@');
+    if (parts.length == 2) {
+      final domain = parts[1].toLowerCase();
+      if (domain != 'gmail.com') {
+        return 'Please enter a Gmail address ending with @gmail.com.';
+      }
+    } else {
+      return 'Please enter a valid email address';
     }
+    
     return null;
   }
 
   void _showError(String message) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -47,35 +67,83 @@ class _EmailSignupPageState extends State<EmailSignupPage> {
     );
   }
 
+  /// Calls the uniqueness check and the code sending endpoint.
   Future<void> _sendCode() async {
-    if (!_formKey.currentState!.validate()) {
+    final email = _emailController.text.trim();
+    
+    // 1. Local format and domain check
+    final localError = _getLocalError(email);
+    if (localError != null) {
+      setState(() => _emailError = localError);
       return;
     }
 
-    final email = _emailController.text.trim();
+    setState(() {
+      _isLoading = true;
+      _emailError = null;
+    });
 
-    setState(() => _isLoading = true);
     try {
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/send-verification-code'),
+      // 2. UX Optimization: Call check-email first
+      final checkRes = await http.post(
+        Uri.parse('${ApiService.baseUrl}/check-email'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': email}),
       );
 
-      if (response.statusCode == 200) {
-        if (mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => CodeVerificationPage(email: email),
-            ),
-          );
+      if (checkRes.statusCode == 200) {
+        final checkData = jsonDecode(checkRes.body);
+        if (checkData['exists'] == true) {
+          setState(() {
+            _emailError = 'An account with this email already exists.\nPlease use another Gmail address or log in instead.';
+            _isLoading = false;
+          });
+          return;
         }
+      }
+
+      // 3. Call send-verification-code
+      final response = await http.post(
+        Uri.parse('${ApiService.baseUrl}/send-verification-code'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'purpose': 'signup',
+        }),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CodeVerificationPage(email: email),
+          ),
+        );
       } else {
-        _showError('Failed to send code: ${response.body}');
+        // 4. Handle specific backend error codes
+        try {
+          final data = jsonDecode(response.body);
+          final errorKey = data['error'];
+          
+          if (errorKey == 'EMAIL_ALREADY_IN_USE') {
+            setState(() {
+              _emailError = 'An account with this email already exists.\nPlease use another Gmail address or log in instead.';
+            });
+          } else if (errorKey == 'INVALID_EMAIL_DOMAIN') {
+             setState(() {
+              _emailError = data['message'] ?? 'Please enter a Gmail address ending with @gmail.com.';
+            });
+          } else {
+            _showError(data['message'] ?? 'Failed to send code. Please try again.');
+          }
+        } catch (_) {
+          _showError('Failed to send code. Please try again.');
+        }
       }
     } catch (e) {
-      _showError('An error occurred. Please try again.');
+      if (mounted) _showError('An error occurred. Please try again.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -83,6 +151,8 @@ class _EmailSignupPageState extends State<EmailSignupPage> {
 
   @override
   Widget build(BuildContext context) {
+    final bool hasError = _emailError != null;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Create Account'),
@@ -98,7 +168,7 @@ class _EmailSignupPageState extends State<EmailSignupPage> {
             children: [
               const SizedBox(height: 24),
               const Text(
-                'Enter your email',
+                'What\'s your email address?',
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
@@ -114,26 +184,57 @@ class _EmailSignupPageState extends State<EmailSignupPage> {
                 ),
               ),
               const SizedBox(height: 32),
+
+              // ── Email field ───────────────────────────────────────────────
               TextFormField(
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
-                validator: _validateEmail,
+                onChanged: _onEmailChanged,
                 decoration: InputDecoration(
                   labelText: 'Email Address',
                   prefixIcon: const Icon(Icons.email_outlined),
+                  // Red error icon on the right if invalid
+                  suffixIcon: hasError ? const Icon(Icons.error, color: Colors.red) : null,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
+                  // Red border style when error exists
+                  enabledBorder: hasError
+                      ? OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: Colors.red),
+                        )
+                      : null,
+                  focusedBorder: hasError
+                      ? OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: Colors.red, width: 2),
+                        )
+                      : null,
                 ),
               ),
+
+              // ── Inline error ─────────────────────────────────────────────
+              if (hasError) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _emailError!,
+                  style: const TextStyle(color: Colors.red, fontSize: 12),
+                ),
+              ],
+
               const SizedBox(height: 32),
+
+              // ── Next button ───────────────────────────────────────────────
               SizedBox(
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: _isLoading ? null : _sendCode,
+                  // Button is disabled while loading OR while an error is shown
+                  onPressed: (_isLoading || hasError) ? null : _sendCode,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF2DBE7F),
                     foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.grey.shade300,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -148,7 +249,7 @@ class _EmailSignupPageState extends State<EmailSignupPage> {
                           ),
                         )
                       : const Text(
-                          'Send Code',
+                          'Next',
                           style: TextStyle(fontSize: 16),
                         ),
                 ),

@@ -12,7 +12,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // ENABLE FIRESTORE OFFLINE PERSISTENCE:
+  // ENABLE FIRESTORE OFFLINE PERSISTENCE:q
   // Configure Firestore settings to enable offline local caching and unlimited cache size.
   // This allows local reads and writes to work seamlessly without network connectivity.
   FirebaseFirestore.instance.settings = const Settings(

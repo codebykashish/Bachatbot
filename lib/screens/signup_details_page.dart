@@ -23,6 +23,9 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  
+  // Backend password error if any
+  String? _backendPasswordError;
 
   @override
   void dispose() {
@@ -33,6 +36,42 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
     _confirmPasswordController.dispose();
     super.dispose();
   }
+
+  // ── Password Rules Logic ───────────────────────────────────────────────
+
+  bool get _hasMinLength => _passwordController.text.length >= 8;
+  bool get _hasNumber => _passwordController.text.contains(RegExp(r'[0-9]'));
+  bool get _hasSpecial => _passwordController.text.contains(RegExp(r'[^a-zA-Z0-9]'));
+  bool get _isPasswordStrong => _hasMinLength && _hasNumber && _hasSpecial;
+
+  String? _getPasswordError() {
+    final password = _passwordController.text;
+    if (password.isEmpty) return null;
+    
+    // Prioritize backend error if it exists and password hasn't changed much
+    if (_backendPasswordError != null) return _backendPasswordError;
+
+    List<String> missing = [];
+    if (!_hasMinLength) {
+      int remaining = 8 - password.length;
+      return 'Your password is too short. Add at least $remaining more characters (minimum 8 characters in total).';
+    }
+    
+    if (!_hasNumber) missing.add('one number (e.g. 1, 2, 3)');
+    if (!_hasSpecial) missing.add('one special character (e.g. @, #, *)');
+
+    if (missing.isNotEmpty) {
+      if (missing.length == 1) {
+        return 'Your password is missing: ${missing[0]}.';
+      } else {
+        return 'Your password is missing: ${missing[0]} and ${missing[1]}.';
+      }
+    }
+
+    return null;
+  }
+
+  // ── Validators ─────────────────────────────────────────────────────────────
 
   String? _validateFirstName(String? value) {
     if (value == null || value.trim().isEmpty) {
@@ -48,16 +87,6 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
     return null;
   }
 
-  String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Password is required';
-    }
-    if (value.length < 8) {
-      return 'Password must be at least 8 characters';
-    }
-    return null;
-  }
-
   String? _validateConfirmPassword(String? value) {
     if (value == null || value.isEmpty) {
       return 'Please confirm your password';
@@ -68,7 +97,10 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
     return null;
   }
 
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
   void _showError(String message) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -78,6 +110,7 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
   }
 
   void _showSuccess(String message) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -86,17 +119,22 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
     );
   }
 
+  // ── Signup logic ────────────────────────────────────────────────────────────
+
   Future<void> _completeSignup() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
+    if (!_isPasswordStrong) return;
 
     final firstName = _firstNameController.text.trim();
     final lastName = _lastNameController.text.trim();
     final phone = _phoneController.text.trim();
-    final password = _passwordController.text.trim();
+    final password = _passwordController.text;
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _backendPasswordError = null;
+    });
+
     try {
       // 1. Firebase create user
       final userCredential =
@@ -105,10 +143,10 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
         password: password,
       );
 
-      // Save the first name to Firebase Auth profile
+      // Save display name
       await userCredential.user?.updateDisplayName(firstName);
 
-      // 2. Complete signup in backend (WITH token)
+      // 2. Complete signup in backend
       try {
         final signupRes = await ApiService.post('/complete-signup', {
           'firstName': firstName,
@@ -118,17 +156,22 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
         });
         debugPrint('[SignupDetailsPage] /complete-signup response: $signupRes');
       } catch (e) {
-        // Handle 409 conflict (user already exists in backend) — that's OK
-        debugPrint(
-            '[SignupDetailsPage] /complete-signup error (may be 409): $e');
+        debugPrint('[SignupDetailsPage] /complete-signup error: $e');
+        
+        // Handle backend weak password error if it comes back from complete-signup
+        final errorMsg = e.toString().toLowerCase();
+        if (errorMsg.contains('password') && errorMsg.contains('weak')) {
+           setState(() => _backendPasswordError = 'The backend rejected this password as too weak. Please use a stronger one.');
+           // If it failed at backend, we might want to delete the firebase user or let them try again
+           // For now, let's just show the error.
+        }
       }
 
-      // 3. Verify profile was created
+      // 3. Verify profile
       try {
-        final profileRes = await ApiService.get('/profile');
-        debugPrint('[SignupDetailsPage] /profile after signup: $profileRes');
+        await ApiService.get('/profile');
       } catch (e) {
-        debugPrint('[SignupDetailsPage] /profile error after signup: $e');
+        debugPrint('[SignupDetailsPage] /profile error: $e');
       }
 
       if (!mounted) return;
@@ -142,7 +185,11 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
         (route) => false,
       );
     } on FirebaseAuthException catch (e) {
-      _showError(e.message ?? 'Signup failed in Firebase.');
+      if (e.code == 'weak-password') {
+        setState(() => _backendPasswordError = e.message ?? 'Password is too weak.');
+      } else {
+        _showError(e.message ?? 'Signup failed. Please try again.');
+      }
     } catch (e) {
       debugPrint('[SignupDetailsPage] signup error: $e');
       _showError('Failed to complete signup. Please try again.');
@@ -153,6 +200,9 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final passwordError = _getPasswordError();
+    final bool canSubmit = !_isLoading && _isPasswordStrong;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profile Details'),
@@ -176,6 +226,8 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
                 ),
               ),
               const SizedBox(height: 24),
+
+              // ── First Name ─────────────────────────────────────────────
               TextFormField(
                 controller: _firstNameController,
                 validator: _validateFirstName,
@@ -188,6 +240,8 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
                 ),
               ),
               const SizedBox(height: 16),
+
+              // ── Last Name ──────────────────────────────────────────────
               TextFormField(
                 controller: _lastNameController,
                 validator: _validateLastName,
@@ -200,6 +254,8 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
                 ),
               ),
               const SizedBox(height: 16),
+
+              // ── Phone ──────────────────────────────────────────────────
               TextFormField(
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
@@ -212,11 +268,18 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
                 ),
               ),
               const SizedBox(height: 24),
+
+              // ── Password ───────────────────────────────────────────────
               TextFormField(
                 controller: _passwordController,
                 obscureText: _obscurePassword,
-                validator: _validatePassword,
-                onChanged: (_) => setState(() {}), // Rebuild to update hint
+                onChanged: (_) {
+                  if (_backendPasswordError != null) {
+                    setState(() => _backendPasswordError = null);
+                  } else {
+                    setState(() {});
+                  }
+                },
                 decoration: InputDecoration(
                   labelText: 'Password',
                   prefixIcon: const Icon(Icons.lock_outlined),
@@ -232,20 +295,34 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
+                  // Highlight red border if invalid or missing parts
+                  enabledBorder: (passwordError != null)
+                      ? OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: Colors.red),
+                        )
+                      : null,
+                  focusedBorder: (passwordError != null)
+                      ? OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: Colors.red, width: 2),
+                        )
+                      : null,
                 ),
               ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  'Use at least 8 characters, a number and a symbol.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey.shade600,
-                  ),
+
+              // ── Direct Password Error ──────────────────────────────────
+              if (passwordError != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  passwordError,
+                  style: const TextStyle(color: Colors.red, fontSize: 12),
                 ),
-              ),
+              ],
+              
               const SizedBox(height: 16),
+
+              // ── Confirm Password ───────────────────────────────────────
               TextFormField(
                 controller: _confirmPasswordController,
                 obscureText: _obscureConfirmPassword,
@@ -268,13 +345,16 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
                 ),
               ),
               const SizedBox(height: 32),
+
+              // ── Create Account Button ──────────────────────────────────
               SizedBox(
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: _isLoading ? null : _completeSignup,
+                  onPressed: canSubmit ? _completeSignup : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF2DBE7F),
                     foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.grey.shade300,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
