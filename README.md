@@ -392,8 +392,8 @@ See [ENDPOINTS.md](ENDPOINTS.md) for complete specifications.
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/complete-signup` | POST | Create user profile after signup |
-| `/profile` | GET | Get user profile |
-| `/profile` | PATCH | Update onboarding/preferences |
+| `/api/v1/user/profile` | GET | Get user profile |
+| `/api/v1/user/profile` | PATCH | Update onboarding/preferences |
 | `/chat` | POST | Main AI endpoint (chat + notifications) |
 | `/transactions` | GET | List transactions with filters |
 | `/confirm-transaction/{id}` | POST | Confirm pending notification |

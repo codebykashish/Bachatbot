@@ -115,8 +115,8 @@ async def get_current_user(request: Request):
 | # | Method | Endpoint | Purpose | Auth | Firestore Path |
 |---|--------|----------|---------|------|----------------|
 | 1 | POST | `/complete-signup` | Create user profile | ✅ | `users/{uid}` |
-| 2 | GET | `/profile` | Get user profile | ✅ | `users/{uid}` |
-| 3 | PATCH | `/profile` | Update onboarding/preferences | ✅ | `users/{uid}` |
+| 2 | GET | `/api/v1/user/profile` | Get user profile | ✅ | `users/{uid}` |
+| 3 | PATCH | `/api/v1/user/profile` | Update onboarding/preferences | ✅ | `users/{uid}` |
 | 4 | POST | `/chat` | Main AI chat endpoint | ✅ | `messages`, `transactions`, `notifications`, `budgets`, `alerts` |
 | 5 | GET | `/transactions` | List transactions | ✅ | `users/{uid}/transactions` |
 | 6 | POST | `/confirm-transaction/{id}` | Confirm pending transaction | ✅ | `users/{uid}/transactions/{id}` |
@@ -156,14 +156,14 @@ async def get_current_user(request: Request):
 **What backend does:**
 ```
 1. Verify idToken → extract uid
-2. Check if users/{uid} already exists → if yes, return error
+2. Check if users/{uid} already exists → if yes, return existing profile
 3. Create document:
    users/{uid} = {
      firstName, lastName, email, phone,
      createdAt: SERVER_TIMESTAMP,
      updatedAt: SERVER_TIMESTAMP,
      onboarding: {
-       isCompleted: false,
+       isCompleted: true,
        occupation: null,
        housingType: null,
        estimatedMonthlySpend: null
@@ -187,11 +187,11 @@ async def get_current_user(request: Request):
     "firstName": "Ram",
     "lastName": "Sharma",
     "email": "ram@email.com",
-    "phone": "+97798XXXXXXXX",
+    "phoneNumber": "+97798XXXXXXXX",
     "createdAt": "2026-04-01T10:00:00Z",
     "updatedAt": "2026-04-01T10:00:00Z",
     "onboarding": {
-      "isCompleted": false,
+      "isCompleted": true,
       "occupation": null,
       "housingType": null,
       "estimatedMonthlySpend": null
@@ -205,29 +205,18 @@ async def get_current_user(request: Request):
 }
 ```
 
-**Error (409 - Already exists):**
-```json
-{
-  "success": false,
-  "error": {
-    "code": "USER_EXISTS",
-    "message": "User profile already exists."
-  }
-}
-```
-
 ---
 
-### Endpoint 2: `GET /profile`
+### Endpoint 2: `GET /api/v1/user/profile`
 
-**Purpose:** Fetch current user's full profile.
+**Purpose:** Fetch current user's full profile. Used to prefill "Edit Profile" and show greeting on dashboard.
 
 **Firestore reads from:** `users/{uid}`
 
 **When called:**
 - After login (to check onboarding status)
-- On profile screen
-- To load preferences
+- On profile screen (prefill fields)
+- Dashboard (show "Hello, {firstName}")
 
 **Request:** No body. Token only.
 
@@ -235,8 +224,9 @@ async def get_current_user(request: Request):
 ```
 1. Verify token → get uid
 2. Fetch users/{uid}
-3. If not found → 404
-4. Return full document
+3. If not found → Auto-create minimal stub profile
+4. Aggregate current-month totals (totalIncome, totalExpense)
+5. Return full document + totals
 ```
 
 **Success Response (200):**
@@ -248,7 +238,7 @@ async def get_current_user(request: Request):
     "firstName": "Ram",
     "lastName": "Sharma",
     "email": "ram@email.com",
-    "phone": "+97798XXXXXXXX",
+    "phoneNumber": "+97798XXXXXXXX",
     "createdAt": "2026-04-01T10:00:00Z",
     "updatedAt": "2026-04-05T14:00:00Z",
     "onboarding": {
@@ -261,62 +251,117 @@ async def get_current_user(request: Request):
       "language": "ne",
       "currency": "NPR",
       "alertThreshold": 80
-    }
+    },
+    "totalIncome": 45000.0,
+    "totalExpense": 12500.0
   }
 }
 ```
 
-**Frontend uses this to decide:**
-```
-if onboarding.isCompleted == false → show onboarding screen
-if onboarding.isCompleted == true → show home/chat screen
-```
-
 ---
 
-### Endpoint 3: `PATCH /profile`
+### Endpoint 3: `PATCH /api/v1/user/profile`
 
-**Purpose:** Update onboarding answers or preferences.
+**Purpose:** Update profile details (Name, Phone) and/or Change Password.
 
 **Firestore updates:** `users/{uid}` (merge update)
 
 **Request:**
 ```json
 {
-  "onboarding": {
-    "isCompleted": true,
-    "occupation": "student",
-    "housingType": "rent",
-    "estimatedMonthlySpend": 15000
-  }
+  "firstName": "Luniva",
+  "lastName": "Dhami",
+  "phoneNumber": "+9779800000000",
+  "onboarding": { ... },
+  "preferences": { ... },
+  "currentPassword": "oldPass123@",
+  "newPassword": "NewPass1@",
+  "confirmNewPassword": "NewPass1@"
 }
 ```
-
-Or preferences only:
-```json
-{
-  "preferences": {
-    "language": "en",
-    "alertThreshold": 75
-  }
-}
-```
-
-Or both together.
+*Note: All fields are optional. Leave all three password fields blank to keep current password.*
 
 **What backend does:**
 ```
 1. Verify token → get uid
-2. Merge update users/{uid} with provided fields
-3. Update updatedAt timestamp
-4. Return success
+2. Merge update provided profile fields (firstName, lastName, phone, onboarding, preferences)
+3. If ANY password field is provided:
+   a. Check if ALL 3 are present (current, new, confirm) -> else error PASSWORD_FIELDS_INCOMPLETE
+   b. Check if newPassword == confirmNewPassword -> else error PASSWORD_MISMATCH
+   c. Check newPassword strength (8+ chars, 1 digit, 1 special) -> else error WEAK_PASSWORD
+   d. Verify currentPassword against stored hash -> else error CURRENT_PASSWORD_INCORRECT
+   e. Hash newPassword and sync with Firebase Auth
+4. Update updatedAt timestamp
+5. Return updated user object
 ```
 
-**Response (200):**
+**Success Response (200):**
 ```json
 {
   "success": true,
-  "message": "Profile updated."
+  "message": "Profile updated successfully.",
+  "updatedFields": ["firstName", "phoneNumber", "password"],
+  "data": {
+    "uid": "...",
+    "firstName": "Luniva",
+    "lastName": "Dhami",
+    "email": "...",
+    "phoneNumber": "+9779800000000",
+    "onboarding": { ... },
+    "preferences": { ... },
+    "createdAt": "...",
+    "updatedAt": "..."
+  }
+}
+```
+
+**Error: Incomplete Password Fields (400):**
+```json
+{
+  "success": false,
+  "error": "PASSWORD_FIELDS_INCOMPLETE",
+  "message": "To change your password, please fill Current Password, New Password and Confirm New Password."
+}
+```
+
+**Error: Password Mismatch (400):**
+```json
+{
+  "success": false,
+  "error": "PASSWORD_MISMATCH",
+  "message": "New password and confirm password do not match."
+}
+```
+
+**Error: Weak Password (400):**
+```json
+{
+  "success": false,
+  "error": "WEAK_PASSWORD",
+  "missing": {
+    "minimumLength": false,
+    "number": true,
+    "specialCharacter": true
+  },
+  "message": "Your new password is missing:\n- at least 8 characters\n- one number (e.g. 1, 2, 3)\n- one special character (e.g. @, #, *)."
+}
+```
+
+**Error: Incorrect Current Password (400):**
+```json
+{
+  "success": false,
+  "error": "CURRENT_PASSWORD_INCORRECT",
+  "message": "The current password you entered is wrong."
+}
+```
+
+**Error: New Password Same as Current (400):**
+```json
+{
+  "success": false,
+  "error": "NEW_PASSWORD_SAME_AS_CURRENT",
+  "message": "New password cannot be the same as your current password."
 }
 ```
 

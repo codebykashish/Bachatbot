@@ -1,6 +1,7 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator, ConfigDict
 from typing import Optional
 from enum import Enum
+import re
 
 class OccupationEnum(str, Enum):
     STUDENT = "student"
@@ -15,7 +16,7 @@ class OnboardingData(BaseModel):
     isCompleted: bool = False
     occupation: Optional[OccupationEnum] = None
     housingType: Optional[HousingTypeEnum] = None
-    estimatedMontlySpend: Optional[float] = None
+    estimatedMonthlySpend: Optional[float] = None
 
 class PreferencesData(BaseModel):
     language: str = "en"
@@ -29,15 +30,17 @@ class UserProfileCreate(BaseModel):
     phone: str
 
 class UserProfileResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     uid: str
-    firstName: str
-    lastName: str
-    email: str
-    phone: str
+    firstName: Optional[str] = None
+    lastName: Optional[str] = None
+    email: Optional[str] = None
+    phoneNumber: Optional[str] = Field(None, alias="phone")
     onboarding: OnboardingData
     preferences: PreferencesData
-    createdAt: str
-    updatedAt: str
+    createdAt: Optional[str] = None
+    updatedAt: Optional[str] = None
 
 class SignupRequest(BaseModel):
     firstName: str
@@ -46,5 +49,91 @@ class SignupRequest(BaseModel):
     phone: str
 
 class ProfileUpdateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    # ── Onboarding / Preferences (existing fields) ──────────────────────────
     onboarding: Optional[OnboardingData] = None
     preferences: Optional[PreferencesData] = None
+
+    # ── Core profile fields ──────────────────────────────────────────────────
+    firstName: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=50,
+        description="User's first name (1-50 characters)",
+    )
+    lastName: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=50,
+        description="User's last name (1-50 characters)",
+    )
+    phoneNumber: Optional[str] = Field(
+        default=None,
+        alias="phone",
+        description="Phone number in international (+977...) or local (98...) format",
+    )
+
+    # ── Password change (requires all three fields) ──────────────────────────
+    currentPassword: Optional[str] = Field(
+        default=None,
+        description="Current password — required when changing password",
+    )
+    newPassword: Optional[str] = Field(
+        default=None,
+        description="New password — must meet strength requirements",
+    )
+    confirmNewPassword: Optional[str] = Field(
+        default=None,
+        description="Confirm new password — must match newPassword",
+    )
+
+    @field_validator("firstName", "lastName", mode="before")
+    @classmethod
+    def strip_name(cls, v):
+        """Strip leading/trailing whitespace from name fields."""
+        if v is not None:
+            v = str(v).strip()
+            if not v:
+                raise ValueError("Name fields must not be blank or whitespace-only.")
+        return v
+
+    @field_validator("phoneNumber", mode="before")
+    @classmethod
+    def validate_phone(cls, v):
+        """
+        Accepts:
+          - International E.164 style: +977XXXXXXXXXX
+          - Local 10-digit Nepali numbers: 98XXXXXXXX / 97XXXXXXXX
+          - Generic 7-15 digit numbers with optional leading +
+        Rejects obvious garbage.
+        """
+        if v is None:
+            return v
+        cleaned = str(v).strip()
+        # Allow + prefix then digits only; 7–15 total digits
+        pattern = r'^\+?[0-9]{7,15}$'
+        if not re.match(pattern, cleaned):
+            raise ValueError(
+                "phoneNumber must be a valid phone number (7-15 digits, optional leading +)."
+            )
+        return cleaned
+
+    @field_validator("newPassword", "currentPassword", "confirmNewPassword", mode="before")
+    @classmethod
+    def validate_password_fields(cls, v):
+        """Reject passwords with only whitespace."""
+        if v is not None:
+            if str(v).strip() == "":
+                return None # Treat empty string as None (no attempt to change)
+        return v
+
+    @model_validator(mode="after")
+    def check_password_attempt(self):
+        """
+        Logic for 'User wants to change password' vs 'No password change'.
+        If ANY field is provided, we treat it as an attempt.
+        Verification of completeness and correctness is done in the route
+        to provide the specific error JSON formats requested.
+        """
+        return self
