@@ -5,6 +5,7 @@ import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
@@ -18,11 +19,16 @@ logger = logging.getLogger(__name__)
 
 class SendVerificationCodeRequest(BaseModel):
     email: EmailStr
+    purpose: Optional[str] = "signup"  # signup, reset, etc.
 
 
 class VerifyCodeRequest(BaseModel):
     email: EmailStr
     code: str
+
+
+class EmailCheckRequest(BaseModel):
+    email: EmailStr
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -74,6 +80,37 @@ def _send_email(recipient: str, code: str) -> None:
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
+@router.post("/check-email")
+async def check_email(body: EmailCheckRequest):
+    """
+    Look up the email in the Firestore users collection.
+    Enforces @gmail.com domain for signup checks.
+    """
+    email = body.email.lower().strip()
+    
+    # ── Domain Validation ──
+    domain = email.split("@")[-1]
+    if domain != "gmail.com":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "INVALID_EMAIL_DOMAIN",
+                "message": "Please use a Gmail address ending with @gmail.com."
+            }
+        )
+
+    db = get_firestore()
+    
+    # Check if a user with this email exists in Firestore
+    query = db.collection("users").where("email", "==", email).limit(1).get()
+    exists = len(query) > 0
+    
+    return {
+        "email": email,
+        "exists": exists
+    }
+
+
 @router.post("/send-verification-code")
 async def send_verification_code(body: SendVerificationCodeRequest):
     """
@@ -82,7 +119,46 @@ async def send_verification_code(body: SendVerificationCodeRequest):
     No authentication required (pre-signup flow).
     """
     email = body.email.lower().strip()
+    purpose = body.purpose.lower() if body.purpose else "signup"
+    
+    # ── Domain Validation (Only for Signup) ──
+    if purpose == "signup":
+        domain = email.split("@")[-1]
+        if domain != "gmail.com":
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "INVALID_EMAIL_DOMAIN",
+                    "message": "Please use a Gmail address ending with @gmail.com."
+                }
+            )
+
     db = get_firestore()
+
+    # ── Early check for email uniqueness (signup) or existence (reset) ─────
+    user_query = db.collection("users").where("email", "==", email).limit(1).get()
+    email_exists = len(user_query) > 0
+
+    if purpose == "signup":
+        if email_exists:
+            logger.warning(f"[VERIFICATION] Signup attempt for already registered email: {email}")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "EMAIL_ALREADY_IN_USE",
+                    "message": "An account with this email already exists."
+                }
+            )
+    elif purpose == "reset":
+        if not email_exists:
+            logger.warning(f"[VERIFICATION] Reset attempt for non-existent email: {email}")
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "EMAIL_NOT_FOUND",
+                    "message": "No account found with this email address."
+                }
+            )
 
     # Generate 6-digit code (zero-padded so "001234" stays as string)
     code = str(random.randint(100000, 999999))
@@ -106,11 +182,8 @@ async def send_verification_code(body: SendVerificationCodeRequest):
         raise HTTPException(
             status_code=500,
             detail={
-                "success": False,
-                "error": {
-                    "code": "EMAIL_SEND_FAILED",
-                    "message": "Failed to send verification email. Please try again.",
-                },
+                "error": "EMAIL_SEND_FAILED",
+                "message": "Failed to send verification email. Please try again.",
             },
         )
 
@@ -136,11 +209,8 @@ async def verify_code(body: VerifyCodeRequest):
         raise HTTPException(
             status_code=400,
             detail={
-                "success": False,
-                "error": {
-                    "code": "INVALID_CODE",
-                    "message": "Invalid or expired verification code.",
-                },
+                "error": "INVALID_CODE",
+                "message": "Invalid or expired verification code.",
             },
         )
 
@@ -159,11 +229,8 @@ async def verify_code(body: VerifyCodeRequest):
         raise HTTPException(
             status_code=400,
             detail={
-                "success": False,
-                "error": {
-                    "code": "CODE_EXPIRED",
-                    "message": "Verification code has expired. Please request a new one.",
-                },
+                "error": "CODE_EXPIRED",
+                "message": "Verification code has expired. Please request a new one.",
             },
         )
 
@@ -172,11 +239,8 @@ async def verify_code(body: VerifyCodeRequest):
         raise HTTPException(
             status_code=400,
             detail={
-                "success": False,
-                "error": {
-                    "code": "INVALID_CODE",
-                    "message": "Verification code is incorrect.",
-                },
+                "error": "INVALID_CODE",
+                "message": "Verification code is incorrect.",
             },
         )
 
