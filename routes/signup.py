@@ -20,11 +20,23 @@ async def complete_signup(
     uid = current_user["uid"]
     db = get_firestore()
 
+    # ── Domain Validation ──
+    domain = body.email.lower().strip().split("@")[-1]
+    if domain != "gmail.com":
+        print(f"[SIGNUP] email={body.email} rejected due to invalid domain")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "INVALID_EMAIL_DOMAIN",
+                "message": "Please use a Gmail address ending with @gmail.com."
+            }
+        )
+
     print(f"[SIGNUP] uid={uid} email={body.email}")
 
     user_ref = db.collection("users").document(uid)
 
-    # Check if user already exists — return existing profile instead of 409
+    # 1. Check if UID already has a profile — return existing profile instead of 409
     existing = user_ref.get()
     if existing.exists:
         print(f"[SIGNUP] uid={uid} profile already exists, returning existing")
@@ -35,6 +47,18 @@ async def complete_signup(
             "message": "Signup completed.",
             "data": serialize_doc(data),
         }
+
+    # 2. Check if email is already taken by ANOTHER user
+    email_query = db.collection("users").where("email", "==", body.email).limit(1).get()
+    if len(email_query) > 0:
+        print(f"[SIGNUP] email={body.email} already in use by another account")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "EMAIL_ALREADY_IN_USE",
+                "message": "An account with this email already exists."
+            }
+        )
 
     # Build user document per schema.md
     user_data = {
