@@ -74,19 +74,6 @@ class ProfileUpdateRequest(BaseModel):
         description="Phone number in international (+977...) or local (98...) format",
     )
 
-    # ── Password change (requires all three fields) ──────────────────────────
-    currentPassword: Optional[str] = Field(
-        default=None,
-        description="Current password — required when changing password",
-    )
-    newPassword: Optional[str] = Field(
-        default=None,
-        description="New password — must meet strength requirements",
-    )
-    confirmNewPassword: Optional[str] = Field(
-        default=None,
-        description="Confirm new password — must match newPassword",
-    )
 
     @field_validator("firstName", "lastName", mode="before")
     @classmethod
@@ -118,22 +105,4 @@ class ProfileUpdateRequest(BaseModel):
                 "phoneNumber must be a valid phone number (7-15 digits, optional leading +)."
             )
         return cleaned
-
-    @field_validator("newPassword", "currentPassword", "confirmNewPassword", mode="before")
-    @classmethod
-    def validate_password_fields(cls, v):
-        """Reject passwords with only whitespace."""
-        if v is not None:
-            if str(v).strip() == "":
-                return None # Treat empty string as None (no attempt to change)
-        return v
-
-    @model_validator(mode="after")
-    def check_password_attempt(self):
-        """
-        Logic for 'User wants to change password' vs 'No password change'.
-        If ANY field is provided, we treat it as an attempt.
-        Verification of completeness and correctness is done in the route
-        to provide the specific error JSON formats requested.
-        """
-        return self
+

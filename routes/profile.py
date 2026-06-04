@@ -5,12 +5,8 @@ from schemas.profile import ProfileUpdateRequest, UserProfileResponse
 from utils import serialize_doc, get_current_month_key, sum_month_expense, sum_month_income
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 from firebase_admin import auth as firebase_auth
-from passlib.context import CryptContext
 import logging
 from datetime import datetime
-
-# ── Password hashing utility (bcrypt) ────────────────────────────────────────
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 profile_router = APIRouter()
 
@@ -33,12 +29,12 @@ async def get_profile(
     
     # Fetch user document
     user_ref = db.collection("users").document(uid)
-    doc = user_ref.get()
+    doc_snapshot = user_ref.get()
     
     # If the Firestore profile doesn't exist yet (e.g. the user authenticated
     # via Firebase Auth but POST /profile was never called), auto-create a
     # minimal stub so GET /profile never 404s for a legitimately logged-in user.
-    if not doc.exists:
+    if not doc_snapshot.exists:
         print(f"[PROFILE] uid={uid} — Firestore doc missing, auto-creating stub profile")
         stub = {
             "firstName": current_user.get("name", "").split()[0] if current_user.get("name") else "",
@@ -61,27 +57,29 @@ async def get_profile(
         }
         user_ref.set(stub)
         # Re-fetch so timestamps are populated
-        doc = user_ref.get()
+        doc_snapshot = user_ref.get()
     
     # Get data and add uid
-    data = doc.to_dict()
-    data["uid"] = uid
+    user_data = doc_snapshot.to_dict()
+    user_data["uid"] = uid
     
     # Convert timestamps
-    response_data = serialize_doc(data)
+    response_data = serialize_doc(user_data)
     
     # ── Allow core profile fields to be None/null if missing ────────────────
-    # Frontend handles fallback; we return null if not yet set in Firestore.
-    first_name = data.get("firstName")
-    last_name = data.get("lastName")
-    phone_number = data.get("phoneNumber") or data.get("phone")
+    first_name_val = user_data.get("firstName") or user_data.get("first_name")
+    if not first_name_val:
+        first_name_val = user_data.get("phone") or user_data.get("phoneNumber") or ""
+
+    last_name = user_data.get("lastName") or user_data.get("last_name") or ""
+    phone_number = user_data.get("phoneNumber") or user_data.get("phone") or ""
 
     # Build the profile data for Pydantic model block
     profile_block = {
         "uid": uid,
-        "firstName": first_name,
+        "firstName": first_name_val,
         "lastName": last_name,
-        "email": data.get("email"),
+        "email": user_data.get("email"),
         "phoneNumber": phone_number,
         "onboarding": response_data.get("onboarding") or {},
         "preferences": response_data.get("preferences") or {},
@@ -119,8 +117,6 @@ async def update_profile(
     Accepted fields (all optional):
       - firstName / lastName   → written to Firestore user document
       - phoneNumber            → written to Firestore user document as 'phone'
-      - currentPassword + newPassword → verified against stored bcrypt hash,
-            then new hash saved to Firestore and Firebase Auth is synced
       - onboarding             → merged into the onboarding sub-map
       - preferences            → merged into the preferences sub-map
 
@@ -181,86 +177,7 @@ async def update_profile(
         for key, value in preferences_dict.items():
             update_data[f"preferences.{key}"] = value
 
-    # ── Password change logic ───────────────────────────────────────────────────
-    curr_pass = body.currentPassword
-    new_pass = body.newPassword
-    conf_pass = body.confirmNewPassword
 
-    # Check if ANY password field is provided (attempt to change)
-    is_attempting_password_change = any([curr_pass, new_pass, conf_pass])
-
-    if is_attempting_password_change:
-        # 1. All three must be present
-        if not all([curr_pass, new_pass, conf_pass]):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "success": False,
-                    "error": "PASSWORD_FIELDS_INCOMPLETE",
-                    "message": "To change your password, please fill Current Password, New Password and Confirm New Password."
-                }
-            )
-
-        # 2. Confirm new password matches
-        if new_pass != conf_pass:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "success": False,
-                    "error": "PASSWORD_MISMATCH",
-                    "message": "New password and confirm password do not match."
-                }
-            )
-
-        # 3. Check new password strength (same as signup)
-        # Rules: 8+ chars, 1 number, 1 special character
-        has_min_length = len(new_pass) >= 8
-        has_number = any(char.isdigit() for char in new_pass)
-        has_special = any(not char.isalnum() for char in new_pass)
-
-        if not all([has_min_length, has_number, has_special]):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "success": False,
-                    "error": "WEAK_PASSWORD",
-                    "missing": {
-                        "minimumLength": not has_min_length,
-                        "number": not has_number,
-                        "specialCharacter": not has_special
-                    },
-                    "message": "Your new password is missing:\n- at least 8 characters\n- one number (e.g. 1, 2, 3)\n- one special character (e.g. @, #, *)."
-                }
-            )
-
-        # 4. Verify current password
-        stored_hash = user_data.get("passwordHash")
-        # If no stored hash, they likely signed up via social login or something else
-        if not stored_hash or not pwd_context.verify(curr_pass, stored_hash):
-            logger.warning(f"[{timestamp_str}] [PROFILE] uid={uid} current password incorrect")
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "success": False,
-                    "error": "CURRENT_PASSWORD_INCORRECT",
-                    "message": "The current password you entered is wrong."
-                }
-            )
-
-        # 5. New password must be different from current password
-        if new_pass == curr_pass:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "success": False,
-                    "error": "NEW_PASSWORD_SAME_AS_CURRENT",
-                    "message": "New password cannot be the same as your current password."
-                }
-            )
-
-        # 6. All checks passed — hash new password
-        update_data["passwordHash"] = pwd_context.hash(new_pass)
-        logger.info(f"[{timestamp_str}] [PROFILE] uid={uid} new passwordHash staged")
 
     # ── Guard: nothing meaningful to update ─────────────────────────────────────────
     # len == 1 means only 'updatedAt' was set
@@ -276,13 +193,7 @@ async def update_profile(
     user_ref.update(update_data)
     logger.info(f"[{timestamp_str}] [PROFILE] uid={uid} Firestore document updated")
 
-    # ── Sync password to Firebase Auth ───
-    if is_attempting_password_change:
-        try:
-            firebase_auth.update_user(uid, password=new_pass)
-            logger.info(f"[{timestamp_str}] [PROFILE] uid={uid} Firebase Auth password synced")
-        except Exception as e:
-            logger.error(f"[{timestamp_str}] [PROFILE] uid={uid} Firebase Auth sync failed: {e}")
+
 
     # ── Build clean success payload ───────────────────────────────────────────────
     updated_fields = []
@@ -292,8 +203,7 @@ async def update_profile(
         updated_fields.append("lastName")
     if body.phoneNumber is not None:
         updated_fields.append("phoneNumber")
-    if is_attempting_password_change:
-        updated_fields.append("password")
+
     if body.onboarding is not None:
         updated_fields.append("onboarding")
     if body.preferences is not None:

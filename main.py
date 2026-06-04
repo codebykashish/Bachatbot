@@ -106,6 +106,7 @@ async def log_requests(request: Request, call_next):
 
 # Import and include all routes
 from routes.signup import router as signup_router
+from routes.auth import router as auth_router
 from routes.profile import profile_router
 from routes.chat import router as chat_router
 from routes.transactions import router as transactions_router
@@ -117,6 +118,7 @@ from routes.messages import router as messages_router
 from routes.verification import router as verification_router
 
 app.include_router(signup_router)
+app.include_router(auth_router)
 app.include_router(profile_router)
 app.include_router(chat_router)
 app.include_router(transactions_router)

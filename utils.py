@@ -373,5 +373,68 @@ def extract_amount(text: str) -> float:
     return 0.0
 
 
+def validate_password(password: str) -> dict:
+    """
+    Validates a password against strong-password rules:
+    - 8–16 characters.
+    - At least 1 uppercase letter: [A–Z].
+    - At least 1 digit: [0–9].
+    - At least 1 special character: non-letter/digit.
+
+    Returns:
+        dict: {
+            "isValid": bool,
+            "missing": {
+                "minLength": bool,
+                "maxLength": bool,
+                "uppercase": bool,
+                "number": bool,
+                "special": bool
+            },
+            "messageLines": list[str]
+        }
+    """
+    if not password:
+        return {
+            "isValid": False,
+            "missing": {
+                "minLength": True,
+                "maxLength": False,
+                "uppercase": True,
+                "number": True,
+                "special": True
+            },
+            "messageLines": ["Password is required."]
+        }
+
+    min_len = len(password) < 8
+    max_len = len(password) > 16
+    has_upper = any(c.isupper() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+    has_special = any(not c.isalnum() for c in password)
+
+    is_valid = not (min_len or max_len or not has_upper or not has_digit or not has_special)
+
+    message_lines = [
+        "Password must:",
+        "- be 8–16 characters long",
+        "- include at least one capital letter (A–Z)",
+        "- include at least one number (e.g. 1, 2, 3)",
+        "- include at least one special character (e.g. @, #, *)"
+    ]
+
+    return {
+        "isValid": is_valid,
+        "missing": {
+            "minLength": min_len,
+            "maxLength": max_len,
+            "uppercase": not has_upper,
+            "number": not has_digit,
+            "special": not has_special
+        },
+        "messageLines": message_lines
+    }
+
+
 import re
 

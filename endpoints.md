@@ -262,7 +262,7 @@ async def get_current_user(request: Request):
 
 ### Endpoint 3: `PATCH /api/v1/user/profile`
 
-**Purpose:** Update profile details (Name, Phone) and/or Change Password.
+**Purpose:** Update profile details (Name, Phone).
 
 **Firestore updates:** `users/{uid}` (merge update)
 
@@ -273,26 +273,17 @@ async def get_current_user(request: Request):
   "lastName": "Dhami",
   "phoneNumber": "+9779800000000",
   "onboarding": { ... },
-  "preferences": { ... },
-  "currentPassword": "oldPass123@",
-  "newPassword": "NewPass1@",
-  "confirmNewPassword": "NewPass1@"
+  "preferences": { ... }
 }
 ```
-*Note: All fields are optional. Leave all three password fields blank to keep current password.*
+*Note: All fields are optional.*
 
 **What backend does:**
 ```
 1. Verify token → get uid
 2. Merge update provided profile fields (firstName, lastName, phone, onboarding, preferences)
-3. If ANY password field is provided:
-   a. Check if ALL 3 are present (current, new, confirm) -> else error PASSWORD_FIELDS_INCOMPLETE
-   b. Check if newPassword == confirmNewPassword -> else error PASSWORD_MISMATCH
-   c. Check newPassword strength (8+ chars, 1 digit, 1 special) -> else error WEAK_PASSWORD
-   d. Verify currentPassword against stored hash -> else error CURRENT_PASSWORD_INCORRECT
-   e. Hash newPassword and sync with Firebase Auth
-4. Update updatedAt timestamp
-5. Return updated user object
+3. Update updatedAt timestamp
+4. Return updated user object
 ```
 
 **Success Response (200):**
@@ -300,7 +291,7 @@ async def get_current_user(request: Request):
 {
   "success": true,
   "message": "Profile updated successfully.",
-  "updatedFields": ["firstName", "phoneNumber", "password"],
+  "updatedFields": ["firstName", "phoneNumber"],
   "data": {
     "uid": "...",
     "firstName": "Luniva",
@@ -315,55 +306,30 @@ async def get_current_user(request: Request):
 }
 ```
 
-**Error: Incomplete Password Fields (400):**
+---
+
+### Endpoint 4: `POST /auth/validate-password`
+
+**Purpose:** Helper endpoint to validate password strength before signup/update.
+
+**Request:**
 ```json
 {
-  "success": false,
-  "error": "PASSWORD_FIELDS_INCOMPLETE",
-  "message": "To change your password, please fill Current Password, New Password and Confirm New Password."
+  "password": "mypassword"
 }
 ```
 
-**Error: Password Mismatch (400):**
+**Success Response (200):**
 ```json
 {
-  "success": false,
-  "error": "PASSWORD_MISMATCH",
-  "message": "New password and confirm password do not match."
+  "success": true,
+  "message": "Password is valid"
 }
 ```
 
 **Error: Weak Password (400):**
-```json
-{
-  "success": false,
-  "error": "WEAK_PASSWORD",
-  "missing": {
-    "minimumLength": false,
-    "number": true,
-    "specialCharacter": true
-  },
-  "message": "Your new password is missing:\n- at least 8 characters\n- one number (e.g. 1, 2, 3)\n- one special character (e.g. @, #, *)."
-}
-```
+Same format as `WEAK_PASSWORD` above.
 
-**Error: Incorrect Current Password (400):**
-```json
-{
-  "success": false,
-  "error": "CURRENT_PASSWORD_INCORRECT",
-  "message": "The current password you entered is wrong."
-}
-```
-
-**Error: New Password Same as Current (400):**
-```json
-{
-  "success": false,
-  "error": "NEW_PASSWORD_SAME_AS_CURRENT",
-  "message": "New password cannot be the same as your current password."
-}
-```
 
 ---
 
