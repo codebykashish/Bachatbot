@@ -12,6 +12,11 @@ from utils import (
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment
 from typing import Optional
 from services.notification_service import resolve_category_from_receiver_name, parse_receiver_name
+from services.report_service import (
+    get_missing_budget_categories,
+    get_top_spending_category,
+    get_spend_alerts
+)
 
 router = APIRouter()
 
@@ -796,14 +801,7 @@ async def chat(
 
         # Compute missing budget categories for current month
         curr_month = get_current_month_key()
-        budget_docs = (
-            db.collection("users").document(uid)
-            .collection("budgets")
-            .where("monthKey", "==", curr_month)
-            .stream()
-        )
-        existing_cats = {d.to_dict().get("category") for d in budget_docs if d.to_dict().get("limit", 0) > 0}
-        missing_budget_categories = [c for c in EXPENSE_CATEGORIES if c not in existing_cats]
+        missing_budget_categories = get_missing_budget_categories(db, uid, curr_month)
 
     except Exception as ctx_err:
         print(f"[CHAT] Context lookup failed (non-critical): {ctx_err}")
@@ -1209,6 +1207,36 @@ async def chat(
                 reply_parts.append("Kei expense fela parena undo garna lai")
                 print("[CHAT] [UNDO] No matching expense")
 
+        # ── QUERY TOP SPENDING CATEGORY ──────────────────────────────────
+        elif intent == "query_top_spend_category":
+            top = get_top_spending_category(db, uid, month_key)
+            if top:
+                reply_parts.append(
+                    f"Yo mahina sabai bhanda dherai kharcha {top['category']} ma (Rs {int(top['amount'])}) bhayeko cha."
+                )
+            else:
+                reply_parts.append("Yo mahina kei kharcha bhetiyena.")
+            print(f"[CHAT] query_top_spend_category: {top}")
+
+        # ── QUERY SPEND FEEDBACK / SUGGESTIONS ───────────────────────────
+        elif intent == "query_spend_feedback":
+            alerts = get_spend_alerts(db, uid, month_key)
+            top_cat = alerts.get("highestCategory")
+            over_cats = alerts.get("overBudgetCategories", [])
+            
+            if not top_cat:
+                reply_parts.append("Hajur ko spending data bhetiyena, kehi kharcha track garnuhos ani ma suggestion dinchu.")
+            else:
+                feedback = [f"Yo mahina sabai bhanda dherai kharcha {top_cat} ma bhayeko cha."]
+                if over_cats:
+                    over_list = ", ".join([c["category"] for c in over_cats])
+                    feedback.append(f"Hajur le {over_list} ma budget bhanda dherai kharcha garnubhako cha.")
+                    feedback.append("Budget control garna ali dhyan dinu hola.")
+                else:
+                    feedback.append("Sabai category budget bitrai chan, ramro gardai hunuhuncha!")
+                reply_parts.append(" ".join(feedback))
+            print(f"[CHAT] query_spend_feedback: {alerts}")
+
         # ── GENERAL CHAT / GREETING ──────────────────────────────────────
         else:
             print(f"[CHAT] General/greeting — no DB writes")
@@ -1576,14 +1604,7 @@ async def chat_sync(
 
             # ── Call Gemini ──────────────────────────────────────────────
             # Compute missing budget categories for the derived month
-            budget_docs = (
-                db.collection("users").document(uid)
-                .collection("budgets")
-                .where("monthKey", "==", derived_month_key)
-                .stream()
-            )
-            existing_cats = {d.to_dict().get("category") for d in budget_docs if d.to_dict().get("limit", 0) > 0}
-            missing_budget_categories = [c for c in EXPENSE_CATEGORIES if c not in existing_cats]
+            missing_budget_categories = get_missing_budget_categories(db, uid, derived_month_key)
 
             gemini_result = await process_chat_message(
                 user_message,
@@ -1970,6 +1991,32 @@ async def chat_sync(
                         }
                     else:
                         reply_parts.append("Kei expense fela parena undo garna lai")
+
+                # ── QUERY TOP SPENDING CATEGORY (sync) ───────────────────
+                elif intent == "query_top_spend_category":
+                    top = get_top_spending_category(db, uid, month_key)
+                    if top:
+                        reply_parts.append(
+                            f"Yo mahina sabai bhanda dherai kharcha {top['category']} ma (Rs {int(top['amount'])}) bhayeko cha."
+                        )
+                    else:
+                        reply_parts.append("Yo mahina kei kharcha bhetiyena.")
+
+                # ── QUERY SPEND FEEDBACK / SUGGESTIONS (sync) ────────────
+                elif intent == "query_spend_feedback":
+                    alerts = get_spend_alerts(db, uid, month_key)
+                    top_cat = alerts.get("highestCategory")
+                    over_cats = alerts.get("overBudgetCategories", [])
+                    if not top_cat:
+                        reply_parts.append("Hajur ko spending data bhetiyena.")
+                    else:
+                        feedback = [f"Yo mahina sabai bhanda dherai kharcha {top_cat} ma bhayeko cha."]
+                        if over_cats:
+                            over_list = ", ".join([c["category"] for c in over_cats])
+                            feedback.append(f"Hajur le {over_list} ma budget bhanda dherai kharcha garnubhako cha.")
+                        else:
+                            feedback.append("Sabai category budget bitrai chan, ramro gardai hunuhuncha!")
+                        reply_parts.append(" ".join(feedback))
 
                 # ── GENERAL CHAT / GREETING ──────────────────────────────
                 else:
