@@ -540,7 +540,7 @@ Same format as `WEAK_PASSWORD` above.
 }
 ```
 
-**Notification → Pending:**
+**Notification → Pending (expense):**
 ```json
 {
   "success": true,
@@ -579,6 +579,51 @@ Same format as `WEAK_PASSWORD` above.
   }
 }
 ```
+
+**Notification → Pending (income):**
+```json
+{
+  "success": true,
+  "data": {
+    "reply": "Bank bata Rs 45000 income bhako jasto cha. Thik cha?",
+    "intent": "notification_parse",
+    "needsConfirmation": true,
+    "transaction": {
+      "id": "txn_pending_456",
+      "amount": 45000,
+      "category": "income",
+      "type": "income",
+      "status": "pending",
+      "source": "notification",
+      "description": "Bank: Rs 45000 credited to your account",
+      "monthKey": "2026-04",
+      "isDeleted": false,
+      "deletedAt": null,
+      "originalMessageId": "msg_abc456",
+      "createdAt": "2026-04-01T10:00:00Z",
+      "updatedAt": "2026-04-01T10:00:00Z"
+    },
+    "notification": {
+      "id": "notif_abc",
+      "rawText": "Bank: Rs 45000 credited to your account",
+      "parsedAmount": 45000,
+      "parsedCategory": "income",
+      "parsedType": "income",
+      "sourceApp": "Bank",
+      "status": "pending",
+      "transactionId": "txn_pending_456",
+      "createdAt": "2026-04-01T10:00:00Z"
+    },
+    "budgetUpdate": null,
+    "alerts": []
+  }
+}
+```
+
+> **`parsedCategory` values:** Any string from the Categories list is valid,  
+> including `"income"` for income-type notifications. The frontend should  
+> display `"income"` as **"Income"**. Confirming an income notification does  
+> **not** update any budget (intentional).
 
 **Budget Set via Chat:**
 ```json
@@ -1323,12 +1368,21 @@ backend/
   "Salary",
   "Freelance",
   "Gift",
+  "income",
   "Other"
 ]
 ```
 
-Expense categories: Food, Transport, Rent, Education, Shopping, Health, Entertainment, Bills, Other  
-Income categories: Salary, Freelance, Gift, Other
+Expense categories: `Food`, `Transport`, `Rent`, `Education`, `Shopping`, `Health`, `Entertainment`, `Bills`, `Other`
+
+Income category: `"income"` — the single accepted string for any income-type notification  
+(e.g. salary credit SMS, bank deposit alert). Stored as-is in Firestore; the  
+frontend should display it as **"Income"**. Does **not** trigger a budget update  
+on confirmation (same as all income-type transactions).
+
+> **Firestore safety:** `"income"` is explicitly listed in `EXPENSE_CATEGORIES`  
+> and passes `is_valid_expense_category()` / `normalize_expense_category()`  
+> without being coerced to `"Other"`.
 
 ---
 
