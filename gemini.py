@@ -496,10 +496,12 @@ async def process_chat_message(
     first_name: str = "User",
     is_first_message: bool = False,
     missing_budget_categories: list[str] | None = None,
+    history: list[dict] | None = None,
 ) -> dict:
     """
     Send user message to Gemini, parse response.
     Accepts user context for personalized greetings.
+    Supports chat history for multi-turn conversations.
     Returns dict with:
       - reply: str (friendly text)
       - actions: list of action dicts
@@ -514,7 +516,22 @@ async def process_chat_message(
                              "type": None, "limit": None, "monthKey": None}],
             }
 
-        # Inject user context so Gemini can personalize greetings
+        # ── Format History ───────────────────────────────────────────────────
+        contents = []
+        if history:
+            for msg in history:
+                # Ensure the message has 'role' and 'parts'
+                role = msg.get("role")
+                parts = msg.get("parts")
+                if role and parts:
+                    contents.append({
+                        "role": role,
+                        "parts": parts
+                    })
+
+        # ── Inject System Prompt & User Context ──────────────────────────────
+        # For multi-turn, we'll prepend the system instructions to the current 
+        # message if there's no history, or use them as a preceding context.
         context_block = (
             f"\n--- USER CONTEXT ---\n"
             f"FirstName: {first_name}\n"
@@ -523,8 +540,22 @@ async def process_chat_message(
             f"--- END CONTEXT ---\n"
         )
 
-        full_prompt = f"{SYSTEM_PROMPT}\n{context_block}\nUser: {user_message}"
-        response = model.generate_content(full_prompt)
+        # Combine system prompt with context for the "current" instruction
+        instruction = f"{SYSTEM_PROMPT}\n{context_block}"
+
+        # If it's the first message, we send it all as one prompt.
+        # If we have history, we can still prepend instruction to the latest user message
+        # or use system_instruction (but let's stick to the user's "contents" request).
+        
+        current_user_message = {
+            "role": "user",
+            "parts": [{"text": f"{instruction}\nUser: {user_message}"}]
+        }
+        
+        contents.append(current_user_message)
+
+        # ── Call Gemini ──────────────────────────────────────────────────────
+        response = model.generate_content(contents)
         response_text = response.text
 
         actions = parse_gemini_response(response_text)
