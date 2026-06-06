@@ -12,6 +12,11 @@ from utils import (
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment
 from typing import Optional
 from services.notification_service import resolve_category_from_receiver_name, parse_receiver_name
+from services.report_service import (
+    get_missing_budget_categories,
+    get_top_spending_category,
+    get_spend_alerts
+)
 
 router = APIRouter()
 
@@ -323,12 +328,51 @@ async def chat(
     user_msg_ref = messages_ref.document()
     user_msg_ref.set({
         "role": "user",
-        "content": user_message,
+        "parts": [{"text": user_message}],
+        "content": user_message, # Keep for backward compatibility
         "intent": None,
         "extractedData": None,
         "relatedTransactionId": None,
         "createdAt": SERVER_TIMESTAMP,
     })
+
+    # ── Fetch Chat History (Sliding Window: last 14 messages) ───────────
+    history = []
+    try:
+        hist_docs = list(
+            messages_ref
+            .order_by("createdAt", direction="DESCENDING")
+            .limit(14)
+            .stream()
+        )
+        hist_docs.reverse() # Chronological order
+        
+        last_role = None
+        for doc in hist_docs:
+            m = doc.to_dict()
+            if doc.id == user_msg_ref.id:
+                continue # Skip the message we just saved
+                
+            h_role = m.get("role")
+            if h_role == "assistant": h_role = "model"
+            
+            h_parts = m.get("parts")
+            if not h_parts and m.get("content"):
+                h_parts = [{"text": m.get("content")}]
+            
+            if h_role and h_parts:
+                # Strictly enforce alternating roles for Gemini
+                if h_role != last_role:
+                    history.append({"role": h_role, "parts": h_parts})
+                    last_role = h_role
+        
+        # If history ends with 'user', we might want to trim it so the next 
+        # message (which is always 'user') doesn't break alternation.
+        if history and history[-1]["role"] == "user":
+            history.pop()
+
+    except Exception as hist_err:
+        print(f"[CHAT] History fetch failed: {hist_err}")
 
     # ── Conversational Confirmation Check ────────────────────────────────
     from utils import is_affirmative, is_denial
@@ -384,7 +428,8 @@ async def chat(
                             
                             assistant_msg_ref = messages_ref.document()
                             assistant_msg_ref.set({
-                                "role": "assistant",
+                                "role": "model",
+                                "parts": [{"text": reply}],
                                 "content": reply,
                                 "intent": "notification_parse_ask_category",
                                 "extractedData": None,
@@ -514,7 +559,8 @@ async def chat(
                 reply = "Kharcha save gareko chu ✅"
                 
             assistant_msg_ref.set({
-                "role": "assistant",
+                "role": "model",
+                "parts": [{"text": reply}],
                 "content": reply,
                 "intent": primary_intent,
                 "extractedData": [
@@ -744,7 +790,8 @@ async def chat(
         # Save assistant message
         assistant_msg_ref = messages_ref.document()
         assistant_msg_ref.set({
-            "role":                 "assistant",
+            "role":                 "model",
+            "parts":                [{"text": reply}],
             "content":              reply,
             "intent":               reply_intent,
             "extractedData":        [{
@@ -793,14 +840,22 @@ async def chat(
         )
         # Only the message we just saved exists → first message
         is_first_message = len(existing_msgs) <= 1
+
+        # Compute missing budget categories for current month
+        curr_month = get_current_month_key()
+        missing_budget_categories = get_missing_budget_categories(db, uid, curr_month)
+
     except Exception as ctx_err:
         print(f"[CHAT] Context lookup failed (non-critical): {ctx_err}")
+        missing_budget_categories = []
 
     # ── Call Gemini ──────────────────────────────────────────────────────
     gemini_result = await process_chat_message(
         user_message,
         first_name=first_name,
         is_first_message=is_first_message,
+        missing_budget_categories=missing_budget_categories,
+        history=history,
     )
     gemini_reply = gemini_result["reply"]
     actions = gemini_result["actions"]
@@ -1195,6 +1250,36 @@ async def chat(
                 reply_parts.append("Kei expense fela parena undo garna lai")
                 print("[CHAT] [UNDO] No matching expense")
 
+        # ── QUERY TOP SPENDING CATEGORY ──────────────────────────────────
+        elif intent == "query_top_spend_category":
+            top = get_top_spending_category(db, uid, month_key)
+            if top:
+                reply_parts.append(
+                    f"Yo mahina sabai bhanda dherai kharcha {top['category']} ma (Rs {int(top['amount'])}) bhayeko cha."
+                )
+            else:
+                reply_parts.append("Yo mahina kei kharcha bhetiyena.")
+            print(f"[CHAT] query_top_spend_category: {top}")
+
+        # ── QUERY SPEND FEEDBACK / SUGGESTIONS ───────────────────────────
+        elif intent == "query_spend_feedback":
+            alerts = get_spend_alerts(db, uid, month_key)
+            top_cat = alerts.get("highestCategory")
+            over_cats = alerts.get("overBudgetCategories", [])
+            
+            if not top_cat:
+                reply_parts.append("Hajur ko spending data bhetiyena, kehi kharcha track garnuhos ani ma suggestion dinchu.")
+            else:
+                feedback = [f"Yo mahina sabai bhanda dherai kharcha {top_cat} ma bhayeko cha."]
+                if over_cats:
+                    over_list = ", ".join([c["category"] for c in over_cats])
+                    feedback.append(f"Hajur le {over_list} ma budget bhanda dherai kharcha garnubhako cha.")
+                    feedback.append("Budget control garna ali dhyan dinu hola.")
+                else:
+                    feedback.append("Sabai category budget bitrai chan, ramro gardai hunuhuncha!")
+                reply_parts.append(" ".join(feedback))
+            print(f"[CHAT] query_spend_feedback: {alerts}")
+
         # ── GENERAL CHAT / GREETING ──────────────────────────────────────
         else:
             print(f"[CHAT] General/greeting — no DB writes")
@@ -1289,7 +1374,8 @@ async def chat(
         # Save assistant message
         assistant_msg_ref = messages_ref.document()
         assistant_msg_ref.set({
-            "role": "assistant",
+            "role": "model",
+            "parts": [{"text": final_reply}],
             "content": final_reply,
             "intent": "confirm_expense_ask",
             "extractedData": [
@@ -1366,7 +1452,8 @@ async def chat(
         ]
 
     assistant_msg_ref.set({
-        "role": "assistant",
+        "role": "model",
+        "parts": [{"text": reply}],
         "content": reply,
         "intent": primary_intent,
         "extractedData": extracted,
@@ -1551,6 +1638,7 @@ async def chat_sync(
             user_msg_ref = messages_ref.document()
             user_msg_ref.set({
                 "role": "user",
+                "parts": [{"text": user_message}],
                 "content": user_message,
                 "intent": None,
                 "extractedData": None,
@@ -1561,7 +1649,13 @@ async def chat_sync(
             })
 
             # ── Call Gemini ──────────────────────────────────────────────
-            gemini_result = await process_chat_message(user_message)
+            # Compute missing budget categories for the derived month
+            missing_budget_categories = get_missing_budget_categories(db, uid, derived_month_key)
+
+            gemini_result = await process_chat_message(
+                user_message,
+                missing_budget_categories=missing_budget_categories
+            )
             gemini_reply = gemini_result["reply"]
             actions = gemini_result["actions"]
 
@@ -1944,6 +2038,32 @@ async def chat_sync(
                     else:
                         reply_parts.append("Kei expense fela parena undo garna lai")
 
+                # ── QUERY TOP SPENDING CATEGORY (sync) ───────────────────
+                elif intent == "query_top_spend_category":
+                    top = get_top_spending_category(db, uid, month_key)
+                    if top:
+                        reply_parts.append(
+                            f"Yo mahina sabai bhanda dherai kharcha {top['category']} ma (Rs {int(top['amount'])}) bhayeko cha."
+                        )
+                    else:
+                        reply_parts.append("Yo mahina kei kharcha bhetiyena.")
+
+                # ── QUERY SPEND FEEDBACK / SUGGESTIONS (sync) ────────────
+                elif intent == "query_spend_feedback":
+                    alerts = get_spend_alerts(db, uid, month_key)
+                    top_cat = alerts.get("highestCategory")
+                    over_cats = alerts.get("overBudgetCategories", [])
+                    if not top_cat:
+                        reply_parts.append("Hajur ko spending data bhetiyena.")
+                    else:
+                        feedback = [f"Yo mahina sabai bhanda dherai kharcha {top_cat} ma bhayeko cha."]
+                        if over_cats:
+                            over_list = ", ".join([c["category"] for c in over_cats])
+                            feedback.append(f"Hajur le {over_list} ma budget bhanda dherai kharcha garnubhako cha.")
+                        else:
+                            feedback.append("Sabai category budget bitrai chan, ramro gardai hunuhuncha!")
+                        reply_parts.append(" ".join(feedback))
+
                 # ── GENERAL CHAT / GREETING ──────────────────────────────
                 else:
                     pass
@@ -1988,7 +2108,8 @@ async def chat_sync(
                     for a in actions
                 ]
             assistant_msg_ref.set({
-                "role": "assistant",
+                "role": "model",
+                "parts": [{"text": reply}],
                 "content": reply,
                 "intent": primary_intent,
                 "extractedData": extracted,

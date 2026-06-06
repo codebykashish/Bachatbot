@@ -1,4 +1,3 @@
-
 \users (collection)
 └── {uid} (document) ← From Firebase Auth
     ├── firstName: "Ram"
@@ -44,10 +43,10 @@
     │       ├── createdAt: timestamp
     │       └── updatedAt: timestamp
     │
-    ├── messages (subcollection)
+    ├── messages (subcollection)  ◀ Optimized for Gemini API
     │   └── {messageId}
-    │       ├── role: "user" | "assistant"
-    │       ├── content: "Sanchai xau?" | "Momo 250"
+    │       ├── role: "user" | "model"  ◀ Changed "assistant" to "model" to match Gemini requirements
+    │       ├── parts: [ { text: "Sanchai xau?" } ] ◀ Changed string to array of objects to map directly to Gemini API
     │       ├── intent: "general_chat" | "expense_log" | "budget_set" | "undo_request" | "greeting" | "query_report" | "confirmation_response"
     │       ├── extractedData (map, optional)
     │       │   ├── amount: 250
@@ -59,7 +58,7 @@
     │       │   └── newValue: 6000
     │       ├── relatedTransactionId: "txn_abc" (optional)
     │       ├── isSynced: true
-    │       └── createdAt: timestamp
+    │       └── createdAt: timestamp  ◀ Use this to sort chronologically for your sliding history window
     │
     ├── notifications (subcollection)
     │   └── {notificationId}
@@ -99,7 +98,3 @@
             ├── isRead: false
             ├── monthKey: "2026-04"
             └── createdAt: timestamp
-
-
-
-

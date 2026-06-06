@@ -6,6 +6,7 @@ from enum import Enum
 class TransactionTypeEnum(str, Enum):
     EXPENSE = "expense"
     INCOME = "income"
+    TRANSFER = "transfer"
     SAVING = "saving"
 
 
@@ -20,12 +21,12 @@ class TransactionSourceEnum(str, Enum):
     CHAT = "chat"
     MANUAL = "manual"
     NOTIFICATION = "notification"
+    OFFLINE_SYNC = "offline_sync"
 
 
 class TransactionCreate(BaseModel):
     amount: float = Field(..., gt=0)
     category: Optional[str] = None
-    source: Optional[str] = None
     savingMethod: Optional[str] = None
     type: TransactionTypeEnum
     description: str = ""
@@ -37,7 +38,6 @@ class TransactionResponse(BaseModel):
     id: str
     amount: float
     category: Optional[str] = None
-    source: Optional[str] = None
     savingMethod: Optional[str] = None
     type: TransactionTypeEnum
     status: TransactionStatusEnum

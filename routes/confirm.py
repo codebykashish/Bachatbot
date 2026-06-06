@@ -208,7 +208,8 @@ async def confirm_transaction(
         confirm_reply = f"OK, Rs {int(amount)} {cat_display} ma save gareko chu ✅"
         msg_ref = messages_ref.document()
         msg_ref.set({
-            "role":                 "assistant",
+            "role":                 "model",
+            "parts":                [{"text": confirm_reply}],
             "content":              confirm_reply,
             "intent":               "notification_confirmed",
             "extractedData":        {
@@ -548,7 +549,8 @@ async def reject_transaction(
         reject_reply = f"OK, {source_app} Rs {int(amount)} {category} transaction ignore gareko chu."
         msg_ref = messages_ref.document()
         msg_ref.set({
-            "role":                 "assistant",
+            "role":                 "model",
+            "parts":                [{"text": reject_reply}],
             "content":              reject_reply,
             "intent":               "notification_cancelled",
             "extractedData":        None,
