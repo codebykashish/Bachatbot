@@ -5,7 +5,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart'; // Import Cloud Firestore
 import 'firebase_options.dart';
 import 'screens/login_screen.dart';
+import 'screens/email_signup_page.dart';
 import 'screens/main_screen.dart';
+import 'screens/splash_screen.dart';
 import 'api_service.dart';
 
 void main() async {
@@ -32,10 +34,14 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'BachatBot',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2DBE7F)),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2DBD7F)),
         useMaterial3: true,
       ),
-      home: const AuthWrapper(),
+      home: const SplashScreen(),
+      routes: {
+        '/login': (context) => const LoginScreen(),
+        '/signup': (context) => const EmailSignupPage(),
+      },
     );
   }
 }
