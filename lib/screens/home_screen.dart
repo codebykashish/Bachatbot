@@ -4,6 +4,7 @@ import '../api_service.dart';
 import '../widgets/report_chart.dart';
 import '../widgets/balance_card.dart';
 import 'categories_screen.dart';
+import 'notification_screen.dart';
 import 'reports_screen.dart';
 
 // State is public so MainScreen can call refresh() via GlobalKey
@@ -219,8 +220,22 @@ class HomeScreenState extends State<HomeScreen> {
     return BalanceCard(
       currentBalance: _remainingIncome,
       spendingThisMonth: _totalExpense,
-      incomeThisMonth: _totalIncome, // Changed: real income from /monthly-report
+      incomeThisMonth: _totalIncome,
       hideAmounts: _hideAmounts,
+      onExpenseTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              const NotificationScreen(initialType: 'expense'),
+        ),
+      ),
+      onIncomeTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              const NotificationScreen(initialType: 'income'),
+        ),
+      ),
     );
   }
 

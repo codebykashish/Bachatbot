@@ -5,6 +5,8 @@ class BalanceCard extends StatelessWidget {
   final double spendingThisMonth;
   final double incomeThisMonth;
   final bool hideAmounts;
+  final VoidCallback? onExpenseTap;
+  final VoidCallback? onIncomeTap;
 
   const BalanceCard({
     super.key,
@@ -12,6 +14,8 @@ class BalanceCard extends StatelessWidget {
     required this.spendingThisMonth,
     required this.incomeThisMonth,
     this.hideAmounts = false,
+    this.onExpenseTap,
+    this.onIncomeTap,
   });
 
   String _formatAmount(double amount) {
@@ -93,112 +97,128 @@ class BalanceCard extends StatelessWidget {
           children: [
             // ── Income Card (LEFT) ──────────────────────────────────────
             Expanded(
-              child: Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
+              child: MouseRegion(
+                cursor: onIncomeTap != null
+                    ? SystemMouseCursors.click
+                    : MouseCursor.defer,
+                child: GestureDetector(
+                  onTap: onIncomeTap,
+                  child: Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.08),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1B8B8E).withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.account_balance_wallet,
-                        color: Color(0xFF1B8B8E),
-                        size: 28,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      'Income this\nMonth',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFF5A5A5A),
-                            fontWeight: FontWeight.w500,
-                            fontSize: 12,
-                            height: 1.4,
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1B8B8E).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      _formatAmount(incomeThisMonth),
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: const Color(0xFF1B8B8E),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
+                          child: const Icon(
+                            Icons.account_balance_wallet,
+                            color: Color(0xFF1B8B8E),
+                            size: 28,
                           ),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          'Income this\nMonth',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: const Color(0xFF5A5A5A),
+                                fontWeight: FontWeight.w500,
+                                fontSize: 12,
+                                height: 1.4,
+                              ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _formatAmount(incomeThisMonth),
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                color: const Color(0xFF1B8B8E),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                              ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
             const SizedBox(width: 16),
             // ── Expense Card (RIGHT) ────────────────────────────────────
             Expanded(
-              child: Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
+              child: MouseRegion(
+                cursor: onExpenseTap != null
+                    ? SystemMouseCursors.click
+                    : MouseCursor.defer,
+                child: GestureDetector(
+                  onTap: onExpenseTap,
+                  child: Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.08),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFD85E5E).withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.trending_down,
-                        color: Color(0xFFD85E5E),
-                        size: 28,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      'Expense this\nMonth',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFF5A5A5A),
-                            fontWeight: FontWeight.w500,
-                            fontSize: 12,
-                            height: 1.4,
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFD85E5E).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      _formatAmount(spendingThisMonth),
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: const Color(0xFFD85E5E),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
+                          child: const Icon(
+                            Icons.trending_down,
+                            color: Color(0xFFD85E5E),
+                            size: 28,
                           ),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          'Expense this\nMonth',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: const Color(0xFF5A5A5A),
+                                fontWeight: FontWeight.w500,
+                                fontSize: 12,
+                                height: 1.4,
+                              ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _formatAmount(spendingThisMonth),
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                color: const Color(0xFFD85E5E),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                              ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),

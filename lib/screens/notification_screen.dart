@@ -200,7 +200,9 @@ class _AlertCard extends StatelessWidget {
 // ── NotificationScreen ───────────────────────────────────────────────────────
 
 class NotificationScreen extends StatefulWidget {
-  const NotificationScreen({super.key});
+  final String initialType;
+
+  const NotificationScreen({super.key, this.initialType = 'all'});
 
   static ValueNotifier<int> unreadCount = ValueNotifier(0);
 
@@ -211,7 +213,7 @@ class NotificationScreen extends StatefulWidget {
 class _NotificationScreenState extends State<NotificationScreen> {
   static const Color _primary = Color(0xFF2DBE7F);
 
-  String _selectedType = 'all';
+  late String _selectedType;
   String _selectedTime = 'all';
   String? _selectedCategory;
   List<dynamic> _alerts = [];
@@ -241,6 +243,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
   @override
   void initState() {
     super.initState();
+    _selectedType = widget.initialType;
     _fetchAlerts();
   }
 
