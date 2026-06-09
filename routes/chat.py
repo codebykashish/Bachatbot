@@ -2233,29 +2233,87 @@ async def chat_sync(
 
 @router.get("/messages")
 async def get_messages(
-    monthKey: Optional[str] = Query(None),
-    limit: int = Query(50),
+    limit: int = Query(default=50, ge=1, le=200),
+    before: Optional[str] = Query(default=None, description="Message doc ID — return messages older than this (cursor pagination)"),
     current_user: dict = Depends(get_current_user),
 ):
-    """Get chat history/messages for current user."""
+    """
+    Return chat message history for the current user, oldest-first.
+
+    - Messages are stored permanently; the backend never wipes them.
+    - Call this when the chat screen opens to restore conversation history.
+    - Use `before=<messageId>` (the oldest message id you already have) to load
+      earlier pages (infinite scroll upward).
+    - Response includes `pendingAction` if the bot is waiting for a yes/no answer.
+    """
     uid = current_user["uid"]
     db = get_firestore()
 
     messages_ref = db.collection("users").document(uid).collection("messages")
-    query = messages_ref.order_by("createdAt", direction="DESCENDING").limit(limit)
-    docs = query.stream()
+
+    query = messages_ref.order_by("createdAt", direction="DESCENDING")
+
+    # Cursor: start after the document the caller already has
+    if before:
+        try:
+            cursor_doc = messages_ref.document(before).get()
+            if cursor_doc.exists:
+                query = query.start_after(cursor_doc)
+        except Exception:
+            pass  # bad cursor — return from start
+
+    query = query.limit(limit)
+    docs = list(query.stream())
 
     messages = []
     for doc in docs:
         data = doc.to_dict()
-        data["id"] = doc.id
-        messages.append(serialize_doc(data))
+        serialized = serialize_doc(data)
+        serialized["id"] = doc.id
+
+        # Normalize legacy role value
+        if serialized.get("role") == "assistant":
+            serialized["role"] = "model"
+
+        # Back-fill parts from content for old messages
+        if not serialized.get("parts") and serialized.get("content"):
+            serialized["parts"] = [{"text": serialized["content"]}]
+
+        messages.append(serialized)
+
+    # Return in chronological order (oldest first) for display
+    messages.reverse()
+
+    has_more = len(docs) == limit
+    # oldest doc in the DESCENDING result is the last element before reversing
+    next_cursor = docs[-1].id if has_more else None
+
+    # Include any active pendingAction so the frontend can restore its UI
+    pending_action = None
+    try:
+        pending_doc = (
+            db.collection("users").document(uid)
+            .collection("pendingAction").document("current")
+            .get()
+        )
+        if pending_doc.exists:
+            pa = pending_doc.to_dict()
+            pending_action = {
+                "actions": pa.get("actions", []),
+                "pendingTxIds": pa.get("pendingTxIds", []),
+                "source": pa.get("source", "chat"),
+                "monthKey": pa.get("monthKey"),
+            }
+    except Exception:
+        pass
 
     return {
         "success": True,
         "data": {
             "messages": messages,
-            "count": len(messages),
+            "hasMore": has_more,
+            "nextCursor": next_cursor,
+            "pendingAction": pending_action,
         },
     }
 

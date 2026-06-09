@@ -75,7 +75,10 @@ def _send_email(recipient: str, code: str) -> None:
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(smtp_email, smtp_password)
-        server.sendmail(smtp_email, recipient, msg.as_string())
+        refused = server.sendmail(smtp_email, recipient, msg.as_string())
+        if refused:
+            # sendmail returns a dict of {address: (code, reason)} for refused recipients
+            raise RuntimeError(f"Recipient refused by SMTP server: {refused}")
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────

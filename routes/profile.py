@@ -17,6 +17,7 @@ profile_router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+@profile_router.get("/profile")
 @profile_router.get("/api/v1/user/profile")
 async def get_profile(
     current_user: dict = Depends(get_current_user)
@@ -108,6 +109,7 @@ async def get_profile(
     }
 
 
+@profile_router.patch("/profile")
 @profile_router.patch("/api/v1/user/profile")
 async def update_profile(
     body: ProfileUpdateRequest,

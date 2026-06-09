@@ -1,3 +1,148 @@
+# BachatBot — API & Firestore Schema
+
+---
+
+## REST API Endpoints
+
+### Profile
+
+| Method | Path                  | Alias         | Auth | Description                          |
+|--------|-----------------------|---------------|------|--------------------------------------|
+| GET    | /api/v1/user/profile  | GET /profile  | JWT  | Get current user's full profile      |
+| PATCH  | /api/v1/user/profile  | PATCH /profile| JWT  | Update profile fields / password     |
+| POST   | /api/v1/user/profile  |               | JWT  | Create initial profile after signup  |
+
+> `/profile` and `/api/v1/user/profile` are identical aliases — both are registered.
+> Frontend may use either path; the backend handles both.
+
+**GET /profile — Response shape:**
+```json
+{
+  "success": true,
+  "data": {
+    "uid": "abc123",
+    "firstName": "Ram",
+    "lastName": "Sharma",
+    "email": "ram@example.com",
+    "phoneNumber": "+97798XXXXXXXX",
+    "onboarding": { "isCompleted": true, "occupation": "student", "housingType": "rent", "estimatedMonthlySpend": 15000 },
+    "preferences": { "language": "en", "currency": "NPR", "alertThreshold": 80 },
+    "totalIncome": 45000,
+    "totalExpense": 15000,
+    "createdAt": "...",
+    "updatedAt": "..."
+  }
+}
+```
+
+---
+
+### Chat
+
+| Method | Path          | Auth | Description                        |
+|--------|---------------|------|------------------------------------|
+| POST   | /chat         | JWT  | Send a chat message to BachatBot   |
+| POST   | /messages     | JWT  | Alias for POST /chat               |
+| GET    | /messages     | JWT  | Get paginated chat history         |
+| POST   | /chat/sync    | JWT  | Batch-process offline messages     |
+
+**GET /messages — Query params:**
+- `limit` (int, default 50, max 200) — number of messages to return
+- `before` (string, optional) — message document ID for cursor pagination
+
+**GET /messages — Response shape:**
+```json
+{
+  "success": true,
+  "data": {
+    "messages": [
+      {
+        "id": "msg_abc",
+        "role": "user",
+        "parts": [{ "text": "200 momo khaye" }],
+        "intent": null,
+        "extractedData": null,
+        "createdAt": "..."
+      }
+    ],
+    "hasMore": false,
+    "nextCursor": null
+  }
+}
+```
+Messages are returned in **chronological order** (oldest first).
+The backend never clears message history; it is persistent per user.
+
+**POST /chat — Request body:**
+```json
+{
+  "message": "aja maile 500 momo ma khaye",
+  "source": "chat",
+  "idempotencyKey": "optional-uuid"
+}
+```
+
+**POST /chat — Response shape:**
+```json
+{
+  "success": true,
+  "data": {
+    "reply": "Rs 500 Food (momo) ma save gareko chu",
+    "intent": "expense_log",
+    "needsConfirmation": false,
+    "transaction": { "id": "...", "amount": 500, "category": "Food", "type": "expense", "status": "confirmed" },
+    "budgetUpdate": { "id": "...", "category": "Food", "limit": 5000, "spent": 1500, "remaining": 3500, "percentUsed": 30.0 },
+    "alerts": [{ "id": "...", "type": "expense", "message": "Rs 500 Food expense saved.", "category": "Food", "severity": "low", "isRead": false }]
+  }
+}
+```
+
+---
+
+### Gemini Chat Intents
+
+These are the `intent` values the backend processes from Gemini's response:
+
+| Intent                    | type field      | Description                                       |
+|---------------------------|-----------------|---------------------------------------------------|
+| expense_log               | "expense"       | Log an expense transaction                        |
+| income_log                | "income"        | Log an income transaction — NEVER use expense_log for income |
+| set_budget                | null            | Create or update a category monthly budget        |
+| confirm_expense           | null            | User confirmed a pending expense                  |
+| query_report              | null            | Daily / weekly / monthly spending report          |
+| query_month_total         | null            | Total expense for current month                   |
+| query_top_spend_category  | null            | Which category has highest spend this month       |
+| query_spend_feedback      | null            | AI suggestion based on spending patterns          |
+| query_category_spend      | null            | Spend total for a specific category               |
+| query_budget_status       | null            | Budget utilization for a specific category        |
+| undo_last_expense         | null            | Soft-delete the most recent expense               |
+| set_notification_category | null            | Assign category to a pending notification tx      |
+| general_chat              | null            | Conversational reply, no DB action                |
+| greeting                  | null            | Greeting response                                 |
+
+**Income rule:** For any income message, Gemini MUST emit `income_log` with `type: "income"`.
+`expense_log` is never used for income. The alert created for income reads:
+`"Rs {amount} income added."` (NOT "expense saved").
+
+---
+
+### Notifications
+
+| Method | Path                          | Auth | Description                                   |
+|--------|-------------------------------|------|-----------------------------------------------|
+| POST   | /chat (source:"notification") | JWT  | Parse a wallet/bank notification              |
+| POST   | /confirm-transactions         | JWT  | Confirm or reject pending notification txs    |
+
+**Notification alert types:**
+- `type: "expense"` → message: `"Rs {amount} {category} expense saved."`
+- `type: "income"`  → message: `"Rs {amount} income added."`
+- `type: "budget_set"` → message: `"{category} budget Rs {limit} set gareko chu."`
+
+---
+
+## Firestore Collections
+
+```
 \users (collection)
 └── {uid} (document) ← From Firebase Auth
     ├── firstName: "Ram"
@@ -33,32 +178,29 @@
     │       ├── amount: 250
     │       ├── category: "Food"
     │       ├── type: "expense" | "income" | "transfer"
-    │       ├── status: "confirmed" | "pending" | "rejected"
-    │       ├── source: "chat" | "manual" | "notification"
+    │       ├── status: "confirmed" | "pending" | "cancelled"
+    │       ├── source: "chat" | "manual" | "notification" | "offline_sync"
     │       ├── description: "Momo khada 250 gayo"
     │       ├── monthKey: "2026-04"
     │       ├── isDeleted: false
     │       ├── deletedAt: timestamp (null if active)
     │       ├── originalMessageId: "msg_abc123"
+    │       ├── idempotencyKey: "uuid" (optional, for deduplication)
     │       ├── createdAt: timestamp
     │       └── updatedAt: timestamp
     │
-    ├── messages (subcollection)  ◀ Optimized for Gemini API
+    ├── messages (subcollection)  ◀ Persistent — never cleared by backend
     │   └── {messageId}
-    │       ├── role: "user" | "model"  ◀ Changed "assistant" to "model" to match Gemini requirements
-    │       ├── parts: [ { text: "Sanchai xau?" } ] ◀ Changed string to array of objects to map directly to Gemini API
-    │       ├── intent: "general_chat" | "expense_log" | "budget_set" | "undo_request" | "greeting" | "query_report" | "confirmation_response"
-    │       ├── extractedData (map, optional)
-    │       │   ├── amount: 250
-    │       │   ├── category: "Food"
-    │       │   └── type: "expense"
-    │       ├── pendingAction (map, optional)
-    │       │   ├── type: "budget_conflict"
-    │       │   ├── oldValue: 5000
-    │       │   └── newValue: 6000
+    │       ├── role: "user" | "model"  ◀ "assistant" normalized to "model" on read
+    │       ├── parts: [ { text: "Sanchai xau?" } ]
+    │       ├── content: "Sanchai xau?"  (legacy field, kept for backward compat)
+    │       ├── intent: "general_chat" | "expense_log" | "income_log" | "set_budget" |
+    │       │           "confirm_expense" | "query_report" | "greeting" | ...
+    │       ├── extractedData (array, optional)
+    │       │   └── { intent, amount, category, type, limit, monthKey }
     │       ├── relatedTransactionId: "txn_abc" (optional)
-    │       ├── isSynced: true
-    │       └── createdAt: timestamp  ◀ Use this to sort chronologically for your sliding history window
+    │       ├── status: "pending" | "delivered"
+    │       └── createdAt: timestamp  ◀ Sort by this for chronological order
     │
     ├── notifications (subcollection)
     │   └── {notificationId}
@@ -69,21 +211,26 @@
     │       ├── sourceApp: "eSewa" | "Khalti" | "NabilBank" | "Unknown"
     │       ├── status: "pending" | "confirmed" | "rejected"
     │       ├── transactionId: "txn_abc" (filled after user confirms)
+    │       ├── receiverName: "Sandar Momo" (optional)
+    │       ├── suggestedCategory: "Food" (optional)
+    │       └── createdAt: timestamp
+    │
+    ├── pendingAction (subcollection — single doc "current")
+    │   └── current
+    │       ├── actions: [ { intent, amount, category, type } ]
+    │       ├── pendingTxIds: ["txn_abc"]
+    │       ├── source: "chat" | "notification"
+    │       ├── monthKey: "2026-04"
     │       └── createdAt: timestamp
     │
     ├── monthlyReports (subcollection)
-    │   └── {monthKey} ← Document ID = "2026-04"
+    │   └── {monthKey}  ← Document ID = "2026-04"
     │       ├── monthKey: "2026-04"
     │       ├── totalExpense: 15000
     │       ├── totalIncome: 45000
     │       ├── netSavings: 30000
-    │       ├── categoryBreakdown (map)
-    │       │   ├── Food: 1200
-    │       │   ├── Rent: 8000
-    │       │   └── ...
-    │       ├── budgetUtilization (map)
-    │       │   ├── Food: 85
-    │       │   └── ...
+    │       ├── categoryBreakdown (map)  { Food: 1200, Rent: 8000, ... }
+    │       ├── budgetUtilization (map)  { Food: 85, ... }
     │       ├── daysRemaining: 10
     │       ├── survivalBudgetPerDay: 380
     │       ├── alertCount: 3
@@ -91,10 +238,14 @@
     │
     └── alerts (subcollection)
         └── {alertId}
-            ├── type: "budget_warning" | "overspent" | "low_survival_budget" | "monthly_report_ready"
-            ├── category: "Food"
-            ├── message: "You have only Rs 1200 left for Food. 5 days remaining. Spend wisely!"
-            ├── severity: "medium" | "high"
+            ├── type: "expense" | "income" | "budget_set" | "budget_warning" |
+            │         "overspent" | "low_survival_budget" | "monthly_report_ready"
+            ├── category: "Food" (null for income alerts)
+            ├── message: "Rs 500 Food expense saved." | "Rs 3000 income added."
+            ├── severity: "low" | "medium" | "high"
             ├── isRead: false
+            ├── isDeleted: false
             ├── monthKey: "2026-04"
+            ├── relatedTransactionId: "txn_abc" (optional)
             └── createdAt: timestamp
+```
