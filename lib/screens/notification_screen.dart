@@ -1,5 +1,203 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../api_service.dart';
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+IconData _categoryIcon(String? category) {
+  switch (category?.toLowerCase()) {
+    case 'food':
+      return Icons.restaurant_outlined;
+    case 'transport':
+      return Icons.directions_bus_outlined;
+    case 'rent':
+      return Icons.home_outlined;
+    case 'shopping':
+      return Icons.shopping_bag_outlined;
+    case 'health':
+      return Icons.local_hospital_outlined;
+    case 'education':
+      return Icons.school_outlined;
+    case 'bills':
+      return Icons.receipt_long_outlined;
+    case 'entertainment':
+      return Icons.movie_outlined;
+    default:
+      return Icons.category_outlined;
+  }
+}
+
+String _formatAlertTime(String? isoString) {
+  if (isoString == null || isoString.isEmpty) return '';
+  final dt = DateTime.tryParse(isoString)?.toLocal();
+  if (dt == null) return '';
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final yesterday = today.subtract(const Duration(days: 1));
+  final dtDay = DateTime(dt.year, dt.month, dt.day);
+  final timeStr = DateFormat('h:mm a').format(dt);
+  if (dtDay == today) return 'Today, $timeStr';
+  if (dtDay == yesterday) return 'Yesterday, $timeStr';
+  if (today.difference(dtDay).inDays < 7) {
+    return '${DateFormat('EEE').format(dt)}, $timeStr';
+  }
+  return '${DateFormat('MMM d').format(dt)}, $timeStr';
+}
+
+// ── AlertCard ────────────────────────────────────────────────────────────────
+
+class _AlertCard extends StatelessWidget {
+  final Map<String, dynamic> alert;
+
+  const _AlertCard({required this.alert});
+
+  @override
+  Widget build(BuildContext context) {
+    final isRead = alert['isRead'] == true;
+    final rawType = (alert['type'] as String?)?.toLowerCase() ?? 'expense';
+    final category = (alert['category'] as String?) ?? 'Other';
+    final amount = (alert['amount'] as num?)?.toDouble() ?? 0;
+    final note = (alert['message'] as String?) ??
+        (alert['note'] as String?) ??
+        '';
+    final createdAt =
+        ((alert['createdAt'] ?? alert['date']) as Object?)?.toString();
+
+    final isBudget = rawType.contains('budget');
+    final isIncome = rawType == 'income';
+
+    // ── Title ──
+    final String title;
+    if (isBudget) {
+      title = 'Budget Update';
+    } else if (isIncome) {
+      title = 'Income';
+    } else {
+      title = category;
+    }
+
+    // ── Circle icon ──
+    final Widget circleIcon;
+    if (isBudget) {
+      circleIcon = CircleAvatar(
+        backgroundColor: Colors.blue.shade50,
+        child: const Icon(Icons.account_balance_wallet_outlined,
+            color: Colors.blue, size: 20),
+      );
+    } else if (isIncome) {
+      circleIcon = CircleAvatar(
+        backgroundColor: Colors.green.shade50,
+        child: const Icon(Icons.arrow_downward_rounded,
+            color: Colors.green, size: 20),
+      );
+    } else {
+      circleIcon = CircleAvatar(
+        backgroundColor: Colors.red.shade50,
+        child: Icon(_categoryIcon(category),
+            color: Colors.red.shade400, size: 20),
+      );
+    }
+
+    // ── Amount ──
+    final String amountStr;
+    final Color amountColor;
+    if (amount == 0) {
+      amountStr = '';
+      amountColor = Colors.grey;
+    } else if (isIncome) {
+      amountStr = '+Rs ${amount.toInt()}';
+      amountColor = Colors.green.shade700;
+    } else if (isBudget) {
+      amountStr = 'Rs ${amount.toInt()}';
+      amountColor = Colors.blue;
+    } else {
+      amountStr = '-Rs ${amount.toInt()}';
+      amountColor = Colors.red.shade600;
+    }
+
+    return Stack(
+      children: [
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          decoration: BoxDecoration(
+            color: isRead ? Colors.white : Colors.green.shade50,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isRead ? Colors.grey.shade200 : Colors.green.shade200,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(width: 40, height: 40, child: circleIcon),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade800,
+                        ),
+                      ),
+                      if (note.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          note,
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade500),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      const SizedBox(height: 4),
+                      Text(
+                        _formatAlertTime(createdAt),
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade400),
+                      ),
+                    ],
+                  ),
+                ),
+                if (amountStr.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    amountStr,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: amountColor,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        if (!isRead)
+          Positioned(
+            top: 8,
+            right: 20,
+            child: Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(
+                color: Colors.green,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// ── NotificationScreen ───────────────────────────────────────────────────────
 
 class NotificationScreen extends StatefulWidget {
   const NotificationScreen({super.key});
@@ -13,19 +211,32 @@ class NotificationScreen extends StatefulWidget {
 class _NotificationScreenState extends State<NotificationScreen> {
   static const Color _primary = Color(0xFF2DBE7F);
 
-  bool _isLoading = true;
+  String _selectedType = 'all';
+  String _selectedTime = 'all';
+  String? _selectedCategory;
   List<dynamic> _alerts = [];
+  bool _isLoading = false;
 
-  String _filterCategory = 'All';
-  String _filterDateRange = 'All';
-  final TextEditingController _searchController = TextEditingController();
-
-  static const List<String> _categories = [
-    'All', 'Food', 'Transport', 'Rent', 'Education',
-    'Shopping', 'Health', 'Entertainment', 'Bills', 'Other',
+  static const List<Map<String, String>> _timeFilters = [
+    {'label': 'All Time', 'value': 'all'},
+    {'label': 'Today', 'value': 'today'},
+    {'label': 'Yesterday', 'value': 'yesterday'},
+    {'label': 'This Week', 'value': 'week'},
+    {'label': 'Last Week', 'value': 'last_week'},
   ];
 
-  static const List<String> _dateFilters = ['All', 'Today', 'This Week', 'This Month'];
+  static const List<Map<String, String>> _catFilters = [
+    {'label': 'All', 'emoji': ''},
+    {'label': 'Food', 'emoji': '🍽'},
+    {'label': 'Transport', 'emoji': '🚌'},
+    {'label': 'Rent', 'emoji': '🏠'},
+    {'label': 'Shopping', 'emoji': '🛍'},
+    {'label': 'Health', 'emoji': '💊'},
+    {'label': 'Education', 'emoji': '📚'},
+    {'label': 'Bills', 'emoji': '⚡'},
+    {'label': 'Entertainment', 'emoji': '🎬'},
+    {'label': 'Others', 'emoji': '📦'},
+  ];
 
   @override
   void initState() {
@@ -33,368 +244,288 @@ class _NotificationScreenState extends State<NotificationScreen> {
     _fetchAlerts();
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
   Future<void> _fetchAlerts() async {
     setState(() => _isLoading = true);
     try {
-      // Build query params for GET /alerts
       final params = <String, String>{};
-      if (_filterCategory != 'All') {
-        params['category'] = _filterCategory;
-      }
-      if (_filterDateRange != 'All') {
-        params['dateRange'] = _filterDateRange;
+      if (_selectedType != 'all') params['type'] = _selectedType;
+      if (_selectedTime != 'all') params['dateRange'] = _selectedTime;
+      if (_selectedType == 'expense' && _selectedCategory != null) {
+        params['category'] = _selectedCategory!;
       }
 
       final queryString = params.entries
-          .map((e) => '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
+          .map((e) =>
+              '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
           .join('&');
-      final endpoint = '/alerts${queryString.isNotEmpty ? '?$queryString' : ''}';
+      final endpoint =
+          '/alerts${queryString.isNotEmpty ? '?$queryString' : ''}';
 
-      debugPrint('[NotificationScreen] fetching: $endpoint');
       final res = await ApiService.get(endpoint);
       if (!mounted) return;
-      debugPrint('[NotificationScreen] response: ${res['success']}');
 
       if (res['success'] == true) {
-        final rawAlerts = res['data']?['alerts'] ?? res['data'] ?? [];
-        // Sort newest-first by createdAt
-        final sortedAlerts = List<dynamic>.from(rawAlerts);
-        sortedAlerts.sort((a, b) {
-          final dateA = a['createdAt'] ?? a['date'] ?? '';
-          final dateB = b['createdAt'] ?? b['date'] ?? '';
-          return dateB.toString().compareTo(dateA.toString());
+        final raw = res['data']?['alerts'] ?? res['data'] ?? [];
+        final sorted = List<dynamic>.from(raw);
+        sorted.sort((a, b) {
+          final da = a['createdAt'] ?? a['date'] ?? '';
+          final db = b['createdAt'] ?? b['date'] ?? '';
+          return db.toString().compareTo(da.toString());
         });
-        setState(() => _alerts = sortedAlerts);
-        NotificationScreen.unreadCount.value = _alerts.where((a) => a['isRead'] != true).length;
+        setState(() => _alerts = sorted);
+        NotificationScreen.unreadCount.value =
+            _alerts.where((a) => a['isRead'] != true).length;
       }
     } catch (e) {
       debugPrint('[NotificationScreen] error: $e');
-      // Keep empty list on failure
-      if (mounted) {
-        setState(() => _alerts = []);
-      }
+      if (mounted) setState(() => _alerts = []);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  List<dynamic> get _filteredAlerts {
-    final query = _searchController.text.toLowerCase();
-    if (query.isEmpty) return _alerts;
-
-    return _alerts.where((a) {
-      final msg = (a['message'] ?? '').toString().toLowerCase();
-      return msg.contains(query);
-    }).toList();
-  }
-
-  String _relativeDate(String? dateStr) {
-    if (dateStr == null || dateStr.isEmpty) return '';
+  Future<void> _markAllRead() async {
+    final unread = _alerts.where((a) => a['isRead'] != true).toList();
+    if (unread.isEmpty) return;
     try {
-      final date = DateTime.parse(dateStr);
-      final diff = DateTime.now().difference(date);
-      if (diff.inMinutes < 1) return 'Just now';
-      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-      if (diff.inHours < 24) return '${diff.inHours}h ago';
-      if (diff.inDays == 1) return 'Yesterday';
-      if (diff.inDays < 7) return '${diff.inDays}d ago';
-      return '${date.day}/${date.month}/${date.year}';
-    } catch (_) {
-      return dateStr;
+      await Future.wait(
+        unread.map((a) {
+          final id = a['id'] ?? a['_id'] ?? '';
+          return ApiService.patch('/alerts/$id/read', {});
+        }),
+      );
+    } catch (e) {
+      debugPrint('[NotificationScreen] markAllRead error: $e');
+    }
+    await _fetchAlerts();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('All caught up!'),
+          backgroundColor: _primary,
+        ),
+      );
     }
   }
 
-  // Returns true when the alert represents an income transaction.
-  // Checks transaction.type field — NOT the alert message text.
-  bool _isIncome(Map<String, dynamic> alert) =>
-      (alert['type'] as String?)?.toLowerCase() == 'income';
-
-  Color _catColor(String cat) {
-    const map = {
-      'Food': Color(0xFFFF7043),
-      'Transport': Color(0xFF42A5F5),
-      'Rent': Color(0xFF26A69A),
-      'Education': Color(0xFF7E57C2),
-      'Shopping': Color(0xFFAB47BC),
-      'Health': Color(0xFFEF5350),
-      'Entertainment': Color(0xFF8D6E63),
-      'Bills': Color(0xFF78909C),
-      'Salary': Color(0xFF66BB6A),
-      'Income': Color(0xFF2DBE7F),
-    };
-    return map[cat] ?? const Color(0xFFFFCA28);
-  }
-
-  IconData _catIcon(String cat) {
-    const map = {
-      'Food': Icons.restaurant,
-      'Transport': Icons.directions_car,
-      'Rent': Icons.home,
-      'Education': Icons.school,
-      'Shopping': Icons.shopping_bag,
-      'Health': Icons.favorite,
-      'Entertainment': Icons.tv,
-      'Bills': Icons.receipt_long,
-      'Salary': Icons.account_balance_wallet,
-      'Income': Icons.account_balance_wallet,
-    };
-    return map[cat] ?? Icons.notifications;
-  }
-
-  void _toggleRead(int index) {
+  void _setType(String type) {
+    if (_selectedType == type) return;
     setState(() {
-      final item = Map<String, dynamic>.from(_alerts[index]);
-      item['isRead'] = !(item['isRead'] == true);
-      _alerts[index] = item;
+      _selectedType = type;
+      if (type != 'expense') _selectedCategory = null;
     });
-    NotificationScreen.unreadCount.value = _alerts.where((a) => a['isRead'] != true).length;
+    _fetchAlerts();
+  }
+
+  void _setTime(String time) {
+    if (_selectedTime == time) return;
+    setState(() => _selectedTime = time);
+    _fetchAlerts();
+  }
+
+  void _setCategory(String? cat) {
+    if (_selectedCategory == cat) return;
+    setState(() => _selectedCategory = cat);
+    _fetchAlerts();
+  }
+
+  Widget _typePill(String label, String value) {
+    final selected = _selectedType == value;
+    return GestureDetector(
+      onTap: () => _setType(value),
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: selected ? Colors.green : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: selected ? Colors.white : Colors.grey.shade600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _choiceChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? Colors.green.shade50 : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? Colors.green : Colors.grey.shade300,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: selected ? Colors.green : Colors.grey,
+            fontWeight:
+                selected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final filtered = _filteredAlerts;
+    final hasUnread = _alerts.any((a) => a['isRead'] != true);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F7F9),
       appBar: AppBar(
-        title: const Text('Notifications', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Activity',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
         elevation: 0,
         actions: [
-          if (_alerts.any((a) => a['isRead'] != true))
+          if (hasUnread)
             TextButton(
-              onPressed: () => setState(() {
-                _alerts = _alerts.map((a) {
-                  final m = Map<String, dynamic>.from(a);
-                  m['isRead'] = true;
-                  return m;
-                }).toList();
-                NotificationScreen.unreadCount.value = 0;
-              }),
-              child: const Text('Mark all read', style: TextStyle(color: Color(0xFF2DBE7F), fontSize: 12)),
+              onPressed: _markAllRead,
+              child: const Text(
+                'Mark all read',
+                style: TextStyle(color: _primary, fontSize: 12),
+              ),
             ),
         ],
       ),
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Filter bar ──────────────────────────────────────────────────
+          // ── Filter panel ─────────────────────────────────────────────────
           Container(
             color: Colors.white,
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Search
-                TextField(
-                  controller: _searchController,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    hintText: 'Search notifications...',
-                    hintStyle: const TextStyle(fontSize: 13),
-                    prefixIcon: const Icon(Icons.search, size: 20),
-                    filled: true,
-                    fillColor: const Color(0xFFF6F7F9),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                // Category + Date range filters
+                // Row 1: Type pills
                 Row(
                   children: [
-                    Expanded(
-                      child: _buildDropdown(
-                        value: _filterCategory,
-                        items: _categories,
-                        onChanged: (v) {
-                          setState(() => _filterCategory = v);
-                          _fetchAlerts();
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _buildDropdown(
-                        value: _filterDateRange,
-                        items: _dateFilters,
-                        onChanged: (v) {
-                          setState(() => _filterDateRange = v);
-                          _fetchAlerts();
-                        },
-                      ),
-                    ),
+                    _typePill('All', 'all'),
+                    const SizedBox(width: 8),
+                    _typePill('Expense', 'expense'),
+                    const SizedBox(width: 8),
+                    _typePill('Income', 'income'),
                   ],
                 ),
+                const SizedBox(height: 10),
+
+                // Row 2: Time chips
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: _timeFilters.map((f) {
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: _choiceChip(
+                          label: f['label']!,
+                          selected: _selectedTime == f['value'],
+                          onTap: () => _setTime(f['value']!),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+
+                // Row 3: Category chips (expense only)
+                if (_selectedType == 'expense') ...[
+                  const SizedBox(height: 8),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: _catFilters.map((f) {
+                        final lbl = f['label']!;
+                        final emoji = f['emoji']!;
+                        final catVal = lbl == 'All' ? null : lbl;
+                        final chipLabel =
+                            emoji.isEmpty ? lbl : '$emoji $lbl';
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: _choiceChip(
+                            label: chipLabel,
+                            selected: _selectedCategory == catVal,
+                            onTap: () => _setCategory(catVal),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
 
-          // ── List ────────────────────────────────────────────────────────
+          Divider(color: Colors.grey.shade200, height: 1),
+
+          // ── Feed ─────────────────────────────────────────────────────────
           Expanded(
             child: RefreshIndicator(
               color: _primary,
               onRefresh: _fetchAlerts,
               child: _isLoading
-                  ? const Center(child: CircularProgressIndicator(color: Color(0xFF2DBE7F)))
-                  : filtered.isEmpty
+                  ? const Center(
+                      child: CircularProgressIndicator(color: _primary))
+                  : _alerts.isEmpty
                       ? ListView(
-                          // Wrap in ListView for RefreshIndicator to work
                           children: [
                             SizedBox(
-                              height: MediaQuery.of(context).size.height * 0.4,
+                              height:
+                                  MediaQuery.of(context).size.height * 0.4,
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(Icons.notifications_none, size: 64, color: Colors.grey.shade300),
-                                  const SizedBox(height: 16),
-                                  const Text('No notifications', style: TextStyle(color: Colors.grey, fontSize: 15)),
-                                  const SizedBox(height: 8),
+                                  Icon(
+                                    Icons.notifications_none_outlined,
+                                    size: 64,
+                                    color: Colors.grey.shade300,
+                                  ),
+                                  const SizedBox(height: 12),
                                   Text(
-                                    _filterCategory != 'All' || _filterDateRange != 'All'
-                                        ? 'Try changing your filters.'
-                                        : 'Alerts will appear here when you log expenses.',
-                                    style: const TextStyle(color: Colors.grey, fontSize: 12),
+                                    'No activity yet',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.grey.shade400,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Your transactions will appear here',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.grey.shade300,
+                                    ),
                                   ),
                                 ],
                               ),
                             ),
                           ],
                         )
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                          itemCount: filtered.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 10),
-                          itemBuilder: (ctx, i) {
-                            final alert = filtered[i] as Map<String, dynamic>;
-                            final isRead = alert['isRead'] == true;
-                            final cat = alert['category'] as String? ?? 'Other';
-                            final date = alert['createdAt'] ?? alert['date'] ?? '';
-                            final originalIndex = _alerts.indexOf(alert);
-
-                            // Income check: use transaction.type field — not the alert text.
-                            final isIncomeTx = _isIncome(alert);
-                            final displayColor = isIncomeTx
-                                ? const Color(0xFF2DBE7F) // green for income
-                                : _catColor(cat);
-                            final displayIcon = isIncomeTx
-                                ? Icons.arrow_downward_rounded
-                                : _catIcon(cat);
-                            final displayLabel = isIncomeTx ? 'Income' : cat;
-
-                            return Container(
-                              decoration: BoxDecoration(
-                                color: isRead
-                                    ? Colors.white
-                                    : (isIncomeTx
-                                        ? const Color(0xFFEAFAF3) // green tint for income
-                                        : const Color(0xFFEAFAF3)),
-                                borderRadius: BorderRadius.circular(14),
-                                border: isRead
-                                    ? Border.all(color: Colors.grey.shade200)
-                                    : Border.all(
-                                        color: displayColor.withValues(alpha: 0.25)),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.04),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 3),
-                                  ),
-                                ],
-                              ),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
-                                leading: Container(
-                                  width: 40, height: 40,
-                                  decoration: BoxDecoration(
-                                    color: displayColor.withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: Icon(displayIcon, color: displayColor, size: 20),
-                                ),
-                                title: Text(
-                                  alert['message'] as String? ?? '',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: isRead ? FontWeight.normal : FontWeight.w600,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                                subtitle: Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: displayColor.withValues(alpha: 0.12),
-                                          borderRadius: BorderRadius.circular(6),
-                                        ),
-                                        child: Text(
-                                          displayLabel,
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            color: displayColor,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(_relativeDate(date.toString()),
-                                          style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                                    ],
-                                  ),
-                                ),
-                                trailing: Checkbox(
-                                  value: isRead,
-                                  activeColor: _primary,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                                  onChanged: (_) {
-                                    if (originalIndex >= 0) _toggleRead(originalIndex);
-                                  },
-                                ),
-                              ),
-                            );
-                          },
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          itemCount: _alerts.length,
+                          itemBuilder: (ctx, i) => _AlertCard(
+                            alert: _alerts[i] as Map<String, dynamic>,
+                          ),
                         ),
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  /// Reusable dropdown that avoids the DropdownButtonFormField deprecation
-  /// and the initialValue vs value confusion.
-  Widget _buildDropdown({
-    required String value,
-    required List<String> items,
-    required ValueChanged<String> onChanged,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF6F7F9),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: value,
-          isExpanded: true,
-          style: const TextStyle(fontSize: 13, color: Colors.black87),
-          items: items.map((item) => DropdownMenuItem(
-            value: item,
-            child: Text(item),
-          )).toList(),
-          onChanged: (v) {
-            if (v != null) onChanged(v);
-          },
-        ),
       ),
     );
   }
