@@ -37,6 +37,7 @@ class UserProfileResponse(BaseModel):
     lastName: Optional[str] = None
     email: Optional[str] = None
     phoneNumber: Optional[str] = Field(None, alias="phone")
+    photoUrl: Optional[str] = None
     onboarding: OnboardingData
     preferences: PreferencesData
     createdAt: Optional[str] = None
@@ -56,6 +57,10 @@ class ProfileUpdateRequest(BaseModel):
     preferences: Optional[PreferencesData] = None
 
     # ── Core profile fields ──────────────────────────────────────────────────
+    photoUrl: Optional[str] = Field(
+        default=None,
+        description="Firebase Storage download URL for the user's profile photo",
+    )
     firstName: Optional[str] = Field(
         default=None,
         min_length=1,

@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
 from firebase_config import get_firestore
+from typing import Optional
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -29,6 +30,12 @@ class VerifyCodeRequest(BaseModel):
 
 class EmailCheckRequest(BaseModel):
     email: EmailStr
+
+
+class ContactFormRequest(BaseModel):
+    name: str
+    email: EmailStr
+    message: str
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -252,3 +259,67 @@ async def verify_code(body: VerifyCodeRequest):
     logger.info(f"[VERIFICATION] Email verified: {email}")
 
     return {"success": True, "verified": True, "message": "Email verified successfully."}
+
+
+@router.post("/contact")
+async def contact_us(body: ContactFormRequest):
+    """
+    Contact Us form — sends the user's message to the support inbox via SMTP.
+    No authentication required.
+    """
+    smtp_email = os.getenv("SMTP_EMAIL")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    support_email = os.getenv("SUPPORT_EMAIL", smtp_email)  # fallback to sender
+
+    if not smtp_email or not smtp_password:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "SERVICE_UNAVAILABLE", "message": "Contact service is not configured."},
+        )
+
+    subject = f"BachatBot Contact: Message from {body.name}"
+    body_text = (
+        f"New contact form submission:\n\n"
+        f"Name:    {body.name}\n"
+        f"Email:   {body.email}\n"
+        f"Message:\n{body.message}\n"
+    )
+    body_html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px;
+                border:1px solid #e5e7eb;border-radius:12px;">
+      <h2 style="color:#1e293b;">BachatBot — New Contact Message</h2>
+      <p><strong>Name:</strong> {body.name}</p>
+      <p><strong>Email:</strong> <a href="mailto:{body.email}">{body.email}</a></p>
+      <hr/>
+      <p><strong>Message:</strong></p>
+      <p style="white-space:pre-wrap;color:#475569;">{body.message}</p>
+    </div>
+    """
+
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    import smtplib
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = smtp_email
+    msg["To"] = support_email
+    msg["Reply-To"] = body.email
+    msg.attach(MIMEText(body_text, "plain"))
+    msg.attach(MIMEText(body_html, "html"))
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(smtp_email, smtp_password)
+            refused = server.sendmail(smtp_email, support_email, msg.as_string())
+            if refused:
+                raise RuntimeError(f"Recipient refused: {refused}")
+    except Exception as exc:
+        logger.error(f"[CONTACT] Failed to send contact email: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "EMAIL_SEND_FAILED", "message": "Failed to send your message. Please try again."},
+        )
+
+    logger.info(f"[CONTACT] Message from {body.email} ({body.name}) delivered to support")
+    return {"success": True, "message": "Your message has been sent. We'll get back to you soon!"}

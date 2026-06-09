@@ -84,6 +84,7 @@ async def get_profile(
         "lastName": last_name,
         "email": data.get("email"),
         "phoneNumber": phone_number,
+        "photoUrl": data.get("photoUrl"),
         "onboarding": response_data.get("onboarding") or {},
         "preferences": response_data.get("preferences") or {},
         "createdAt": response_data.get("createdAt"),
@@ -170,6 +171,10 @@ async def update_profile(
         # Stored as 'phone' in Firestore per schema.md
         update_data["phone"] = body.phoneNumber
         logger.info(f"[{timestamp_str}] [PROFILE] uid={uid} updating phone")
+
+    if body.photoUrl is not None:
+        update_data["photoUrl"] = body.photoUrl
+        logger.info(f"[{timestamp_str}] [PROFILE] uid={uid} updating photoUrl")
 
     # Onboarding sub-map (dot-notation merge)
     if body.onboarding is not None:
@@ -294,6 +299,8 @@ async def update_profile(
         updated_fields.append("lastName")
     if body.phoneNumber is not None:
         updated_fields.append("phoneNumber")
+    if body.photoUrl is not None:
+        updated_fields.append("photoUrl")
     if is_attempting_password_change:
         updated_fields.append("password")
     if body.onboarding is not None:
