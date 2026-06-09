@@ -19,6 +19,9 @@ dependencies:
   notification_listener_service: ^0.3.5
   shared_preferences: ^2.2.2
   google_fonts: ^6.1.0
+  image_picker: ^1.0.7
+  firebase_storage: ^11.6.0
+  url_launcher: ^6.2.5
 
 dev_dependencies:
   flutter_test:

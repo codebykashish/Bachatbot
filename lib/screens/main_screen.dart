@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import '../api_service.dart';
 import '../services/notification_sync_service.dart';
 import '../services/month_event_service.dart';
 import 'home_screen.dart';
 import 'categories_screen.dart';
 import 'chatbot_page.dart';
-import 'login_screen.dart';
 import 'notification_screen.dart';
-import 'mock_notification_screen.dart';
+import 'profile_screen.dart';
 import 'reports_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -24,7 +21,6 @@ class _MainScreenState extends State<MainScreen> {
   static const Color _primary = Color(0xFF2DBE7F);
 
   int _currentIndex = 0;
-  bool _isLoggingOut = false;
 
   // Keys so we can call refresh on each tab without re-creating widgets
   final _homeKey = GlobalKey<HomeScreenState>();
@@ -42,6 +38,8 @@ class _MainScreenState extends State<MainScreen> {
         return 'Categories';
       case 2:
         return 'Reports';
+      case 3:
+        return 'Profile';
       default:
         return 'BachatBot';
     }
@@ -72,52 +70,6 @@ class _MainScreenState extends State<MainScreen> {
   void dispose() {
     MonthEventService.eventNotifier.removeListener(_monthBannerListener);
     super.dispose();
-  }
-
-  Future<void> _logout() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to logout?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Logout', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    setState(() => _isLoggingOut = true);
-    try {
-      // 1. Notify backend first — token is still valid at this point
-      await ApiService.logout();
-      // 2. Invalidate the client-side Firebase session
-      await FirebaseAuth.instance.signOut();
-      if (!mounted) return;
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (route) => false,
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Logout failed.'), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) setState(() => _isLoggingOut = false);
-    }
   }
 
   /// Intent-based real-time refresh callback from chat.
@@ -151,89 +103,8 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    final displayName = user?.displayName ?? 'User';
-    final email = user?.email ?? '';
-
     return Scaffold(
       backgroundColor: const Color(0xFFF6F7F9),
-      // ── Drawer ───────────────────────────────────────────────────────────
-      drawer: Drawer(
-        child: Column(
-          children: [
-            UserAccountsDrawerHeader(
-              decoration: const BoxDecoration(color: _primary),
-              currentAccountPicture: const CircleAvatar(
-                backgroundColor: Colors.white,
-                child: Icon(Icons.person, size: 40, color: _primary),
-              ),
-              accountName: Text(displayName,
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              accountEmail: Text(email),
-            ),
-            ListTile(
-              leading:
-                  Icon(Icons.home, color: _currentIndex == 0 ? _primary : null),
-              title: const Text('Home'),
-              selected: _currentIndex == 0,
-              selectedColor: _primary,
-              onTap: () {
-                setState(() => _currentIndex = 0);
-                Navigator.pop(context);
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.grid_view,
-                  color: _currentIndex == 1 ? _primary : null),
-              title: const Text('Categories'),
-              selected: _currentIndex == 1,
-              selectedColor: _primary,
-              onTap: () {
-                setState(() => _currentIndex = 1);
-                Navigator.pop(context);
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.insert_chart,
-                  color: _currentIndex == 2 ? _primary : null),
-              title: const Text('Reports'),
-              selected: _currentIndex == 2,
-              selectedColor: _primary,
-              onTap: () {
-                setState(() => _currentIndex = 2);
-                Navigator.pop(context);
-              },
-            ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.bug_report_outlined,
-                  color: Color(0xFF2DBE7F)),
-              title: const Text('Test Mock Notification',
-                  style: TextStyle(color: Color(0xFF2DBE7F))),
-              subtitle: const Text('Dev only', style: TextStyle(fontSize: 11)),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const MockNotificationScreen()),
-                );
-              },
-            ),
-            const Divider(),
-            ListTile(
-              leading: _isLoggingOut
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.logout, color: Colors.red),
-              title: const Text('Logout', style: TextStyle(color: Colors.red)),
-              onTap: _isLoggingOut ? null : _logout,
-            ),
-          ],
-        ),
-      ),
       // ── Single AppBar (no child screen has its own) ───────────────────────
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -277,6 +148,7 @@ class _MainScreenState extends State<MainScreen> {
               HomeScreen(key: _homeKey, firstName: widget.firstName),
               CategoriesScreen(key: _categoriesKey),
               const ReportsScreen(),
+              const ProfileScreen(),
             ],
           ),
           // ── Month event in-app banner ─────────────────────────────────
@@ -303,6 +175,7 @@ class _MainScreenState extends State<MainScreen> {
         unselectedItemColor: Colors.grey,
         backgroundColor: Colors.white,
         elevation: 8,
+        type: BottomNavigationBarType.fixed,
         onTap: (i) {
           setState(() => _currentIndex = i);
           // LIVE UPDATES SYNCHRONIZATION:
@@ -328,6 +201,10 @@ class _MainScreenState extends State<MainScreen> {
               icon: Icon(Icons.insert_chart_outlined),
               activeIcon: Icon(Icons.insert_chart),
               label: 'Reports'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline),
+              activeIcon: Icon(Icons.person),
+              label: 'Profile'),
         ],
       ),
     );
