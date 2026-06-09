@@ -91,6 +91,31 @@ class ApiService {
     }
   }
 
+  /// POST request returning raw http.Response (with auto token refresh + 401 retry)
+  static Future<http.Response> postRaw(
+      String endpoint, Map<String, dynamic> body) async {
+    try {
+      final token = await _getToken();
+      var response = await http.post(
+        Uri.parse("$baseUrl$endpoint"),
+        headers: _headers(token),
+        body: jsonEncode(body),
+      );
+
+      if (response.statusCode == 401) {
+        final freshToken = await _getToken();
+        response = await http.post(
+          Uri.parse("$baseUrl$endpoint"),
+          headers: _headers(freshToken),
+          body: jsonEncode(body),
+        );
+      }
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   /// PATCH request with auto token refresh + 401 retry
   static Future<Map<String, dynamic>> patch(
       String endpoint, Map<String, dynamic> body) async {

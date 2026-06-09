@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../api_service.dart';
 import '../models/onboarding_model.dart';
 import 'get_started_screen.dart';
+import 'main_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -53,8 +56,16 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       if (!mounted) return;
 
       if (onboardingDone) {
-        // Returning user -> Navigate to Login/Signup directly
-        Navigator.pushReplacementNamed(context, '/login');
+        // Returning user -> Check auth state
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          // Already logged in -> go to MainScreen
+          // We fetch the profile first to get the first name
+          _navigateToMain(user);
+        } else {
+          // Not logged in -> go to Login
+          Navigator.pushReplacementNamed(context, '/login');
+        }
       } else {
         // First time user -> Navigate to Get Started screen
         Navigator.pushReplacement(
@@ -80,6 +91,25 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           MaterialPageRoute(builder: (_) => const GetStartedScreen()),
         );
       }
+    }
+  }
+
+  Future<void> _navigateToMain(User user) async {
+    String firstName = (user.displayName ?? 'User').split(' ').first;
+    try {
+      final profileRes = await ApiService.get('/profile');
+      if (profileRes['success'] == true && profileRes['data'] != null) {
+        firstName = profileRes['data']['firstName'] as String? ?? firstName;
+      }
+    } catch (e) {
+      debugPrint('[SplashScreen] Profile fetch failed: $e');
+    }
+
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => MainScreen(firstName: firstName)),
+      );
     }
   }
 

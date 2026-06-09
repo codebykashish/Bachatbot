@@ -98,8 +98,8 @@ class _MockNotificationScreenState extends State<MockNotificationScreen> {
     });
 
     try {
-      final response = await ApiService.post('/chat', {
-        'message': text,
+      final response = await ApiService.post('/messages', {
+        'text': text,
         'source': 'notification',
         'sourceApp': _selectedSourceApp,
         'originalMessageId': 'mock-${DateTime.now().millisecondsSinceEpoch}',

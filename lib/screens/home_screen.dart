@@ -169,7 +169,11 @@ class HomeScreenState extends State<HomeScreen> {
   // ── Derived values ───────────────────────────────────────────────────────
 
   double get _totalIncome =>
-      (_report?['totalIncome'] ?? _report?['income'] ?? 0).toDouble();
+      (_report?['incomeCardValue'] ??
+              _report?['totalIncome'] ??
+              _report?['income'] ??
+              0)
+          .toDouble();
 
   double get _totalExpense =>
       (_report?['totalExpense'] ?? _report?['expense'] ?? 0).toDouble();
