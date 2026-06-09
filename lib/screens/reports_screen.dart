@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../api_service.dart';
 import '../widgets/report_chart.dart';
+import 'notification_screen.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -119,20 +120,74 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
-  Color _statusColor(String status) {
+  // ── Category insight helpers ─────────────────────────────────────────────
+
+  IconData _insightIcon(String? category) {
+    switch (category?.toLowerCase()) {
+      case 'food':          return Icons.restaurant_outlined;
+      case 'transport':     return Icons.directions_bus_outlined;
+      case 'rent':          return Icons.home_outlined;
+      case 'shopping':      return Icons.shopping_bag_outlined;
+      case 'health':        return Icons.local_hospital_outlined;
+      case 'education':     return Icons.school_outlined;
+      case 'bills':         return Icons.receipt_long_outlined;
+      case 'entertainment': return Icons.movie_outlined;
+      default:              return Icons.category_outlined;
+    }
+  }
+
+  Color _progressColor(String status) {
     switch (status.toLowerCase()) {
-      case 'overspent':
-        return Colors.red;
+      case 'low':     return Colors.blue.shade400;
+      case 'warning': return Colors.amber.shade600;
       case 'high':
-        return Colors.orange;
+      case 'danger':
+      case 'overspent': return Colors.red.shade500;
+      default:        return Colors.green;
+    }
+  }
+
+  Widget _statusBadge(String status) {
+    final Color bg;
+    final Color fg;
+    final String label;
+    switch (status.toLowerCase()) {
+      case 'low':
+        bg = Colors.blue.shade50; fg = Colors.blue.shade700; label = 'LOW';
+        break;
+      case 'warning':
+        bg = Colors.amber.shade50; fg = Colors.amber.shade800; label = 'WARNING';
+        break;
+      case 'high':
+      case 'danger':
+      case 'overspent':
+        bg = Colors.red.shade50; fg = Colors.red.shade700; label = 'HIGH';
+        break;
       case 'ok':
       case 'exact':
-        return _primary;
-      case 'low':
-        return Colors.blue;
+        bg = Colors.green.shade50; fg = Colors.green.shade700; label = 'OK';
+        break;
       default:
-        return Colors.grey;
+        bg = Colors.grey.shade100;
+        fg = Colors.grey.shade600;
+        label = status.toUpperCase();
     }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: fg,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
   }
 
   Widget _buildOverallStatusCard() {
@@ -308,108 +363,102 @@ class _ReportsScreenState extends State<ReportsScreen> {
           itemBuilder: (context, index) {
             final category = sortedCategories[index];
             final insight = _categoryInsights[category] ?? {};
-            final status = insight['status'] ?? 'ok';
+            final status = (insight['status'] ?? 'ok') as String;
             final spent = (insight['spent'] ?? 0).toDouble().toInt();
             final limit = (insight['limit'] ?? 0).toDouble().toInt();
-            final statusColor = _statusColor(status);
+            final pct = limit > 0
+                ? (spent / limit * 100).clamp(0, 999).toInt()
+                : 0;
+            final barValue = (pct / 100).clamp(0.0, 1.0);
+            final barColor = _progressColor(status);
 
-            return Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: statusColor.withValues(alpha: 0.2),
-                  width: 1,
+            return InkWell(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => NotificationScreen(
+                    initialType: 'expense',
+                    initialCategory: category,
+                    initialDateRange: 'month',
+                  ),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  )
-                ],
               ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: statusColor.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Row 1: icon + name + badge + chevron
+                    Row(
+                      children: [
+                        Icon(_insightIcon(category),
+                            size: 18, color: Colors.grey.shade600),
+                        const SizedBox(width: 8),
+                        Text(
+                          category,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade800,
+                          ),
+                        ),
+                        const Spacer(),
+                        _statusBadge(status),
+                        const SizedBox(width: 6),
+                        Icon(Icons.chevron_right,
+                            size: 16, color: Colors.grey.shade400),
+                      ],
                     ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      category.substring(0, 1),
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: statusColor,
+                    const SizedBox(height: 8),
+                    // Row 2: progress bar
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: barValue,
+                        minHeight: 6,
+                        backgroundColor: Colors.grey.shade100,
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(barColor),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    const SizedBox(height: 6),
+                    // Row 3: spent / budget + percentage
+                    Row(
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              category,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: statusColor.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                status.toUpperCase(),
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: statusColor,
-                                ),
-                              ),
-                            ),
-                          ],
+                        Text(
+                          'Rs $spent',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade800,
+                          ),
                         ),
-                        const SizedBox(height: 6),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Rs $spent / Rs $limit',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            Text(
-                              '${((spent / limit * 100).clamp(0, 999)).toStringAsFixed(0)}%',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: statusColor,
-                              ),
-                            ),
-                          ],
+                        Text(
+                          ' / Rs $limit',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade400),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '$pct%',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: barColor,
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             );
           },
