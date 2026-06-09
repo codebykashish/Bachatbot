@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import '../api_service.dart';
 import 'edit_profile_screen.dart';
@@ -136,31 +138,73 @@ class ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _pickAndUploadPhoto(ImageSource source) async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: source, imageQuality: 80);
+    final picked = await picker.pickImage(
+      source: source,
+      imageQuality: 75,
+      maxWidth: 512,
+    );
     if (picked == null) return;
 
     setState(() => _isUploadingPhoto = true);
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      final ref = FirebaseStorage.instance.ref('users/$uid/profile.jpg');
-      await ref.putFile(File(picked.path));
-      final url = await ref.getDownloadURL();
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('Not logged in');
 
-      await ApiService.patch('/profile', {'photoUrl': url});
+      final file = File(picked.path);
+      if (!file.existsSync()) throw Exception('Image file not found');
+
+      final ref = FirebaseStorage.instance
+          .ref('profile_photos/${user.uid}.jpg');
+
+      final snapshot = await ref.putFile(
+        file,
+        SettableMetadata(contentType: 'image/jpeg'),
+      );
+      final downloadUrl = await snapshot.ref.getDownloadURL();
+
+      final token = await user.getIdToken(true);
+      final response = await http.patch(
+        Uri.parse('${ApiService.baseUrl}/profile'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'photoUrl': downloadUrl}),
+      );
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          setState(() => _profileData?['photoUrl'] = downloadUrl);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Profile photo updated!')),
+          );
+        }
+      } else {
+        final err = jsonDecode(response.body) as Map<String, dynamic>?;
+        throw Exception(
+            err?['detail']?['message'] ?? err?['message'] ?? 'Failed to update');
+      }
+    } on FirebaseException catch (e) {
       if (mounted) {
-        setState(() {
-          _profileData?['photoUrl'] = url;
-          _isUploadingPhoto = false;
-        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Storage error: ${e.message}'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } catch (e) {
       debugPrint('[ProfileScreen] Photo upload failed: $e');
       if (mounted) {
-        setState(() => _isUploadingPhoto = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Photo upload failed. Please try again.')),
+          SnackBar(
+            content: Text('Photo upload failed: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isUploadingPhoto = false);
     }
   }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:url_launcher/url_launcher.dart';
 import '../api_service.dart';
 
@@ -40,10 +41,24 @@ class _ContactUsScreenState extends State<ContactUsScreen> {
     super.dispose();
   }
 
-  Future<void> _launchUrl(String url) async {
-    final uri = Uri.parse(url);
+  Future<void> _launchEmail(String address) async {
+    final uri = Uri(scheme: 'mailto', path: address);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri);
+    } else {
+      await Clipboard.setData(ClipboardData(text: address));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Email copied to clipboard')),
+        );
+      }
+    }
+  }
+
+  Future<void> _launchPhone(String number) async {
+    final uri = Uri(scheme: 'tel', path: number);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -121,44 +136,6 @@ class _ContactUsScreenState extends State<ContactUsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Contact Info Card ─────────────────────────────────────────
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  _contactRow(
-                    icon: Icons.email_outlined,
-                    label: 'bachatbot0@gmail.com',
-                    onTap: () => _launchUrl('mailto:bachatbot0@gmail.com'),
-                  ),
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-                  _contactRow(
-                    icon: Icons.phone_outlined,
-                    label: '9800000000',
-                    onTap: () => _launchUrl('tel:9800000000'),
-                  ),
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-                  _contactRow(
-                    icon: Icons.location_on_outlined,
-                    label: 'Sunway College, Nepal',
-                    onTap: null,
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
             // ── Message Form ──────────────────────────────────────────────
             const Text(
               'Send us a Message',
@@ -231,7 +208,7 @@ class _ContactUsScreenState extends State<ContactUsScreen> {
                                   fontWeight: FontWeight.w600)),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   const Text(
                     'We typically respond within 24 hours on working days.',
                     textAlign: TextAlign.center,
@@ -239,6 +216,44 @@ class _ContactUsScreenState extends State<ContactUsScreen> {
                         fontSize: 12.5,
                         color: Colors.grey,
                         fontStyle: FontStyle.italic),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
+            // ── Contact Info Card ─────────────────────────────────────────
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  _contactRow(
+                    icon: Icons.email_outlined,
+                    label: 'bachatbot0@gmail.com',
+                    onTap: () => _launchEmail('bachatbot0@gmail.com'),
+                  ),
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  _contactRow(
+                    icon: Icons.phone_outlined,
+                    label: '9800000000',
+                    onTap: () => _launchPhone('9800000000'),
+                  ),
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  _contactRow(
+                    icon: Icons.location_on_outlined,
+                    label: 'Sunway College, Nepal',
+                    onTap: null,
                   ),
                 ],
               ),
