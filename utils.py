@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import calendar
 
 
@@ -200,6 +200,38 @@ def is_in_current_month(timestamp) -> bool:
             if timestamp.tzinfo is None:
                 timestamp = timestamp.replace(tzinfo=timezone.utc)
             return timestamp.year == now.year and timestamp.month == now.month
+        return False
+    except Exception:
+        return False
+
+
+def is_yesterday(timestamp) -> bool:
+    """Check if a Firestore timestamp falls on yesterday (UTC)."""
+    if timestamp is None:
+        return False
+    try:
+        now = datetime.now(timezone.utc)
+        yesterday = (now - timedelta(days=1)).date()
+        if hasattr(timestamp, "date"):
+            ts_date = timestamp.date() if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc).date()
+        else:
+            return False
+        return ts_date == yesterday
+    except Exception:
+        return False
+
+
+def is_last_week(timestamp) -> bool:
+    """Check if a Firestore timestamp falls 7–14 days ago (previous week, UTC)."""
+    if timestamp is None:
+        return False
+    try:
+        now = datetime.now(timezone.utc)
+        if hasattr(timestamp, "date"):
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            delta_days = (now - timestamp).days
+            return 7 <= delta_days < 14
         return False
     except Exception:
         return False

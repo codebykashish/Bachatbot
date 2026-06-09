@@ -4,6 +4,7 @@ from auth import get_current_user
 from utils import (
     get_current_month_key, serialize_doc,
     is_today, is_in_current_week, is_in_current_month,
+    is_yesterday, is_last_week,
 )
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 from typing import Optional
@@ -33,12 +34,17 @@ async def get_alerts(
 
     print(f"[ALERTS] uid={uid} monthKey={month_key} category={category} dateRange={effective_range} isRead={isRead}")
 
-    # When dateRange is "all", we still scope to monthKey for sanity.
-    # For "today"/"week" we fetch by monthKey and filter further in-memory.
-    alerts_ref = (
-        db.collection("users").document(uid).collection("alerts")
-        .where("monthKey", "==", month_key)
-    )
+    # For cross-month date ranges (yesterday/last_week) we must NOT scope by monthKey
+    # because "yesterday" at the start of a new month would be in the previous monthKey.
+    # For "today", "week", "month", "all" we keep the monthKey scope for performance.
+    cross_month_ranges = ("yesterday", "last_week")
+    if effective_range in cross_month_ranges:
+        alerts_ref = db.collection("users").document(uid).collection("alerts")
+    else:
+        alerts_ref = (
+            db.collection("users").document(uid).collection("alerts")
+            .where("monthKey", "==", month_key)
+        )
 
     docs = list(alerts_ref.stream())
 
@@ -74,7 +80,11 @@ async def get_alerts(
         created_at = data.get("createdAt")
         if effective_range == "today" and not is_today(created_at):
             continue
+        elif effective_range == "yesterday" and not is_yesterday(created_at):
+            continue
         elif effective_range == "week" and not is_in_current_week(created_at):
+            continue
+        elif effective_range == "last_week" and not is_last_week(created_at):
             continue
         elif effective_range == "month" and not is_in_current_month(created_at):
             continue
