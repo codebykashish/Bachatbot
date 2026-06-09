@@ -110,6 +110,11 @@ class _NotificationScreenState extends State<NotificationScreen> {
     }
   }
 
+  // Returns true when the alert represents an income transaction.
+  // Checks transaction.type field — NOT the alert message text.
+  bool _isIncome(Map<String, dynamic> alert) =>
+      (alert['type'] as String?)?.toLowerCase() == 'income';
+
   Color _catColor(String cat) {
     const map = {
       'Food': Color(0xFFFF7043),
@@ -121,6 +126,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       'Entertainment': Color(0xFF8D6E63),
       'Bills': Color(0xFF78909C),
       'Salary': Color(0xFF66BB6A),
+      'Income': Color(0xFF2DBE7F),
     };
     return map[cat] ?? const Color(0xFFFFCA28);
   }
@@ -136,6 +142,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       'Entertainment': Icons.tv,
       'Bills': Icons.receipt_long,
       'Salary': Icons.account_balance_wallet,
+      'Income': Icons.account_balance_wallet,
     };
     return map[cat] ?? Icons.notifications;
   }
@@ -264,19 +271,34 @@ class _NotificationScreenState extends State<NotificationScreen> {
                           itemCount: filtered.length,
                           separatorBuilder: (_, __) => const SizedBox(height: 10),
                           itemBuilder: (ctx, i) {
-                            final alert = filtered[i];
+                            final alert = filtered[i] as Map<String, dynamic>;
                             final isRead = alert['isRead'] == true;
-                            final cat = alert['category'] ?? 'Other';
+                            final cat = alert['category'] as String? ?? 'Other';
                             final date = alert['createdAt'] ?? alert['date'] ?? '';
                             final originalIndex = _alerts.indexOf(alert);
 
+                            // Income check: use transaction.type field — not the alert text.
+                            final isIncomeTx = _isIncome(alert);
+                            final displayColor = isIncomeTx
+                                ? const Color(0xFF2DBE7F) // green for income
+                                : _catColor(cat);
+                            final displayIcon = isIncomeTx
+                                ? Icons.arrow_downward_rounded
+                                : _catIcon(cat);
+                            final displayLabel = isIncomeTx ? 'Income' : cat;
+
                             return Container(
                               decoration: BoxDecoration(
-                                color: isRead ? Colors.white : const Color(0xFFEAFAF3),
+                                color: isRead
+                                    ? Colors.white
+                                    : (isIncomeTx
+                                        ? const Color(0xFFEAFAF3) // green tint for income
+                                        : const Color(0xFFEAFAF3)),
                                 borderRadius: BorderRadius.circular(14),
                                 border: isRead
                                     ? Border.all(color: Colors.grey.shade200)
-                                    : Border.all(color: _primary.withValues(alpha: 0.2)),
+                                    : Border.all(
+                                        color: displayColor.withValues(alpha: 0.25)),
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.black.withValues(alpha: 0.04),
@@ -290,13 +312,13 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                 leading: Container(
                                   width: 40, height: 40,
                                   decoration: BoxDecoration(
-                                    color: _catColor(cat).withValues(alpha: 0.12),
+                                    color: displayColor.withValues(alpha: 0.12),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: Icon(_catIcon(cat), color: _catColor(cat), size: 20),
+                                  child: Icon(displayIcon, color: displayColor, size: 20),
                                 ),
                                 title: Text(
-                                  alert['message'] ?? '',
+                                  alert['message'] as String? ?? '',
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: isRead ? FontWeight.normal : FontWeight.w600,
@@ -310,13 +332,21 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: _catColor(cat).withValues(alpha: 0.12),
+                                          color: displayColor.withValues(alpha: 0.12),
                                           borderRadius: BorderRadius.circular(6),
                                         ),
-                                        child: Text(cat, style: TextStyle(fontSize: 10, color: _catColor(cat), fontWeight: FontWeight.w600)),
+                                        child: Text(
+                                          displayLabel,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: displayColor,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
                                       ),
                                       const SizedBox(width: 8),
-                                      Text(_relativeDate(date), style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                      Text(_relativeDate(date.toString()),
+                                          style: const TextStyle(fontSize: 11, color: Colors.grey)),
                                     ],
                                   ),
                                 ),

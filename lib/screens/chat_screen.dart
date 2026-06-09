@@ -1,7 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'dart:async';
 import 'dart:convert';
 import '../api_service.dart';
 import '../models/pending_transaction.dart';
@@ -71,12 +68,8 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isHistoryLoaded = false;
   bool _isFirstMessage = true;
 
-  // OFFLINE SYNC SYSTEM:
-  StreamSubscription<QuerySnapshot>? _chatSubscription;
-  final Set<String> _myPendingSentMessageIds = {};
-
   // ── Pending confirmation cards (transient in-memory state) ───────────────
-  // Keyed by the Firestore doc ID of the assistant message they follow.
+  // Keyed by the assistant message ID they follow.
   final Map<String, _PendingCard> _pendingCards = {};
 
   // ── Month event listener ─────────────────────────────────────────────────
@@ -103,7 +96,6 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     ChatScreen.messageSent = false; // reset each time chat opens
-    _listenToMessages(); // Start listening immediately to benefit from Firestore cache
     _loadHistory();
 
     // ── Listen for month events and inject as chat messages ─────────────────
@@ -118,22 +110,15 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _controller.dispose();
     _scrollController.dispose();
-    _chatSubscription?.cancel();
     MonthEventService.chatMessageNotifier.removeListener(_monthEventListener);
     super.dispose();
   }
 
   // ── Month event chat injection ───────────────────────────────────────────
 
-  Future<void> _injectMonthEventMessage(MonthEvent event) async {
-    final userId = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
-    final messagesColl = FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('messages');
-
-    String content;
-    String intent;
+  void _injectMonthEventMessage(MonthEvent event) {
+    final String content;
+    final String intent;
 
     if (event.type == MonthEventType.preNewMonth) {
       content =
@@ -145,225 +130,120 @@ class _ChatScreenState extends State<ChatScreen> {
       intent = 'new_month_started';
     }
 
-    // Avoid duplicate injection: check if same intent already saved recently
-    try {
-      final recent = await messagesColl
-          .where('intent', isEqualTo: intent)
-          .orderBy('timestamp', descending: true)
-          .limit(1)
-          .get();
+    // In-memory dedup: skip if already shown this session.
+    if (_messages.any((m) => m['intent'] == intent)) return;
 
-      if (recent.docs.isNotEmpty) {
-        final lastTs =
-            (recent.docs.first.data()['timestamp'] as Timestamp?)?.toDate();
-        if (lastTs != null &&
-            DateTime.now().difference(lastTs).inHours < 12) {
-          return; // already shown recently — skip
-        }
-      }
-
-      await messagesColl.add({
+    if (!mounted) return;
+    setState(() {
+      _messages.add({
         'role': 'assistant',
         'content': content,
         'intent': intent,
-        'timestamp': FieldValue.serverTimestamp(),
+        'status': MessageStatus.sent,
+        'id': 'month_$intent',
         'isMonthEvent': true,
       });
-    } catch (e) {
-      debugPrint('[ChatScreen] Failed to inject month event message: $e');
-    }
+    });
+    _scrollToBottom();
   }
 
-  // ── History loading (unchanged except adding pending poll) ───────────────
+  // ── History loading ──────────────────────────────────────────────────────
 
   Future<void> _loadHistory() async {
     try {
-      // 1. Fetch historical messages from the REST API backend
       final response = await ApiService.get('/messages?limit=50');
       if (!mounted) return;
 
-      final msgs = response['data']?['messages'] as List? ?? [];
-      final reversed = msgs.reversed.toList();
+      final data = response['data'] as Map<String, dynamic>?;
+      final msgs = data?['messages'] as List? ?? [];
 
-      // 2. Cache historical messages to Firestore
-      final userId = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
-      final messagesColl = FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('messages');
+      final loaded = <Map<String, dynamic>>[];
+      for (int i = 0; i < msgs.length; i++) {
+        final msg = msgs[i];
+        final rawRole = (msg['role'] as String?) ?? 'user';
+        final role = rawRole == 'model' ? 'assistant' : rawRole;
 
-      final existingDocs = await messagesColl
-          .get(const GetOptions(source: Source.cache))
-          .catchError((_) => messagesColl.get());
-      final existingContents =
-          existingDocs.docs.map((d) => d.data()['content'] as String?).toSet();
+        final parts = msg['parts'] as List?;
+        final content = parts != null && parts.isNotEmpty
+            ? (parts.first['text'] as String? ?? '')
+            : (msg['content'] as String? ?? '');
 
-      final batch = FirebaseFirestore.instance.batch();
-      int count = 0;
+        if (content.isEmpty) continue;
 
-      for (final msg in reversed) {
-        final content = msg['content'] as String?;
-        if (content != null && !existingContents.contains(content)) {
-          final newDocRef = messagesColl.doc();
-          batch.set(newDocRef, {
-            'role': msg['role'],
-            'content': content,
-            'intent': msg['intent'] ?? 'general_chat',
-            'timestamp': msg['createdAt'] != null
-                ? Timestamp.fromDate(DateTime.parse(msg['createdAt']))
-                : FieldValue.serverTimestamp(),
-          });
-          count++;
-        }
+        final intent = (msg['intent'] as String?) ?? 'general_chat';
+        loaded.add({
+          'role': role,
+          'content': content,
+          'intent': intent,
+          'status': MessageStatus.sent,
+          'id': (msg['id'] as String?) ?? 'hist_$i',
+          'isMonthEvent':
+              intent == 'new_month_started' || intent == 'pre_new_month_reminder',
+        });
       }
 
-      if (count > 0) {
-        await batch.commit();
+      final pendingAction = data?['pendingAction'] as Map<String, dynamic>?;
+
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(loaded);
+        _isFirstMessage = loaded.isEmpty;
+      });
+
+      if (pendingAction != null && msgs.isNotEmpty) {
+        _restorePendingAction(pendingAction, msgs);
       }
 
+      _scrollToBottom();
     } catch (e) {
-      debugPrint(
-          '[ChatScreen] REST API history load failed (offline/network failure): $e');
+      debugPrint('[ChatScreen] History load failed: $e');
     } finally {
-      // 4. Fall back to listening is already handled in initState
       if (mounted) setState(() => _isHistoryLoaded = true);
     }
   }
 
-  /// Real-time listener for Firestore messages.
-  void _listenToMessages() {
-    final userId = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
-    if (userId == 'anonymous') return;
+  /// Restores a pending confirmation card from the backend's pendingAction.
+  /// Called on chat screen open so confirmation UI survives app restarts.
+  void _restorePendingAction(
+    Map<String, dynamic> pendingAction,
+    List msgs,
+  ) {
+    try {
+      final pendingTxIds =
+          (pendingAction['pendingTxIds'] as List?)?.cast<String>() ?? [];
+      if (pendingTxIds.isEmpty) return;
 
-    final messagesColl = FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('messages');
+      final lastAssistantId = msgs.isNotEmpty
+          ? (msgs.last['id'] as String? ?? 'restored_pending')
+          : 'restored_pending';
 
-    _chatSubscription?.cancel();
-    _chatSubscription = messagesColl
-        .orderBy('timestamp', descending: false)
-        .snapshots()
-        .listen((snapshot) {
-      if (!mounted) return;
+      if (_pendingCards.containsKey(lastAssistantId)) return;
 
-      final docs = snapshot.docs.toList();
-      // Client-side sort to ensure messages don't jump while serverTimestamp is pending
-      docs.sort((a, b) {
-        final aData = a.data();
-        final bData = b.data();
-        final aTime = aData['timestamp'] as Timestamp?;
-        final bTime = bData['timestamp'] as Timestamp?;
-        if (aTime == null && bTime == null) return 0;
-        if (aTime == null) return 1;
-        if (bTime == null) return -1;
-        return aTime.compareTo(bTime);
-      });
+      final items = pendingTxIds
+          .map((id) => PendingTransaction(
+                id: id,
+                amount: 0,
+                label: 'Pending transaction',
+                source: (pendingAction['source'] as String?) ?? 'chat',
+              ))
+          .toList();
+
+      if (items.isEmpty) return;
 
       setState(() {
-        _messages.clear();
-        for (final doc in docs) {
-          final data = doc.data();
-          final docId = doc.id;
-          final isPending = doc.metadata.hasPendingWrites;
-          final status = isPending ? MessageStatus.pending : MessageStatus.sent;
-
-          _messages.add({
-            'role': data['role'],
-            'content': data['content'],
-            'intent': data['intent'] ?? 'general_chat',
-            'status': status,
-            'id': docId,
-            'pendingTransactionId': data['pendingTransactionId'],
-            'pendingCardLocalId': data['pendingCardLocalId'],
-            'isMonthEvent': data['isMonthEvent'] == true,
-          });
-
-          if (data['role'] == 'user' &&
-              !isPending &&
-              _myPendingSentMessageIds.contains(docId)) {
-            _myPendingSentMessageIds.remove(docId);
-            _sendOfflineMessageToChatbot(data['content'] ?? '', docId, messagesColl);
-          }
-        }
-        _isHistoryLoaded = true;
-      });
-
-      _scrollToBottom();
-    }, onError: _onSnapshotError);
-  }
-
-  void _onSnapshotError(Object error) {
-    debugPrint('[ChatScreen] Firestore snapshots error: $error');
-    if (mounted) {
-      if (error is FirebaseException && error.code == 'permission-denied') {
-        _showSnackBar('Chat history cannot be loaded (permission issue).');
-      } else {
-        _showSnackBar('Could not load chat history.');
-      }
-      setState(() => _isHistoryLoaded = true);
-    }
-    // Do NOT clear _messages on error
-  }
-
-  void _showSnackBar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
-  }
-
-  /// REST api callback for auto-syncing messages sent while offline — UNCHANGED.
-  Future<void> _sendOfflineMessageToChatbot(
-      String text, String docId, CollectionReference messagesColl) async {
-    try {
-      debugPrint('Syncing offline message: "$text"');
-      final response = await ApiService.post('/messages', {
-        'text': text,
-        'isFirstMessage': _isFirstMessage,
-        'source': 'chat',
-        'transaction_id': docId,
-        'uuid': docId,
-      });
-
-      if (!mounted) return;
-
-      final data = response['data'];
-      final reply = data?['reply'] ?? data?['text'] ?? 'Sorry, I could not understand that.';
-      final intent = data?['intent'] ?? 'general_chat';
-      final alerts = data?['alerts'] as List?;
-
-      final assistantDocRef = messagesColl.doc();
-      await assistantDocRef.set({
-        'role': 'assistant',
-        'content': reply,
-        'intent': intent,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-
-      // Handle any pending transactions in the offline-sync response
-      final pendingList = data?['pending_transactions'] as List?;
-      if (pendingList != null && pendingList.isNotEmpty) {
-        _attachPendingCard(
-          assistantDocId: assistantDocRef.id,
-          rawList: pendingList,
+        _pendingCards[lastAssistantId] = _PendingCard(
+          localId: lastAssistantId,
+          items: items,
         );
-      }
-
-      if (alerts != null && alerts.isNotEmpty) {
-        NotificationScreen.unreadCount.value += alerts.length;
-      }
-
-      _triggerRefreshForIntent(intent);
-      ChatScreen.messageSent = true;
-      _isFirstMessage = false;
-      _scrollToBottom();
+      });
+      debugPrint('[ChatScreen] Restored ${items.length} pending action(s) from history.');
     } catch (e) {
-      debugPrint('[ChatScreen] Failed to send synced message to chatbot: $e');
+      debugPrint('[ChatScreen] _restorePendingAction failed: $e');
     }
   }
 
-  // ── Send (RESTORED: optimistic update + correct API contract) ───────────
+  // ── Send ─────────────────────────────────────────────────────────────────
 
   Future<void> _send() async {
     final text = _controller.text.trim();
@@ -371,47 +251,27 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _controller.clear();
 
-    // 1. Optimistically add user message to the UI
+    final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+
+    // 1. Optimistic user message
     setState(() {
       _messages.add({
         'role': 'user',
         'content': text,
         'intent': 'general_chat',
         'status': MessageStatus.pending,
-        'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
+        'id': tempId,
       });
       _isLoading = true;
     });
     _scrollToBottom();
 
-    final userId = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
-    final messagesColl = FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('messages');
-
-    final userDocRef = messagesColl.doc();
-    final docId = userDocRef.id;
-
-    // 2. Persist to Firestore in background (for history/offline sync)
-    userDocRef.set({
-      'role': 'user',
-      'content': text,
-      'intent': 'general_chat',
-      'timestamp': FieldValue.serverTimestamp(),
-      'transaction_id': docId,
-      'uuid': docId,
-    }).catchError((e) => debugPrint('[ChatScreen] Firestore write failed: $e'));
-
     try {
       debugPrint('Sending chat: "$text"');
-      // Using /messages and 'text' key as per schema.md / prompt instructions
       final res = await ApiService.postRaw('/messages', {
         'text': text,
         'isFirstMessage': _isFirstMessage,
         'source': 'chat',
-        'transaction_id': docId,
-        'uuid': docId,
       });
 
       debugPrint('POST /messages -> ${res.statusCode} ${res.body}');
@@ -423,38 +283,35 @@ class _ChatScreenState extends State<ChatScreen> {
         final data = decoded['data'];
         final reply =
             data?['reply'] ?? data?['text'] ?? 'Sorry, I could not understand that.';
-        final intent = data?['intent'] ?? 'general_chat';
+        final intent = (data?['intent'] as String?) ?? 'general_chat';
         final alerts = data?['alerts'] as List?;
+        // needsConfirmation: backend stores this state; user types "ho"/"yes"
+        // or "hudaina"/"no" to resolve. Never block the UI with a spinner.
+        final needsConfirmation = data?['needsConfirmation'] == true;
 
-        // 3. Update UI with bot reply
+        final assistantId = 'bot_${DateTime.now().millisecondsSinceEpoch}';
+
+        // 2. Mark user message sent, add bot reply — always clear _isLoading.
         setState(() {
+          final idx = _messages.indexWhere((m) => m['id'] == tempId);
+          if (idx != -1) {
+            _messages[idx] = {..._messages[idx], 'status': MessageStatus.sent};
+          }
           _messages.add({
             'role': 'assistant',
             'content': reply,
             'intent': intent,
-            'timestamp': Timestamp.now(),
+            'needsConfirmation': needsConfirmation,
+            'id': assistantId,
           });
           _isLoading = false;
           _isFirstMessage = false;
         });
 
-        // 4. Persist bot reply to Firestore
-        final assistantDocRef = messagesColl.doc();
-        assistantDocRef.set({
-          'role': 'assistant',
-          'content': reply,
-          'intent': intent,
-          'timestamp': FieldValue.serverTimestamp(),
-        }).catchError(
-            (e) => debugPrint('[ChatScreen] Firestore assistant write failed: $e'));
-
-        // Handle pending_transactions in response
+        // 3. Attach pending confirmation card if present.
         final pendingList = data?['pending_transactions'] as List?;
         if (pendingList != null && pendingList.isNotEmpty) {
-          _attachPendingCard(
-            assistantDocId: assistantDocRef.id,
-            rawList: pendingList,
-          );
+          _attachPendingCard(assistantDocId: assistantId, rawList: pendingList);
         }
 
         if (alerts != null && alerts.isNotEmpty) {
@@ -465,25 +322,23 @@ class _ChatScreenState extends State<ChatScreen> {
         ChatScreen.messageSent = true;
       } else {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Chat error (${res.statusCode}). Please try again.'),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Chat error (${res.statusCode}). Please try again.'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
       }
       _scrollToBottom();
     } catch (e, st) {
       debugPrint('Chat send error: $e\n$st');
       if (!mounted) return;
-
-      // On error, mark for sync when back online
-      _myPendingSentMessageIds.add(docId);
       setState(() => _isLoading = false);
-
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Network error. Message will be sent when online.'),
+          content: Text('Network error. Please try again.'),
           duration: Duration(seconds: 3),
         ),
       );
