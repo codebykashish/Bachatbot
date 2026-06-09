@@ -13,6 +13,7 @@ router = APIRouter()
 
 @router.get("/alerts")
 async def get_alerts(
+    tx_type: Optional[str] = Query(None, alias="type", description="expense or income"),
     monthKey: Optional[str] = Query(None, description="YYYY-MM. Defaults to current month."),
     category: Optional[str] = Query(None, description="Filter by category."),
     dateRange: Optional[str] = Query(None, description="today | week | month | all"),
@@ -22,7 +23,7 @@ async def get_alerts(
 ):
     """
     Fetch alerts for the notification/alert screen.
-    Ordered newest-first. Supports category and dateRange filters.
+    Ordered newest-first. Supports category, type, and dateRange filters.
     """
     uid = current_user["uid"]
     db = get_firestore()
@@ -50,6 +51,16 @@ async def get_alerts(
         # Skip soft-deleted
         if data.get("isDeleted", False):
             continue
+
+        # Filter by tx_type
+        if tx_type == "expense":
+            # Treat None/missing type as "expense" for legacy data
+            t = data.get("type")
+            if t not in ("expense", None, "transaction_saved"):
+                continue
+        elif tx_type == "income":
+            if data.get("type") != "income":
+                continue
 
         # Filter by category
         if category and data.get("category") != category:

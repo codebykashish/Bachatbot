@@ -115,6 +115,7 @@ async def get_monthly_report(
 
     budget_utilization = {}
     total_remaining = 0.0
+    total_budget_limit = 0.0  # Used for income card value
     # Build budget lookup for insights: {category: {limit, spent_from_budget}}
     budget_lookup = {}
 
@@ -126,6 +127,7 @@ async def get_monthly_report(
         if limit_val > 0:
             budget_utilization[cat] = round((spent_val / limit_val) * 100)
             total_remaining += max(0.0, limit_val - spent_val)
+        total_budget_limit += limit_val   # sum all budgets for income card
         budget_lookup[cat] = {"limit": limit_val, "spent": spent_val}
 
     # ── Insights ─────────────────────────────────────────────────────────
@@ -202,10 +204,16 @@ async def get_monthly_report(
     alert_count = len(alert_docs)
 
     # ── Build and save/cache report ──────────────────────────────────────
+    # incomeCardValue = totalBudget + totalIncomeTx
+    # This is what the Income card on the home screen should display.
+    income_card_value = total_budget_limit + total_income
+
     report_data = {
         "monthKey": month_key,
         "totalExpense": total_expense,
         "totalIncome": total_income,
+        "totalBudget": total_budget_limit,
+        "incomeCardValue": income_card_value,   # ← Income card = budgets + incomes
         "netSavings": net_savings,
         "categoryBreakdown": category_breakdown,
         "budgetUtilization": budget_utilization,
