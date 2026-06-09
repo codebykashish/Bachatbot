@@ -4,6 +4,9 @@ from dotenv import load_dotenv
 from pathlib import Path
 import json
 import re
+import logging
+
+logger = logging.getLogger("bachatbot.gemini")
 
 print("\n" + "="*50)
 print("[GEMINI] Starting initialization...")
@@ -569,9 +572,9 @@ async def process_chat_message(
         }
 
     except Exception as e:
-        print(f"[ERROR] GEMINI SYSTEM ERROR: {str(e)}")
+        logger.exception("[GEMINI] Gemini API error: %s", e)
         return {
-            "reply": f"Internal Error: {str(e)}",
+            "reply": "Chat server ma error aayo. Kehi samay pachi feri try garnus.",
             "actions": [{"intent": "general_chat", "amount": None, "category": None,
                          "type": None, "limit": None, "monthKey": None}],
         }

@@ -17,6 +17,9 @@ from services.report_service import (
     get_top_spending_category,
     get_spend_alerts
 )
+import logging
+
+logger = logging.getLogger("bachatbot.chat")
 
 router = APIRouter()
 
@@ -159,15 +162,20 @@ def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_ke
     # ── Alert ────────────────────────────────────────────────────────────
     alert_out = None
     try:
-        label = "expense" if tx_type == "expense" else "income"
-        cat_label = f"{category} " if category else ""
-        msg = f"Rs {int(amount)} {cat_label}{label} saved."
-        if tx_type == "expense" and budget_update and percent_used >= 80:
-            msg = f"{category} Rs {int(amount)} saved, {int(percent_used)}% budget used!"
+        if tx_type == "expense":
+            cat_label = f"{category} " if category else ""
+            msg = f"Rs {int(amount)} {cat_label}expense saved."
+            if budget_update and percent_used >= 80:
+                msg = f"{category} Rs {int(amount)} saved, {int(percent_used)}% budget used!"
+            alert_type = "expense"
+        else:
+            cat_label = category or "income"
+            msg = f"Rs {int(amount)} {cat_label} income added."
+            alert_type = "income"
 
         aref = db.collection("users").document(uid).collection("alerts").document()
         aref.set({
-            "type": "transaction_saved",
+            "type": alert_type,
             "message": msg,
             "category": category,
             "severity": "medium" if percent_used >= 80 else "low",
@@ -178,7 +186,7 @@ def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_ke
             "createdAt": SERVER_TIMESTAMP,
         })
         alert_out = {
-            "id": aref.id, "type": "transaction_saved",
+            "id": aref.id, "type": alert_type,
             "message": msg, "category": category,
             "severity": "medium" if percent_used >= 80 else "low",
             "isRead": False, "monthKey": month_key,
@@ -298,6 +306,7 @@ def _handle_set_budget(db, uid, action, month_key):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/chat")
+@router.post("/messages")
 async def chat(
     request: Request,
     current_user: dict = Depends(get_current_user),
@@ -306,12 +315,16 @@ async def chat(
     db = get_firestore()
 
     body = await request.json()
-    user_message = body.get("message", "").strip()
+    user_message = body.get("message") or body.get("text", "")
+    user_message = user_message.strip()
     source = body.get("source", "chat")
     idempotency_key = body.get("idempotencyKey") or None
 
+    # ── Request logging (confirms the route is being hit) ────────────────
+    logger.info("[CHAT] POST /messages user=%s body=%s", uid, body)
+
     print(f"\n{'='*60}")
-    print(f"[CHAT] uid={uid} message='{user_message}'")
+    print(f"[CHAT] uid={uid} source={source} message='{user_message}'")
     print(f"{'='*60}")
 
     if not user_message:
@@ -329,10 +342,11 @@ async def chat(
     user_msg_ref.set({
         "role": "user",
         "parts": [{"text": user_message}],
-        "content": user_message, # Keep for backward compatibility
+        "content": user_message,  # Keep for backward compatibility
         "intent": None,
         "extractedData": None,
         "relatedTransactionId": None,
+        "status": "pending",       # Will be updated to "delivered" after bot replies
         "createdAt": SERVER_TIMESTAMP,
     })
 
@@ -491,13 +505,20 @@ async def chat(
 
                         # Alert
                         try:
-                            cat_label = f"{category} " if category else ""
-                            msg = f"Rs {int(amount)} {cat_label}expense saved."
-                            if tx_type == "expense" and budget_update and percent_used >= 80:
-                                msg = f"{category} Rs {int(amount)} saved, {int(percent_used)}% budget used!"
+                            if tx_type == "expense":
+                                cat_label = f"{category} " if category else ""
+                                msg = f"Rs {int(amount)} {cat_label}expense saved."
+                                if budget_update and percent_used >= 80:
+                                    msg = f"{category} Rs {int(amount)} saved, {int(percent_used)}% budget used!"
+                                alert_type = "expense"
+                            else:
+                                cat_label = category or "income"
+                                msg = f"Rs {int(amount)} {cat_label} income added."
+                                alert_type = "income"
+
                             aref = db.collection("users").document(uid).collection("alerts").document()
                             aref.set({
-                                "type":                  "transaction_saved",
+                                "type":                  alert_type,
                                 "message":               msg,
                                 "category":              category,
                                 "severity":              "medium" if percent_used >= 80 else "low",
@@ -508,7 +529,7 @@ async def chat(
                                 "createdAt":             SERVER_TIMESTAMP,
                             })
                             alerts_created.append({
-                                "id":       aref.id, "type": "transaction_saved",
+                                "id":       aref.id, "type": alert_type,
                                 "message":  msg,     "category": category,
                                 "severity": "medium" if percent_used >= 80 else "low",
                                 "isRead":   False,   "monthKey": tx_mk,
@@ -801,8 +822,14 @@ async def chat(
                 "type": tx_type,
             }],
             "relatedTransactionId": tx_ref.id,
+            "status": "delivered",
             "createdAt":            SERVER_TIMESTAMP,
         })
+        # Mark user message as delivered now that backend processed it
+        try:
+            user_msg_ref.update({"status": "delivered"})
+        except Exception:
+            pass
 
         # E. Return notification-style response
         return {
@@ -850,15 +877,43 @@ async def chat(
         missing_budget_categories = []
 
     # ── Call Gemini ──────────────────────────────────────────────────────
-    gemini_result = await process_chat_message(
-        user_message,
-        first_name=first_name,
-        is_first_message=is_first_message,
-        missing_budget_categories=missing_budget_categories,
-        history=history,
-    )
-    gemini_reply = gemini_result["reply"]
-    actions = gemini_result["actions"]
+    try:
+        gemini_result = await process_chat_message(
+            user_message,
+            first_name=first_name,
+            is_first_message=is_first_message,
+            missing_budget_categories=missing_budget_categories,
+            history=history,
+        )
+        gemini_reply = gemini_result["reply"]
+        actions = gemini_result["actions"]
+    except Exception as gemini_route_err:
+        logger.exception("[CHAT] Gemini call failed unexpectedly: %s", gemini_route_err)
+        fallback_reply = "Chat server ma samasya aayo. Kehi samay pachi feri try garnus."
+        # Save fallback bot message so the conversation is not left hanging
+        try:
+            messages_ref.document().set({
+                "role": "model",
+                "parts": [{"text": fallback_reply}],
+                "content": fallback_reply,
+                "intent": "general_chat",
+                "extractedData": None,
+                "relatedTransactionId": None,
+                "createdAt": SERVER_TIMESTAMP,
+            })
+        except Exception:
+            pass
+        return {
+            "success": True,
+            "data": {
+                "reply": fallback_reply,
+                "intent": "general_chat",
+                "needsConfirmation": False,
+                "transaction": None,
+                "budgetUpdate": None,
+                "alerts": [],
+            },
+        }
 
     print(f"[CHAT] uid={uid} actions={[a.get('intent') for a in actions]}")
 
@@ -1383,8 +1438,14 @@ async def chat(
                 for a in pending_actions
             ],
             "relatedTransactionId": None,
+            "status": "delivered",
             "createdAt": SERVER_TIMESTAMP,
         })
+        # Mark user message as delivered
+        try:
+            user_msg_ref.update({"status": "delivered"})
+        except Exception:
+            pass
         
         print(f"[CHAT] Stored pendingAction with {len(pending_tx_ids)} pending txs. Question: {final_reply}")
         
@@ -1458,8 +1519,14 @@ async def chat(
         "intent": primary_intent,
         "extractedData": extracted,
         "relatedTransactionId": last_transaction["id"] if last_transaction else None,
+        "status": "delivered",
         "createdAt": SERVER_TIMESTAMP,
     })
+    # Mark user message as delivered now that bot has replied successfully
+    try:
+        user_msg_ref.update({"status": "delivered"})
+    except Exception:
+        pass
 
     print(
         f"[CHAT] DONE: actions={[a.get('intent') for a in actions]}, "
