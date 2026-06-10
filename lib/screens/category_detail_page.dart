@@ -30,7 +30,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   List<dynamic> _alerts = [];
   bool _isLoadingAlerts = false;
   bool _isSaving = false;
-  bool _showBudgetWarning = false;
+  bool _showBudgetError = false;
 
   final _amountController = TextEditingController();
   final _noteController = TextEditingController();
@@ -93,15 +93,16 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   }
 
   Future<void> _saveExpense() async {
+    if (_budgetLimit == 0) {
+      setState(() => _showBudgetError = true);
+      return;
+    }
+
+    setState(() => _showBudgetError = false);
+
     if (!_formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
     setState(() => _isSaving = true);
-
-    if (_budgetLimit == 0) {
-      setState(() => _showBudgetWarning = true);
-    } else {
-      setState(() => _showBudgetWarning = false);
-    }
 
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -267,7 +268,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                                         _budgetSpent =
                                             (bd['spent']).toDouble();
                                       }
-                                      _showBudgetWarning = false;
+                                      _showBudgetError = false;
                                     });
                                     Navigator.pop(ctx);
                                     if (mounted) {
@@ -355,16 +356,28 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
               const Spacer(),
               TextButton(
                 onPressed: _showBudgetBottomSheet,
-                style: TextButton.styleFrom(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  foregroundColor: Colors.green,
+                style: _showBudgetError
+                    ? TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        foregroundColor: Colors.green,
+                        backgroundColor: Colors.green.shade50,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          side: const BorderSide(color: Colors.green),
+                        ),
+                      )
+                    : TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        foregroundColor: Colors.green,
+                      ),
+                child: Text(
+                  _budgetLimit == 0 ? 'Set Budget' : 'Edit',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 ),
-                child: const Text('Edit',
-                    style: TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600)),
               ),
             ],
           ),
@@ -662,35 +675,29 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildBudgetCard(),
-              if (_showBudgetWarning) ...[
+              if (_showBudgetError) ...[
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
-                    color: Colors.amber.shade50,
+                    color: Colors.red.shade50,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.amber.shade300, width: 1),
+                    border: Border.all(color: Colors.red.shade300, width: 1),
                   ),
                   child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.info_outline_rounded, size: 16, color: Colors.amber.shade700),
+                      Icon(Icons.error_outline_rounded, size: 16, color: Colors.red.shade600),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          "Expense saved! Set a budget to track how much "
-                          "you're spending on ${widget.category}.",
+                          "Please set a budget for ${widget.category} before "
+                          "adding an expense.",
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.amber.shade800,
+                            color: Colors.red.shade700,
                             height: 1.4,
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: () => setState(() => _showBudgetWarning = false),
-                        child: Icon(Icons.close_rounded, size: 16, color: Colors.amber.shade600),
                       ),
                     ],
                   ),
