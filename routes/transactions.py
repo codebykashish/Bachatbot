@@ -1,10 +1,120 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
+from pydantic import BaseModel, Field
 from firebase_config import get_firestore
 from auth import get_current_user
 from utils import serialize_doc, get_current_month_key
 from typing import Optional
-from google.cloud.firestore_v1 import SERVER_TIMESTAMP
+from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment
+import logging
+
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+class ManualExpenseRequest(BaseModel):
+    category: str = Field(..., min_length=1)
+    amount: float = Field(..., gt=0)
+    note: Optional[str] = Field(default="", max_length=200)
+    monthKey: Optional[str] = None
+
+
+@router.post("/transactions/manual")
+async def add_manual_expense(
+    body: ManualExpenseRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Manually add an expense from the category detail page.
+    Mirrors what chat does: saves transaction + increments budget.spent
+    (if a budget exists) + creates an alert.
+    """
+    uid = current_user["uid"]
+    db = get_firestore()
+    month_key = body.monthKey or get_current_month_key()
+
+    # 1 — Save transaction
+    tx_ref = (
+        db.collection("users").document(uid)
+        .collection("transactions").document()
+    )
+    tx_ref.set({
+        "amount": body.amount,
+        "category": body.category,
+        "type": "expense",
+        "status": "confirmed",
+        "source": "manual",
+        "description": body.note or "",
+        "monthKey": month_key,
+        "isDeleted": False,
+        "deletedAt": None,
+        "originalMessageId": None,
+        "createdAt": SERVER_TIMESTAMP,
+        "updatedAt": SERVER_TIMESTAMP,
+    })
+    logger.info(f"[MANUAL] uid={uid} expense {body.category} Rs {body.amount} saved id={tx_ref.id}")
+
+    # 2 — Increment budget.spent if a budget exists for this category + month
+    percent_used = 0.0
+    budget_update = None
+    try:
+        budgets_ref = db.collection("users").document(uid).collection("budgets")
+        matching = list(
+            budgets_ref
+            .where("category", "==", body.category)
+            .where("monthKey", "==", month_key)
+            .limit(1)
+            .stream()
+        )
+        if matching:
+            bref = matching[0].reference
+            bref.update({"spent": Increment(body.amount), "updatedAt": SERVER_TIMESTAMP})
+            updated = bref.get().to_dict()
+            new_spent = updated.get("spent", 0.0)
+            blimit = updated.get("limit", 0.0)
+            percent_used = round((new_spent / blimit) * 100, 2) if blimit > 0 else 0.0
+            budget_update = {
+                "category": body.category,
+                "limit": blimit,
+                "spent": new_spent,
+                "remaining": max(0.0, blimit - new_spent),
+                "percentUsed": percent_used,
+            }
+            logger.info(f"[MANUAL] budget {body.category} spent→{new_spent} ({percent_used}%)")
+    except Exception as e:
+        logger.warning(f"[MANUAL] budget update failed: {e}")
+
+    # 3 — Create alert
+    try:
+        msg = f"Rs {int(body.amount)} {body.category} expense saved."
+        if budget_update and percent_used >= 80:
+            msg = f"{body.category} Rs {int(body.amount)} saved, {int(percent_used)}% budget used!"
+        aref = db.collection("users").document(uid).collection("alerts").document()
+        aref.set({
+            "type": "expense",
+            "message": msg,
+            "category": body.category,
+            "severity": "medium" if percent_used >= 80 else "low",
+            "isRead": False,
+            "isDeleted": False,
+            "monthKey": month_key,
+            "relatedTransactionId": tx_ref.id,
+            "createdAt": SERVER_TIMESTAMP,
+        })
+        logger.info(f"[MANUAL] alert created: {msg}")
+    except Exception as e:
+        logger.warning(f"[MANUAL] alert creation failed: {e}")
+
+    return {
+        "success": True,
+        "message": f"Rs {int(body.amount)} added to {body.category}.",
+        "data": {
+            "transactionId": tx_ref.id,
+            "category": body.category,
+            "amount": body.amount,
+            "monthKey": month_key,
+            "budgetUpdate": budget_update,
+        },
+    }
 
 @router.get("/transactions")
 async def get_transactions(

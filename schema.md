@@ -9,11 +9,14 @@
 | Method | Path                  | Alias         | Auth | Description                          |
 |--------|-----------------------|---------------|------|--------------------------------------|
 | GET    | /api/v1/user/profile  | GET /profile  | JWT  | Get current user's full profile      |
-| PATCH  | /api/v1/user/profile  | PATCH /profile| JWT  | Update profile fields / password     |
+| PATCH  | /api/v1/user/profile  | PATCH /profile| JWT  | Update profile fields / password / photoUrl |
 | POST   | /api/v1/user/profile  |               | JWT  | Create initial profile after signup  |
 
 > `/profile` and `/api/v1/user/profile` are identical aliases — both are registered.
 > Frontend may use either path; the backend handles both.
+
+**PATCH /profile — Accepted fields (all optional):**
+`firstName`, `lastName`, `phoneNumber`, `onboarding`, `preferences`, `photoUrl` (string, Cloudinary URL), `currentPassword`, `newPassword`, `confirmNewPassword`
 
 **GET /profile — Response shape:**
 ```json
@@ -25,15 +28,26 @@
     "lastName": "Sharma",
     "email": "ram@example.com",
     "phoneNumber": "+97798XXXXXXXX",
+    "photoUrl": "https://res.cloudinary.com/..." ,
     "onboarding": { "isCompleted": true, "occupation": "student", "housingType": "rent", "estimatedMonthlySpend": 15000 },
     "preferences": { "language": "en", "currency": "NPR", "alertThreshold": 80 },
     "totalIncome": 45000,
     "totalExpense": 15000,
+    "recentTransaction": {
+      "id": "txn_abc123",
+      "type": "expense",
+      "amount": 250,
+      "category": "Food",
+      "note": "Momo khada",
+      "createdAt": "..."
+    },
     "createdAt": "...",
     "updatedAt": "..."
   }
 }
 ```
+> `photoUrl` is `null` if the user has not uploaded a profile photo.  
+> `recentTransaction` is `null` if the user has no transactions yet.
 
 ---
 
@@ -132,11 +146,119 @@ These are the `intent` values the backend processes from Gemini's response:
 |--------|-------------------------------|------|-----------------------------------------------|
 | POST   | /chat (source:"notification") | JWT  | Parse a wallet/bank notification              |
 | POST   | /confirm-transactions         | JWT  | Confirm or reject pending notification txs    |
+| GET    | /alerts                       | JWT  | Fetch alerts with filters                     |
+
+**GET /alerts — Supported query params:**
+- `monthKey` (string, optional) — default: current month. Not applied for yesterday/last_week dateRange queries (cross-month support).
+- `type` = `"expense"` | `"income"`
+- `category` = `"Food"` | `"Transport"` | etc.
+- `dateRange` = `"today"` | `"yesterday"` | `"week"` | `"last_week"` | `"month"` | `"all"`
+  - `yesterday` and `last_week` do **not** restrict by monthKey (cross-month safe)
+- `isRead` = boolean
+- `limit` (int, default 20)
 
 **Notification alert types:**
 - `type: "expense"` → message: `"Rs {amount} {category} expense saved."`
 - `type: "income"`  → message: `"Rs {amount} income added."`
 - `type: "budget_set"` → message: `"{category} budget Rs {limit} set gareko chu."`
+
+---
+
+### Transactions (Manual)
+
+| Method | Path                      | Auth | Description                                        |
+|--------|---------------------------|------|----------------------------------------------------|
+| POST   | /transactions/manual      | JWT  | Manually add an expense from category detail page  |
+
+**POST /transactions/manual — Request body:**
+```json
+{
+  "category": "Food",
+  "amount": 250.0,
+  "note": "Momo khada",
+  "monthKey": "2026-04"
+}
+```
+> `note` and `monthKey` are optional. If `monthKey` is omitted, current month is used.
+
+**POST /transactions/manual — Side effects:** saves transaction + increments `budget.spent` (if budget exists for that category+month) + creates alert. Same side effects as chat-logged expenses.
+
+**POST /transactions/manual — Response shape:**
+```json
+{
+  "success": true,
+  "message": "Expense added successfully.",
+  "data": {
+    "transactionId": "txn_abc123",
+    "category": "Food",
+    "amount": 250.0,
+    "monthKey": "2026-04",
+    "budgetUpdate": {
+      "id": "budget_abc",
+      "category": "Food",
+      "limit": 5000,
+      "spent": 2250,
+      "remaining": 2750,
+      "percentUsed": 45.0
+    }
+  }
+}
+```
+> `budgetUpdate` is `null` if no budget is set for that category.
+
+---
+
+### Upload
+
+| Method | Path                      | Auth | Description                                      |
+|--------|---------------------------|------|--------------------------------------------------|
+| POST   | /upload/profile-photo     | JWT  | Upload profile photo to Cloudinary, returns URL  |
+
+**POST /upload/profile-photo — Request:** `multipart/form-data`, field name `"file"`, accepted types: `image/jpeg`, `image/png`, `image/webp`, max size 5 MB.
+
+**POST /upload/profile-photo — Response shape:**
+```json
+{
+  "success": true,
+  "photoUrl": "https://res.cloudinary.com/..."
+}
+```
+
+**POST /upload/profile-photo — Errors:**
+
+| Error code | HTTP | Reason |
+|------------|------|--------|
+| `INVALID_FILE_TYPE` | 400 | File is not jpeg/png/webp |
+| `FILE_TOO_LARGE` | 400 | File exceeds 5 MB |
+| `UPLOAD_FAILED` | 500 | Cloudinary upload error |
+
+> After receiving `photoUrl`, the frontend calls `PATCH /profile` with `{ "photoUrl": "..." }` to persist it.
+
+---
+
+### Contact
+
+| Method | Path       | Auth | Description                     |
+|--------|------------|------|---------------------------------|
+| POST   | /contact   | None | Submit contact form, sends email |
+
+**POST /contact — Request body:**
+```json
+{
+  "name": "Ram Sharma",
+  "email": "ram@example.com",
+  "message": "I have a question about..."
+}
+```
+
+**POST /contact — Response shape:**
+```json
+{
+  "success": true,
+  "message": "Your message has been sent. We'll get back to you soon."
+}
+```
+> Sends email to support inbox via SMTP. No auth required.
 
 ---
 
@@ -149,6 +271,7 @@ These are the `intent` values the backend processes from Gemini's response:
     ├── lastName: "Sharma"
     ├── email: "ram@email.com"
     ├── phone: "+97798XXXXXXXX"
+    ├── photoUrl: "https://res.cloudinary.com/..." (null if not set)
     ├── createdAt: timestamp
     ├── updatedAt: timestamp
     │

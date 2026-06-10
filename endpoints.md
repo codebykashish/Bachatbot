@@ -128,6 +128,9 @@ async def get_current_user(request: Request):
 | 12 | GET | `/alerts` | Get alerts | ✅ | `users/{uid}/alerts` |
 | 13 | PATCH | `/alerts/{id}/read` | Mark alert read | ✅ | `users/{uid}/alerts/{id}` |
 | 14 | GET | `/messages` | Get chat history | ✅ | `users/{uid}/messages` |
+| 15 | POST | `/transactions/manual` | Manually add expense | ✅ | `users/{uid}/transactions`, `users/{uid}/budgets`, `users/{uid}/alerts` |
+| 16 | POST | `/upload/profile-photo` | Upload photo to Cloudinary | ✅ | Cloudinary (no Firestore write — call PATCH /profile after) |
+| 17 | POST | `/contact` | Contact form submission | ❌ | None (sends email via SMTP) |
 
 ---
 
@@ -226,7 +229,8 @@ async def get_current_user(request: Request):
 2. Fetch users/{uid}
 3. If not found → Auto-create minimal stub profile
 4. Aggregate current-month totals (totalIncome, totalExpense)
-5. Return full document + totals
+5. Fetch most recent confirmed transaction (for recentTransaction field)
+6. Return full document + totals + recentTransaction
 ```
 
 **Success Response (200):**
@@ -239,6 +243,7 @@ async def get_current_user(request: Request):
     "lastName": "Sharma",
     "email": "ram@email.com",
     "phoneNumber": "+97798XXXXXXXX",
+    "photoUrl": "https://res.cloudinary.com/...",
     "createdAt": "2026-04-01T10:00:00Z",
     "updatedAt": "2026-04-05T14:00:00Z",
     "onboarding": {
@@ -253,10 +258,20 @@ async def get_current_user(request: Request):
       "alertThreshold": 80
     },
     "totalIncome": 45000.0,
-    "totalExpense": 12500.0
+    "totalExpense": 12500.0,
+    "recentTransaction": {
+      "id": "txn_abc123",
+      "type": "expense",
+      "amount": 250.0,
+      "category": "Food",
+      "note": "Momo khada",
+      "createdAt": "2026-04-10T12:30:00Z"
+    }
   }
 }
 ```
+> `photoUrl` is `null` if no photo has been uploaded.  
+> `recentTransaction` is `null` if the user has no transactions yet.
 
 ---
 
@@ -272,6 +287,7 @@ async def get_current_user(request: Request):
   "firstName": "Luniva",
   "lastName": "Dhami",
   "phoneNumber": "+9779800000000",
+  "photoUrl": "https://res.cloudinary.com/...",
   "onboarding": { ... },
   "preferences": { ... },
   "currentPassword": "oldPass123@",
@@ -279,7 +295,7 @@ async def get_current_user(request: Request):
   "confirmNewPassword": "NewPass1@"
 }
 ```
-*Note: All fields are optional. Leave all three password fields blank to keep current password.*
+*Note: All fields are optional. Leave all three password fields blank to keep current password. `photoUrl` is set here after uploading via POST /upload/profile-photo.*
 
 **What backend does:**
 ```
@@ -938,8 +954,10 @@ GET /transactions?status=pending
 ```
 1. Verify token → get uid
 2. Check if budget for same category + monthKey exists
-   → If yes: update limit and alertThreshold
-   → If no: create new budget document with spent = 0
+   → If yes: update limit and alertThreshold (spent is NOT reset)
+   → If no: create new budget document — spent is BACKFILLED by summing
+            all existing confirmed transactions for that category+monthKey
+            (instead of starting at 0)
 3. Return budget
 ```
 
@@ -977,8 +995,12 @@ GET /transactions?status=pending
 ```
 1. Verify token → get uid
 2. Query budgets where monthKey == provided monthKey
-3. Calculate remaining and percentUsed for each
-4. Return array
+3. For each budget: recompute spent by summing confirmed transactions
+   for that category+monthKey from the transactions subcollection
+   (does NOT use the stored budget.spent field — ensures consistency
+   with the reports endpoint)
+4. Calculate remaining and percentUsed for each
+5. Return array
 ```
 
 **Response (200):**
@@ -1113,13 +1135,24 @@ Summary card:
 
 **Query Params:**
 
-| Param | Type | Required | Default |
-|-------|------|----------|---------|
-| `monthKey` | string | No | current month |
-| `isRead` | boolean | No | all |
-| `limit` | int | No | 20 |
+| Param | Type | Required | Default | Notes |
+|-------|------|----------|---------|-------|
+| `monthKey` | string | No | current month | Ignored when `dateRange` is `yesterday` or `last_week` |
+| `type` | string | No | all | `"expense"` or `"income"` |
+| `category` | string | No | all | e.g. `"Food"`, `"Transport"` |
+| `dateRange` | string | No | — | `"today"` \| `"yesterday"` \| `"week"` \| `"last_week"` \| `"month"` \| `"all"` |
+| `isRead` | boolean | No | all | `true` or `false` |
+| `limit` | int | No | 20 | |
 
-**Example:** `GET /alerts?monthKey=2026-04&isRead=false`
+> **Cross-month support:** `yesterday` and `last_week` do not restrict by `monthKey`, so alerts spanning month boundaries are returned correctly.
+
+**Example calls:**
+```
+GET /alerts?monthKey=2026-04&isRead=false
+GET /alerts?dateRange=yesterday
+GET /alerts?type=expense&category=Food
+GET /alerts?dateRange=last_week&isRead=false
+```
 
 **Response (200):**
 ```json
@@ -1240,6 +1273,193 @@ Summary card:
 
 ---
 
+### Endpoint 15: `POST /transactions/manual`
+
+**Purpose:** Manually add an expense from the category detail page (without going through the AI chat).
+
+**Auth:** Required (JWT)
+
+**Firestore writes to:** `users/{uid}/transactions`, `users/{uid}/budgets` (spent increment), `users/{uid}/alerts`
+
+**Request:**
+```json
+{
+  "category": "Food",
+  "amount": 250.0,
+  "note": "Momo khada",
+  "monthKey": "2026-04"
+}
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `category` | string | Yes | Must be a valid category |
+| `amount` | float | Yes | Must be > 0 |
+| `note` | string | No | Optional description |
+| `monthKey` | string | No | Defaults to current month if omitted |
+
+**What backend does:**
+```
+1. Verify token → get uid
+2. Create confirmed transaction in users/{uid}/transactions
+   (source = "manual", status = "confirmed")
+3. Find budget for category + monthKey
+4. If budget exists:
+   a. budget.spent += amount
+   b. Check alert threshold → create alert if needed
+5. Return transactionId + budgetUpdate
+```
+
+**Success Response (201):**
+```json
+{
+  "success": true,
+  "message": "Expense added successfully.",
+  "data": {
+    "transactionId": "txn_abc123",
+    "category": "Food",
+    "amount": 250.0,
+    "monthKey": "2026-04",
+    "budgetUpdate": {
+      "id": "budget_abc",
+      "category": "Food",
+      "limit": 5000,
+      "spent": 2250,
+      "remaining": 2750,
+      "percentUsed": 45.0
+    }
+  }
+}
+```
+> `budgetUpdate` is `null` if no budget is set for that category+month.
+
+**Error (400) — Missing required field:**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "MISSING_FIELD",
+    "message": "category and amount are required."
+  }
+}
+```
+
+---
+
+### Endpoint 16: `POST /upload/profile-photo`
+
+**Purpose:** Upload a profile photo to Cloudinary. Returns the hosted URL. Frontend then calls `PATCH /profile` with the returned URL to persist it.
+
+**Auth:** Required (JWT)
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `file` | file | Yes | image/jpeg, image/png, or image/webp — max 5 MB |
+
+**What backend does:**
+```
+1. Verify token → get uid
+2. Validate file type (jpeg/png/webp) → else INVALID_FILE_TYPE
+3. Validate file size (<= 5 MB) → else FILE_TOO_LARGE
+4. Upload to Cloudinary
+5. Return Cloudinary URL
+(No Firestore write — caller must follow up with PATCH /profile)
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "photoUrl": "https://res.cloudinary.com/bachatbot/image/upload/v1234567890/profile_photos/abc123.jpg"
+}
+```
+
+**Error: Invalid File Type (400):**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_FILE_TYPE",
+    "message": "Only jpeg, png, and webp images are allowed."
+  }
+}
+```
+
+**Error: File Too Large (400):**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "FILE_TOO_LARGE",
+    "message": "File size must not exceed 5 MB."
+  }
+}
+```
+
+**Error: Upload Failed (500):**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "UPLOAD_FAILED",
+    "message": "Failed to upload photo. Please try again."
+  }
+}
+```
+
+---
+
+### Endpoint 17: `POST /contact`
+
+**Purpose:** Submit a contact/support form. Sends email to the support inbox via SMTP.
+
+**Auth:** Not required (public endpoint)
+
+**Request:**
+```json
+{
+  "name": "Ram Sharma",
+  "email": "ram@example.com",
+  "message": "I have a question about budget tracking..."
+}
+```
+
+| Field | Type | Required |
+|-------|------|----------|
+| `name` | string | Yes |
+| `email` | string | Yes |
+| `message` | string | Yes |
+
+**What backend does:**
+```
+1. Validate required fields
+2. Send email to SUPPORT_EMAIL via SMTP
+3. Return success
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Your message has been sent. We'll get back to you soon."
+}
+```
+
+**Error (400) — Missing fields:**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "MISSING_FIELD",
+    "message": "name, email, and message are required."
+  }
+}
+```
+
+---
+
 ## 🚨 Error Response Format (All Endpoints)
 
 | HTTP Code | When |
@@ -1322,23 +1542,41 @@ backend/
 │   ├── signup.py              # POST /complete-signup
 │   ├── profile.py             # GET, PATCH /profile
 │   ├── chat.py                # POST /chat (main AI endpoint)
-│   ├── transactions.py        # GET, DELETE /transactions
+│   ├── transactions.py        # GET, DELETE /transactions + POST /transactions/manual
 │   ├── confirm.py             # POST /confirm, /reject
 │   ├── budgets.py             # POST, GET /budgets
 │   ├── reports.py             # GET /monthly-report
 │   ├── alerts.py              # GET /alerts, PATCH /alerts/{id}/read
-│   └── messages.py            # GET /messages
+│   ├── messages.py            # GET /messages
+│   ├── upload.py              # POST /upload/profile-photo (Cloudinary)
+│   └── verification.py        # Email verification + POST /contact
 ├── services/
 │   ├── transaction_service.py # Transaction CRUD logic
-│   ├── budget_service.py      # Budget CRUD + spent update
+│   ├── budget_service.py      # Budget CRUD + spent update + rollover logic
 │   ├── alert_service.py       # Alert generation logic
 │   ├── report_service.py      # Report aggregation logic
 │   └── notification_service.py # Notification parsing + storage
-├── .env                       # GEMINI_API_KEY
+├── .env                       # GEMINI_API_KEY, CLOUDINARY_*, SUPPORT_EMAIL
 ├── serviceAccountKey.json     # Firebase credentials
 ├── requirements.txt
 └── README.md
 ```
+
+**Required `.env` variables:**
+
+| Variable | Purpose |
+|----------|---------|
+| `GEMINI_API_KEY` | Google Gemini API access |
+| `CLOUDINARY_CLOUD_NAME` | Cloudinary cloud name |
+| `CLOUDINARY_API_KEY` | Cloudinary API key |
+| `CLOUDINARY_API_SECRET` | Cloudinary API secret |
+| `SUPPORT_EMAIL` | Destination inbox for contact form submissions |
+
+**New `requirements.txt` packages:**
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `cloudinary` | `1.44.2` | Cloudinary Python SDK for profile photo uploads |
 
 ---
 
