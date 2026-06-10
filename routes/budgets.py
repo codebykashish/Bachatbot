@@ -113,12 +113,12 @@ async def create_or_update_budget(
             },
         }
 
-    # Create new budget document
+    # Create new budget document — backfill spent from existing transactions
     new_ref = budgets_ref.document()
     budget_data = {
         "category": body.category,
         "limit": body.limit,
-        "spent": 0.0,
+        "spent": actual_spent,          # ← use real spend, not 0
         "alertThreshold": threshold,
         "monthKey": month_key,
         "createdAt": SERVER_TIMESTAMP,
@@ -126,7 +126,8 @@ async def create_or_update_budget(
     }
     new_ref.set(budget_data)
 
-    print(f"[BUDGET] Created new budget id={new_ref.id}")
+    percent_used = round((actual_spent / body.limit) * 100, 2) if body.limit > 0 else 0.0
+    print(f"[BUDGET] Created new budget id={new_ref.id} backfilled spent={actual_spent}")
 
     return {
         "success": True,
@@ -135,9 +136,9 @@ async def create_or_update_budget(
             "id": new_ref.id,
             "category": body.category,
             "limit": body.limit,
-            "spent": 0.0,
-            "remaining": body.limit,
-            "percentUsed": 0.0,
+            "spent": actual_spent,
+            "remaining": max(0.0, body.limit - actual_spent),
+            "percentUsed": percent_used,
             "alertThreshold": threshold,
             "monthKey": month_key,
         },
@@ -166,16 +167,34 @@ async def get_budgets(
         .stream()
     )
 
+    # Compute actual spent per category from transactions (single query)
+    tx_docs = (
+        db.collection("users").document(uid).collection("transactions")
+        .where("monthKey", "==", month_key)
+        .where("type", "==", "expense")
+        .where("status", "==", "confirmed")
+        .stream()
+    )
+    actual_spent_map: dict = {}
+    for tx in tx_docs:
+        td = tx.to_dict()
+        if td.get("isDeleted", False):
+            continue
+        cat = td.get("category", "")
+        actual_spent_map[cat] = actual_spent_map.get(cat, 0.0) + float(td.get("amount", 0.0))
+
     budgets = []
     for doc in budgets_ref:
         data = doc.to_dict()
         limit_val = data.get("limit", 0.0)
-        spent = data.get("spent", 0.0)
+        category = data.get("category")
+        # Always use transaction-based spend so category page matches reports
+        spent = actual_spent_map.get(category, 0.0)
         percent_used = round((spent / limit_val) * 100, 2) if limit_val > 0 else 0.0
 
         budgets.append({
             "id": doc.id,
-            "category": data.get("category"),
+            "category": category,
             "limit": limit_val,
             "spent": spent,
             "remaining": max(0.0, limit_val - spent),
