@@ -117,7 +117,7 @@ class ProfileScreenState extends State<ProfileScreen> {
               title: const Text('Upload from Gallery'),
               onTap: () {
                 Navigator.pop(ctx);
-                _uploadProfilePhoto();
+                _uploadProfilePhoto(ImageSource.gallery);
               },
             ),
             ListTile(
@@ -125,7 +125,7 @@ class ProfileScreenState extends State<ProfileScreen> {
               title: const Text('Take Photo'),
               onTap: () {
                 Navigator.pop(ctx);
-                _uploadProfilePhoto();
+                _uploadProfilePhoto(ImageSource.camera);
               },
             ),
             const SizedBox(height: 8),
@@ -135,13 +135,16 @@ class ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Future<void> _uploadProfilePhoto() async {
+  Future<void> _uploadProfilePhoto(ImageSource source) async {
     try {
       final picker = ImagePicker();
       final XFile? picked = await picker.pickImage(
-        source: ImageSource.gallery,
+        source: source,
         imageQuality: 80,
         maxWidth: 800,
+        preferredCameraDevice: source == ImageSource.camera
+            ? CameraDevice.front
+            : CameraDevice.rear,
       );
       if (picked == null) return;
 
