@@ -1,9 +1,8 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import '../api_service.dart';
 import 'edit_profile_screen.dart';
@@ -118,7 +117,7 @@ class ProfileScreenState extends State<ProfileScreen> {
               title: const Text('Upload from Gallery'),
               onTap: () {
                 Navigator.pop(ctx);
-                _pickAndUploadPhoto(ImageSource.gallery);
+                _uploadProfilePhoto();
               },
             ),
             ListTile(
@@ -126,7 +125,7 @@ class ProfileScreenState extends State<ProfileScreen> {
               title: const Text('Take Photo'),
               onTap: () {
                 Navigator.pop(ctx);
-                _pickAndUploadPhoto(ImageSource.camera);
+                _uploadProfilePhoto();
               },
             ),
             const SizedBox(height: 8),
@@ -136,62 +135,67 @@ class ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Future<void> _pickAndUploadPhoto(ImageSource source) async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(
-      source: source,
-      imageQuality: 75,
-      maxWidth: 512,
-    );
-    if (picked == null) return;
-
-    setState(() => _isUploadingPhoto = true);
+  Future<void> _uploadProfilePhoto() async {
     try {
+      final picker = ImagePicker();
+      final XFile? picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80,
+        maxWidth: 800,
+      );
+      if (picked == null) return;
+
+      setState(() => _isUploadingPhoto = true);
+
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception('Not logged in');
 
-      final file = File(picked.path);
-      if (!file.existsSync()) throw Exception('Image file not found');
-
-      final ref = FirebaseStorage.instance
-          .ref('profile_photos/${user.uid}.jpg');
-
-      final snapshot = await ref.putFile(
-        file,
-        SettableMetadata(contentType: 'image/jpeg'),
-      );
-      final downloadUrl = await snapshot.ref.getDownloadURL();
-
       final token = await user.getIdToken(true);
-      final response = await http.patch(
+
+      // Step 1 — Upload image; backend handles Cloudinary
+      final uri = Uri.parse('${ApiService.baseUrl}/upload/profile-photo');
+      final request = http.MultipartRequest('POST', uri)
+        ..headers['Authorization'] = 'Bearer $token'
+        ..files.add(await http.MultipartFile.fromPath(
+          'file',
+          picked.path,
+          contentType: MediaType('image', 'jpeg'),
+        ));
+
+      final streamed = await request.send();
+      final uploadResponse = await http.Response.fromStream(streamed);
+
+      if (uploadResponse.statusCode != 200) {
+        final err = jsonDecode(uploadResponse.body);
+        throw Exception(err['detail']?['message'] ?? 'Upload failed');
+      }
+
+      final uploadData = jsonDecode(uploadResponse.body);
+      final photoUrl = uploadData['photoUrl'] as String;
+
+      // Step 2 — Save Cloudinary URL to profile
+      final patchResponse = await http.patch(
         Uri.parse('${ApiService.baseUrl}/profile'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({'photoUrl': downloadUrl}),
+        body: jsonEncode({'photoUrl': photoUrl}),
       );
 
-      if (response.statusCode == 200) {
+      if (patchResponse.statusCode == 200) {
         if (mounted) {
-          setState(() => _profileData?['photoUrl'] = downloadUrl);
+          setState(() => _profileData?['photoUrl'] = photoUrl);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Profile photo updated!')),
+            const SnackBar(
+              content: Text('Profile photo updated!'),
+              backgroundColor: Colors.green,
+            ),
           );
         }
       } else {
-        final err = jsonDecode(response.body) as Map<String, dynamic>?;
-        throw Exception(
-            err?['detail']?['message'] ?? err?['message'] ?? 'Failed to update');
-      }
-    } on FirebaseException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Storage error: ${e.message}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        final err = jsonDecode(patchResponse.body);
+        throw Exception(err['detail']?['message'] ?? 'Failed to save photo');
       }
     } catch (e) {
       debugPrint('[ProfileScreen] Photo upload failed: $e');
