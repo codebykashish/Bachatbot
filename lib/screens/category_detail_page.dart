@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../api_service.dart';
 import '../widgets/shared_widgets.dart';
+import '../widgets/chat_fab.dart';
 
 class CategoryDetailPage extends StatefulWidget {
   final String category;
@@ -199,7 +200,8 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                     autofocus: true,
                     decoration: InputDecoration(
                       labelText: 'Monthly Limit (Rs)',
-                      prefixIcon: const Icon(Icons.currency_rupee),
+                      prefixText: 'Rs ',
+                      prefixStyle: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w500, fontSize: 15),
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8)),
                       focusedBorder: OutlineInputBorder(
@@ -459,8 +461,8 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                       decimal: true),
                   decoration: InputDecoration(
                     labelText: 'Amount (Rs)',
-                    prefixIcon:
-                        const Icon(Icons.currency_rupee, size: 18),
+                    prefixText: 'Rs ',
+                    prefixStyle: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w500, fontSize: 15),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide:
@@ -659,6 +661,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
           ),
         ),
       ),
+      floatingActionButton: const ChatFab(),
     );
   }
 }

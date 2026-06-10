@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../api_service.dart';
 import '../widgets/shared_widgets.dart';
+import '../widgets/chat_fab.dart';
 import 'category_detail_page.dart';
 
 // ── NotificationScreen ───────────────────────────────────────────────────────
@@ -332,6 +333,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
           ),
         ],
       ),
+      floatingActionButton: const ChatFab(),
     );
   }
 }

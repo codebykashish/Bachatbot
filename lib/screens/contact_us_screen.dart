@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import '../widgets/chat_fab.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../api_service.dart';
 
@@ -263,6 +264,7 @@ class _ContactUsScreenState extends State<ContactUsScreen> {
           ],
         ),
       ),
+      floatingActionButton: const ChatFab(),
     );
   }
 

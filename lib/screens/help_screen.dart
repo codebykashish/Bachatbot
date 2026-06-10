@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/chat_fab.dart';
 
 class HelpScreen extends StatelessWidget {
   const HelpScreen({super.key});
@@ -213,6 +214,7 @@ class HelpScreen extends StatelessWidget {
           );
         }).toList(),
       ),
+      floatingActionButton: const ChatFab(),
     );
   }
 }

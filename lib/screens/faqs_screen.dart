@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/chat_fab.dart';
 
 class FaqsScreen extends StatelessWidget {
   const FaqsScreen({super.key});
@@ -172,6 +173,7 @@ class FaqsScreen extends StatelessWidget {
           );
         },
       ),
+      floatingActionButton: const ChatFab(),
     );
   }
 }

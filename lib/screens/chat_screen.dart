@@ -142,6 +142,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'status': MessageStatus.sent,
         'id': 'month_$intent',
         'isMonthEvent': true,
+        'createdAt': DateTime.now().toUtc().toIso8601String(),
       });
     });
     _scrollToBottom();
@@ -171,6 +172,16 @@ class _ChatScreenState extends State<ChatScreen> {
         if (content.isEmpty) continue;
 
         final intent = (msg['intent'] as String?) ?? 'general_chat';
+        String? createdAt;
+        final rawTs = msg['createdAt'];
+        if (rawTs is String) {
+          createdAt = rawTs;
+        } else if (rawTs is Map) {
+          final secs = rawTs['_seconds'] as int?;
+          if (secs != null) {
+            createdAt = DateTime.fromMillisecondsSinceEpoch(secs * 1000, isUtc: true).toIso8601String();
+          }
+        }
         loaded.add({
           'role': role,
           'content': content,
@@ -179,6 +190,7 @@ class _ChatScreenState extends State<ChatScreen> {
           'id': (msg['id'] as String?) ?? 'hist_$i',
           'isMonthEvent':
               intent == 'new_month_started' || intent == 'pre_new_month_reminder',
+          if (createdAt != null) 'createdAt': createdAt,
         });
       }
 
@@ -261,6 +273,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'intent': 'general_chat',
         'status': MessageStatus.pending,
         'id': tempId,
+        'createdAt': DateTime.now().toUtc().toIso8601String(),
       });
       _isLoading = true;
     });
@@ -303,6 +316,7 @@ class _ChatScreenState extends State<ChatScreen> {
             'intent': intent,
             'needsConfirmation': needsConfirmation,
             'id': assistantId,
+            'createdAt': DateTime.now().toUtc().toIso8601String(),
           });
           _isLoading = false;
           _isFirstMessage = false;
@@ -516,7 +530,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final msg = _messages[i];
       final docId = msg['id'] as String? ?? '';
 
-      items.add(_buildMessageBubble(msg, time: _fakeTimeForIndex(i)));
+      items.add(_buildMessageBubble(msg, time: _formatMsgTime(msg['createdAt'] as String?)));
 
       // After assistant messages, check if there's a pending card to render.
       if (msg['role'] == 'assistant') {
@@ -1461,10 +1475,12 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // purely visual (no backend logic change)
-  String _fakeTimeForIndex(int i) {
-    final baseMinute = 0 + (i * 2);
-    final minute = (baseMinute % 60).toString().padLeft(2, '0');
-    return "10:$minute AM";
+  String _formatMsgTime(String? createdAt) {
+    if (createdAt == null) return '';
+    final dt = DateTime.tryParse(createdAt)?.toLocal();
+    if (dt == null) return '';
+    final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '$h:$m ${dt.hour >= 12 ? 'PM' : 'AM'}';
   }
 }
