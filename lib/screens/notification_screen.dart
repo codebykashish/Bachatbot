@@ -1,201 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../api_service.dart';
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-IconData _categoryIcon(String? category) {
-  switch (category?.toLowerCase()) {
-    case 'food':
-      return Icons.restaurant_outlined;
-    case 'transport':
-      return Icons.directions_bus_outlined;
-    case 'rent':
-      return Icons.home_outlined;
-    case 'shopping':
-      return Icons.shopping_bag_outlined;
-    case 'health':
-      return Icons.local_hospital_outlined;
-    case 'education':
-      return Icons.school_outlined;
-    case 'bills':
-      return Icons.receipt_long_outlined;
-    case 'entertainment':
-      return Icons.movie_outlined;
-    default:
-      return Icons.category_outlined;
-  }
-}
-
-String _formatAlertTime(String? isoString) {
-  if (isoString == null || isoString.isEmpty) return '';
-  final dt = DateTime.tryParse(isoString)?.toLocal();
-  if (dt == null) return '';
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
-  final yesterday = today.subtract(const Duration(days: 1));
-  final dtDay = DateTime(dt.year, dt.month, dt.day);
-  final timeStr = DateFormat('h:mm a').format(dt);
-  if (dtDay == today) return 'Today, $timeStr';
-  if (dtDay == yesterday) return 'Yesterday, $timeStr';
-  if (today.difference(dtDay).inDays < 7) {
-    return '${DateFormat('EEE').format(dt)}, $timeStr';
-  }
-  return '${DateFormat('MMM d').format(dt)}, $timeStr';
-}
-
-// ── AlertCard ────────────────────────────────────────────────────────────────
-
-class _AlertCard extends StatelessWidget {
-  final Map<String, dynamic> alert;
-
-  const _AlertCard({required this.alert});
-
-  @override
-  Widget build(BuildContext context) {
-    final isRead = alert['isRead'] == true;
-    final rawType = (alert['type'] as String?)?.toLowerCase() ?? 'expense';
-    final category = (alert['category'] as String?) ?? 'Other';
-    final amount = (alert['amount'] as num?)?.toDouble() ?? 0;
-    final note = (alert['message'] as String?) ??
-        (alert['note'] as String?) ??
-        '';
-    final createdAt =
-        ((alert['createdAt'] ?? alert['date']) as Object?)?.toString();
-
-    final isBudget = rawType.contains('budget');
-    final isIncome = rawType == 'income';
-
-    // ── Title ──
-    final String title;
-    if (isBudget) {
-      title = 'Budget Update';
-    } else if (isIncome) {
-      title = 'Income';
-    } else {
-      title = category;
-    }
-
-    // ── Circle icon ──
-    final Widget circleIcon;
-    if (isBudget) {
-      circleIcon = CircleAvatar(
-        backgroundColor: Colors.blue.shade50,
-        child: const Icon(Icons.account_balance_wallet_outlined,
-            color: Colors.blue, size: 20),
-      );
-    } else if (isIncome) {
-      circleIcon = CircleAvatar(
-        backgroundColor: Colors.green.shade50,
-        child: const Icon(Icons.arrow_downward_rounded,
-            color: Colors.green, size: 20),
-      );
-    } else {
-      circleIcon = CircleAvatar(
-        backgroundColor: Colors.red.shade50,
-        child: Icon(_categoryIcon(category),
-            color: Colors.red.shade400, size: 20),
-      );
-    }
-
-    // ── Amount ──
-    final String amountStr;
-    final Color amountColor;
-    if (amount == 0) {
-      amountStr = '';
-      amountColor = Colors.grey;
-    } else if (isIncome) {
-      amountStr = '+Rs ${amount.toInt()}';
-      amountColor = Colors.green.shade700;
-    } else if (isBudget) {
-      amountStr = 'Rs ${amount.toInt()}';
-      amountColor = Colors.blue;
-    } else {
-      amountStr = '-Rs ${amount.toInt()}';
-      amountColor = Colors.red.shade600;
-    }
-
-    return Stack(
-      children: [
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          decoration: BoxDecoration(
-            color: isRead ? Colors.white : Colors.green.shade50,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isRead ? Colors.grey.shade200 : Colors.green.shade200,
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(width: 40, height: 40, child: circleIcon),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey.shade800,
-                        ),
-                      ),
-                      if (note.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          note,
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade500),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                      const SizedBox(height: 4),
-                      Text(
-                        _formatAlertTime(createdAt),
-                        style: TextStyle(
-                            fontSize: 11, color: Colors.grey.shade400),
-                      ),
-                    ],
-                  ),
-                ),
-                if (amountStr.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    amountStr,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: amountColor,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-        if (!isRead)
-          Positioned(
-            top: 8,
-            right: 20,
-            child: Container(
-              width: 8,
-              height: 8,
-              decoration: const BoxDecoration(
-                color: Colors.green,
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
+import '../widgets/shared_widgets.dart';
+import 'category_detail_page.dart';
 
 // ── NotificationScreen ───────────────────────────────────────────────────────
 
@@ -366,35 +172,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
     );
   }
 
-  Widget _choiceChip({
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected ? Colors.green.shade50 : Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected ? Colors.green : Colors.grey.shade300,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: selected ? Colors.green : Colors.grey,
-            fontWeight:
-                selected ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final hasUnread = _alerts.any((a) => a['isRead'] != true);
@@ -447,7 +224,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                     children: _timeFilters.map((f) {
                       return Padding(
                         padding: const EdgeInsets.only(right: 8),
-                        child: _choiceChip(
+                        child: buildChoiceChip(
                           label: f['label']!,
                           selected: _selectedTime == f['value'],
                           onTap: () => _setTime(f['value']!),
@@ -471,7 +248,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                             emoji.isEmpty ? lbl : '$emoji $lbl';
                         return Padding(
                           padding: const EdgeInsets.only(right: 8),
-                          child: _choiceChip(
+                          child: buildChoiceChip(
                             label: chipLabel,
                             selected: _selectedCategory == catVal,
                             onTap: () => _setCategory(catVal),
@@ -532,9 +309,24 @@ class _NotificationScreenState extends State<NotificationScreen> {
                       : ListView.builder(
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           itemCount: _alerts.length,
-                          itemBuilder: (ctx, i) => _AlertCard(
-                            alert: _alerts[i] as Map<String, dynamic>,
-                          ),
+                          itemBuilder: (ctx, i) {
+                            final alert = _alerts[i] as Map<String, dynamic>;
+                            final type = (alert['type'] as String?)?.toLowerCase() ?? '';
+                            final cat = alert['category'] as String?;
+                            return AlertCard(
+                              alert: alert,
+                              onViewCategory: (type == 'expense' && cat != null)
+                                  ? () => Navigator.push(
+                                        ctx,
+                                        MaterialPageRoute(
+                                          builder: (_) => CategoryDetailPage(
+                                            category: cat,
+                                          ),
+                                        ),
+                                      )
+                                  : null,
+                            );
+                          },
                         ),
             ),
           ),

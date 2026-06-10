@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../api_service.dart';
 import '../widgets/report_chart.dart';
+import '../widgets/shared_widgets.dart';
 import 'notification_screen.dart';
 
 class ReportsScreen extends StatefulWidget {
@@ -135,75 +136,6 @@ class ReportsScreenState extends State<ReportsScreen>
     );
   }
 
-  // ── Category insight helpers ─────────────────────────────────────────────
-
-  IconData _insightIcon(String? category) {
-    switch (category?.toLowerCase()) {
-      case 'food':          return Icons.restaurant_outlined;
-      case 'transport':     return Icons.directions_bus_outlined;
-      case 'rent':          return Icons.home_outlined;
-      case 'shopping':      return Icons.shopping_bag_outlined;
-      case 'health':        return Icons.local_hospital_outlined;
-      case 'education':     return Icons.school_outlined;
-      case 'bills':         return Icons.receipt_long_outlined;
-      case 'entertainment': return Icons.movie_outlined;
-      default:              return Icons.category_outlined;
-    }
-  }
-
-  Color _progressColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'low':     return Colors.blue.shade400;
-      case 'warning': return Colors.amber.shade600;
-      case 'high':
-      case 'danger':
-      case 'overspent': return Colors.red.shade500;
-      default:        return Colors.green;
-    }
-  }
-
-  Widget _statusBadge(String status) {
-    final Color bg;
-    final Color fg;
-    final String label;
-    switch (status.toLowerCase()) {
-      case 'low':
-        bg = Colors.blue.shade50; fg = Colors.blue.shade700; label = 'LOW';
-        break;
-      case 'warning':
-        bg = Colors.amber.shade50; fg = Colors.amber.shade800; label = 'WARNING';
-        break;
-      case 'high':
-      case 'danger':
-      case 'overspent':
-        bg = Colors.red.shade50; fg = Colors.red.shade700; label = 'HIGH';
-        break;
-      case 'ok':
-      case 'exact':
-        bg = Colors.green.shade50; fg = Colors.green.shade700; label = 'OK';
-        break;
-      default:
-        bg = Colors.grey.shade100;
-        fg = Colors.grey.shade600;
-        label = status.toUpperCase();
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: fg,
-          letterSpacing: 0.5,
-        ),
-      ),
-    );
-  }
 
   Widget _buildOverallStatusCard() {
     String statusText;
@@ -385,7 +317,7 @@ class ReportsScreenState extends State<ReportsScreen>
                 ? (spent / limit * 100).clamp(0, 999).toInt()
                 : 0;
             final barValue = (pct / 100).clamp(0.0, 1.0);
-            final barColor = _progressColor(status);
+            final barColor = progressColor(status);
 
             return InkWell(
               onTap: () => Navigator.push(
@@ -413,7 +345,7 @@ class ReportsScreenState extends State<ReportsScreen>
                     // Row 1: icon + name + badge + chevron
                     Row(
                       children: [
-                        Icon(_insightIcon(category),
+                        Icon(categoryIcon(category),
                             size: 18, color: Colors.grey.shade600),
                         const SizedBox(width: 8),
                         Text(
@@ -425,7 +357,7 @@ class ReportsScreenState extends State<ReportsScreen>
                           ),
                         ),
                         const Spacer(),
-                        _statusBadge(status),
+                        statusBadge(status),
                         const SizedBox(width: 6),
                         Icon(Icons.chevron_right,
                             size: 16, color: Colors.grey.shade400),

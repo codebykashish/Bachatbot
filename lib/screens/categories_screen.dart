@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api_service.dart';
+import 'category_detail_page.dart';
 import 'notification_screen.dart';
 
 class CategoriesScreen extends StatefulWidget {
@@ -90,124 +91,6 @@ class CategoriesScreenState extends State<CategoriesScreen>
   IconData _catIcon(String name) {
     try { return _catMeta.firstWhere((c) => c['name'] == name)['icon'] as IconData; }
     catch (_) { return Icons.category; }
-  }
-
-  void _showSetBudgetDialog(String category, double currentLimit, double spent) {
-    final controller = TextEditingController(text: currentLimit > 0 ? currentLimit.toInt().toString() : '');
-    String? errorMessage;
-    bool isSaving = false;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: Text('Set Budget – $category'),
-            content: TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'Monthly Limit (Rs)', 
-                prefixIcon: const Icon(Icons.currency_rupee),
-                errorText: errorMessage,
-              ),
-              onChanged: (val) {
-                if (errorMessage != null) {
-                  setDialogState(() {
-                    errorMessage = null;
-                  });
-                }
-              },
-            ),
-            actions: [
-              TextButton(
-                onPressed: isSaving ? null : () => Navigator.pop(ctx), 
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: isSaving
-                    ? null
-                    : () async {
-                        final valStr = controller.text.trim();
-                        final v = int.tryParse(valStr);
-                        if (v == null || v <= 0) {
-                          setDialogState(() {
-                            errorMessage = 'Please enter a valid amount';
-                          });
-                          return;
-                        }
-                        if (v < spent) {
-                          setDialogState(() {
-                            errorMessage = 'Budget cannot be less than current expenses';
-                          });
-                          return;
-                        }
-
-                        setDialogState(() {
-                          isSaving = true;
-                          errorMessage = null;
-                        });
-
-                        final error = await _setBudget(category, v);
-                        if (!ctx.mounted) return;
-
-                        if (error == null) {
-                          Navigator.pop(ctx);
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(
-                              content: Text('$category budget set to Rs $v'), 
-                              backgroundColor: Colors.green,
-                            ),
-                          );
-                        } else {
-                          setDialogState(() {
-                            isSaving = false;
-                            errorMessage = error;
-                          });
-                        }
-                      },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _primary,
-                  disabledBackgroundColor: _primary.withValues(alpha: 0.5),
-                ),
-                child: isSaving
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : const Text('Save', style: TextStyle(color: Colors.white)),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Future<String?> _setBudget(String category, int limit) async {
-    try {
-      final now = DateTime.now();
-      final monthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
-      final res = await ApiService.post('/budgets', {
-        'category': category,
-        'limit': limit,
-        'monthKey': monthKey,
-        'alertThreshold': 80,
-      });
-      if (res['success'] == true) {
-        _fetchBudgets();
-        return null;
-      } else {
-        return res['message'] ?? 'Failed to set budget.';
-      }
-    } catch (e) {
-      return e.toString().replaceAll('Exception: ', '');
-    }
   }
 
   // ── build display list (10 defaults + existing merged) ────────────────────
@@ -429,8 +312,18 @@ class CategoriesScreenState extends State<CategoriesScreen>
     final icon = _catIcon(category);
     final barColor = isOver ? Colors.red : (percent > 0.7 ? Colors.orange : _primary);
 
-    return GestureDetector(
-      onTap: () => _showSetBudgetDialog(category, limit, spent),
+    return InkWell(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CategoryDetailPage(
+            category: category,
+            budgetLimit: limit,
+            budgetSpent: spent,
+          ),
+        ),
+      ).then((_) => _fetchBudgets()),
+      borderRadius: BorderRadius.circular(16),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(

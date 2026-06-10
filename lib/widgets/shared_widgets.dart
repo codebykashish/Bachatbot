@@ -1,0 +1,292 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
+// ── Category icon ─────────────────────────────────────────────────────────────
+
+IconData categoryIcon(String? category) {
+  switch (category?.toLowerCase()) {
+    case 'food':          return Icons.restaurant_outlined;
+    case 'transport':     return Icons.directions_bus_outlined;
+    case 'rent':          return Icons.home_outlined;
+    case 'shopping':      return Icons.shopping_bag_outlined;
+    case 'health':        return Icons.local_hospital_outlined;
+    case 'education':     return Icons.school_outlined;
+    case 'bills':         return Icons.receipt_long_outlined;
+    case 'entertainment': return Icons.movie_outlined;
+    default:              return Icons.category_outlined;
+  }
+}
+
+// ── Alert time formatting ─────────────────────────────────────────────────────
+
+String formatAlertTime(String? isoString) {
+  if (isoString == null || isoString.isEmpty) return '';
+  final dt = DateTime.tryParse(isoString)?.toLocal();
+  if (dt == null) return '';
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final yesterday = today.subtract(const Duration(days: 1));
+  final dtDay = DateTime(dt.year, dt.month, dt.day);
+  final timeStr = DateFormat('h:mm a').format(dt);
+  if (dtDay == today) return 'Today, $timeStr';
+  if (dtDay == yesterday) return 'Yesterday, $timeStr';
+  if (today.difference(dtDay).inDays < 7) {
+    return '${DateFormat('EEE').format(dt)}, $timeStr';
+  }
+  return '${DateFormat('MMM d').format(dt)}, $timeStr';
+}
+
+// ── Budget status helpers ─────────────────────────────────────────────────────
+
+Color progressColor(String status) {
+  switch (status.toLowerCase()) {
+    case 'low':       return Colors.blue.shade400;
+    case 'warning':   return Colors.amber.shade600;
+    case 'high':
+    case 'danger':
+    case 'overspent': return Colors.red.shade500;
+    default:          return Colors.green;
+  }
+}
+
+Widget statusBadge(String status) {
+  final Color bg;
+  final Color fg;
+  final String label;
+  switch (status.toLowerCase()) {
+    case 'low':
+      bg = Colors.blue.shade50; fg = Colors.blue.shade700; label = 'LOW';
+      break;
+    case 'warning':
+      bg = Colors.amber.shade50; fg = Colors.amber.shade800; label = 'WARNING';
+      break;
+    case 'high':
+    case 'danger':
+    case 'overspent':
+      bg = Colors.red.shade50; fg = Colors.red.shade700; label = 'HIGH';
+      break;
+    case 'ok':
+    case 'exact':
+      bg = Colors.green.shade50; fg = Colors.green.shade700; label = 'OK';
+      break;
+    default:
+      bg = Colors.grey.shade100; fg = Colors.grey.shade600;
+      label = status.toUpperCase();
+  }
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: bg,
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(
+        fontSize: 10,
+        fontWeight: FontWeight.w700,
+        color: fg,
+        letterSpacing: 0.5,
+      ),
+    ),
+  );
+}
+
+// ── Choice chip (filter row) ──────────────────────────────────────────────────
+
+Widget buildChoiceChip({
+  required String label,
+  required bool selected,
+  required VoidCallback onTap,
+}) {
+  return GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: selected ? Colors.green.shade50 : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: selected ? Colors.green : Colors.grey.shade300,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          color: selected ? Colors.green : Colors.grey,
+          fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
+    ),
+  );
+}
+
+// ── AlertCard ─────────────────────────────────────────────────────────────────
+// Non-tappable activity card. Pass onViewCategory to show a "View X" link
+// at the bottom-right (expense type only).
+
+class AlertCard extends StatelessWidget {
+  final Map<String, dynamic> alert;
+  final VoidCallback? onViewCategory;
+
+  const AlertCard({super.key, required this.alert, this.onViewCategory});
+
+  @override
+  Widget build(BuildContext context) {
+    final isRead = alert['isRead'] == true;
+    final rawType = (alert['type'] as String?)?.toLowerCase() ?? 'expense';
+    final category = (alert['category'] as String?) ?? 'Other';
+    final amount = (alert['amount'] as num?)?.toDouble() ?? 0;
+    final note = (alert['message'] as String?) ?? (alert['note'] as String?) ?? '';
+    final createdAt = ((alert['createdAt'] ?? alert['date']) as Object?)?.toString();
+
+    final isBudget = rawType.contains('budget');
+    final isIncome = rawType == 'income';
+    final isExpense = !isBudget && !isIncome;
+
+    // ── Title
+    final String title;
+    if (isBudget) {
+      title = 'Budget Update';
+    } else if (isIncome) {
+      title = 'Income';
+    } else {
+      title = category;
+    }
+
+    // ── Circle icon
+    final Widget circleIcon;
+    if (isBudget) {
+      circleIcon = CircleAvatar(
+        backgroundColor: Colors.blue.shade50,
+        child: const Icon(Icons.account_balance_wallet_outlined,
+            color: Colors.blue, size: 20),
+      );
+    } else if (isIncome) {
+      circleIcon = CircleAvatar(
+        backgroundColor: Colors.green.shade50,
+        child: const Icon(Icons.arrow_downward_rounded,
+            color: Colors.green, size: 20),
+      );
+    } else {
+      circleIcon = CircleAvatar(
+        backgroundColor: Colors.red.shade50,
+        child: Icon(categoryIcon(category), color: Colors.red.shade400, size: 20),
+      );
+    }
+
+    // ── Amount
+    final String amountStr;
+    final Color amountColor;
+    if (amount == 0) {
+      amountStr = ''; amountColor = Colors.grey;
+    } else if (isIncome) {
+      amountStr = '+Rs ${amount.toInt()}'; amountColor = Colors.green.shade700;
+    } else if (isBudget) {
+      amountStr = 'Rs ${amount.toInt()}'; amountColor = Colors.blue;
+    } else {
+      amountStr = '-Rs ${amount.toInt()}'; amountColor = Colors.red.shade600;
+    }
+
+    return Stack(
+      children: [
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          decoration: BoxDecoration(
+            color: isRead ? Colors.white : Colors.green.shade50,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isRead ? Colors.grey.shade200 : Colors.green.shade200,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 40, height: 40, child: circleIcon),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey.shade800,
+                            ),
+                          ),
+                          if (note.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              note,
+                              style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                          const SizedBox(height: 4),
+                          Text(
+                            formatAlertTime(createdAt),
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (amountStr.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        amountStr,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: amountColor,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                // "View X" link — only for expense cards when callback is provided
+                if (isExpense && onViewCategory != null)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: onViewCategory,
+                      icon: const Icon(Icons.arrow_forward, size: 14, color: Colors.green),
+                      label: Text(
+                        'View $category',
+                        style: const TextStyle(fontSize: 11, color: Colors.green),
+                      ),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        if (!isRead)
+          Positioned(
+            top: 8,
+            right: 20,
+            child: Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(
+                color: Colors.green,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
