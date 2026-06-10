@@ -30,6 +30,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   List<dynamic> _alerts = [];
   bool _isLoadingAlerts = false;
   bool _isSaving = false;
+  bool _showBudgetWarning = false;
 
   final _amountController = TextEditingController();
   final _noteController = TextEditingController();
@@ -95,6 +96,13 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     if (!_formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
     setState(() => _isSaving = true);
+
+    if (_budgetLimit == 0) {
+      setState(() => _showBudgetWarning = true);
+    } else {
+      setState(() => _showBudgetWarning = false);
+    }
+
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception('Not logged in');
@@ -259,6 +267,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                                         _budgetSpent =
                                             (bd['spent']).toDouble();
                                       }
+                                      _showBudgetWarning = false;
                                     });
                                     Navigator.pop(ctx);
                                     if (mounted) {
@@ -653,6 +662,40 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildBudgetCard(),
+              if (_showBudgetWarning) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber.shade300, width: 1),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline_rounded, size: 16, color: Colors.amber.shade700),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          "Expense saved! Set a budget to track how much "
+                          "you're spending on ${widget.category}.",
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.amber.shade800,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () => setState(() => _showBudgetWarning = false),
+                        child: Icon(Icons.close_rounded, size: 16, color: Colors.amber.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 20),
               _buildAddExpenseSection(),
               const SizedBox(height: 24),
