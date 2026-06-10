@@ -7,10 +7,11 @@ class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
 
   @override
-  State<ReportsScreen> createState() => _ReportsScreenState();
+  State<ReportsScreen> createState() => ReportsScreenState();
 }
 
-class _ReportsScreenState extends State<ReportsScreen> {
+class ReportsScreenState extends State<ReportsScreen>
+    with WidgetsBindingObserver {
   static const Color _primary = Color(0xFF2DBE7F);
 
   bool _isLoading = true;
@@ -31,11 +32,25 @@ class _ReportsScreenState extends State<ReportsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final now = DateTime.now();
     _currentMonth = DateTime(now.year, now.month, 1);
     _selectedMonthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
     _loadReport();
   }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _loadReport();
+  }
+
+  void refresh() => _loadReport();
 
   String _formatMonthKey(DateTime date) {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}';

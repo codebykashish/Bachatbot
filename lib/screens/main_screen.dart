@@ -25,6 +25,7 @@ class _MainScreenState extends State<MainScreen> {
   // Keys so we can call refresh on each tab without re-creating widgets
   final _homeKey = GlobalKey<HomeScreenState>();
   final _categoriesKey = GlobalKey<CategoriesScreenState>();
+  final _reportsKey = GlobalKey<ReportsScreenState>();
 
   // ── Month event banner ──────────────────────────────────────────────────
   MonthEvent? _activeBanner;
@@ -147,7 +148,7 @@ class _MainScreenState extends State<MainScreen> {
             children: [
               HomeScreen(key: _homeKey, firstName: widget.firstName),
               CategoriesScreen(key: _categoriesKey),
-              const ReportsScreen(),
+              ReportsScreen(key: _reportsKey),
               const ProfileScreen(),
             ],
           ),
@@ -186,6 +187,8 @@ class _MainScreenState extends State<MainScreen> {
             _homeKey.currentState?.refresh();
           } else if (i == 1) {
             _categoriesKey.currentState?.refresh();
+          } else if (i == 2) {
+            _reportsKey.currentState?.refresh();
           }
         },
         items: const [

@@ -10,7 +10,8 @@ class CategoriesScreen extends StatefulWidget {
   CategoriesScreenState createState() => CategoriesScreenState();
 }
 
-class CategoriesScreenState extends State<CategoriesScreen> {
+class CategoriesScreenState extends State<CategoriesScreen>
+    with WidgetsBindingObserver {
   static const Color _primary = Color(0xFF2DBE7F);
 
   bool _isLoading = true;
@@ -34,10 +35,22 @@ class CategoriesScreenState extends State<CategoriesScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _fetchBudgets();
   }
 
-  /// Called by MainScreen after chat sends a message
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _fetchBudgets();
+  }
+
+  /// Called by MainScreen when switching to this tab or after chat sends a message
   void refresh() => _fetchBudgets();
 
   Future<void> _fetchBudgets() async {
