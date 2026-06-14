@@ -131,6 +131,8 @@ async def get_current_user(request: Request):
 | 15 | POST | `/transactions/manual` | Manually add expense | ✅ | `users/{uid}/transactions`, `users/{uid}/budgets`, `users/{uid}/alerts` |
 | 16 | POST | `/upload/profile-photo` | Upload photo to Cloudinary | ✅ | Cloudinary (no Firestore write — call PATCH /profile after) |
 | 17 | POST | `/contact` | Contact form submission | ❌ | None (sends email via SMTP) |
+| 18 | GET | `/income` | Get declared income sources | ✅ | `users/{uid}` (income sub-map) |
+| 19 | POST | `/income` | Set/update declared income sources | ✅ | `users/{uid}`, `users/{uid}/alerts` |
 
 ---
 
@@ -1549,6 +1551,7 @@ backend/
 │   ├── alerts.py              # GET /alerts, PATCH /alerts/{id}/read
 │   ├── messages.py            # GET /messages
 │   ├── upload.py              # POST /upload/profile-photo (Cloudinary)
+│   ├── income.py              # GET /income, POST /income (declared income sources)
 │   └── verification.py        # Email verification + POST /contact
 ├── services/
 │   ├── transaction_service.py # Transaction CRUD logic

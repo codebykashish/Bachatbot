@@ -208,6 +208,39 @@ These are the `intent` values the backend processes from Gemini's response:
 
 ---
 
+### Income
+
+| Method | Path      | Auth | Description                                      |
+|--------|-----------|------|--------------------------------------------------|
+| GET    | /income   | JWT  | Get declared income sources (inHand, inBank, onlineBanking, total) |
+| POST   | /income   | JWT  | Set/update income sources; creates alert per changed source |
+
+**POST /income — Request body (all fields optional, partial update supported):**
+```json
+{
+  "inHand": 5000.0,
+  "inBank": 15000.0,
+  "onlineBanking": 3000.0
+}
+```
+
+**GET /income — Response shape:**
+```json
+{
+  "success": true,
+  "data": {
+    "inHand": 5000.0,
+    "inBank": 15000.0,
+    "onlineBanking": 3000.0,
+    "total": 23000.0
+  }
+}
+```
+
+**POST /income — Side effects:** updates `users/{uid}.income.*` via dot-notation; creates one alert per changed source (e.g. "Rs 5000 added to In Hand income." / "In Bank income updated to Rs 15000.").
+
+---
+
 ### Upload
 
 | Method | Path                      | Auth | Description                                      |
@@ -279,7 +312,14 @@ These are the `intent` values the backend processes from Gemini's response:
     │   ├── isCompleted: true
     │   ├── occupation: "student" | "employed" | "business"
     │   ├── housingType: "rent" | "own"
-    │   └── estimatedMonthlySpend: 15000
+    │   ├── estimatedMonthlySpend: 15000
+    │   └── tourCompleted: false  ← set true after first-time tour guide is dismissed
+    │
+    ├── income (map)  ← declared income set during onboarding / income page
+    │   ├── inHand: 5000.0
+    │   ├── inBank: 15000.0
+    │   ├── onlineBanking: 3000.0
+    │   └── updatedAt: timestamp
     │
     ├── preferences (map)
     │   ├── language: "ne" | "en"

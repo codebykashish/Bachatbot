@@ -77,6 +77,18 @@ async def get_profile(
     last_name = data.get("lastName")
     phone_number = data.get("phoneNumber") or data.get("phone")
 
+    # Build income sub-map from user document
+    raw_income = data.get("income", {})
+    in_hand = float(raw_income.get("inHand", 0.0))
+    in_bank = float(raw_income.get("inBank", 0.0))
+    online_banking = float(raw_income.get("onlineBanking", 0.0))
+    income_block = {
+        "inHand": in_hand,
+        "inBank": in_bank,
+        "onlineBanking": online_banking,
+        "total": in_hand + in_bank + online_banking,
+    }
+
     # Build the profile data for Pydantic model block
     profile_block = {
         "uid": uid,
@@ -87,6 +99,7 @@ async def get_profile(
         "photoUrl": data.get("photoUrl"),
         "onboarding": response_data.get("onboarding") or {},
         "preferences": response_data.get("preferences") or {},
+        "income": income_block,
         "createdAt": response_data.get("createdAt"),
         "updatedAt": response_data.get("updatedAt")
     }

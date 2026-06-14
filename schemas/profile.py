@@ -17,6 +17,14 @@ class OnboardingData(BaseModel):
     occupation: Optional[OccupationEnum] = None
     housingType: Optional[HousingTypeEnum] = None
     estimatedMonthlySpend: Optional[float] = None
+    tourCompleted: bool = False
+
+
+class IncomeData(BaseModel):
+    inHand: float = 0.0
+    inBank: float = 0.0
+    onlineBanking: float = 0.0
+    total: float = 0.0
 
 class PreferencesData(BaseModel):
     language: str = "en"
@@ -40,6 +48,7 @@ class UserProfileResponse(BaseModel):
     photoUrl: Optional[str] = None
     onboarding: OnboardingData
     preferences: PreferencesData
+    income: Optional[IncomeData] = None
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
 

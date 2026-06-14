@@ -116,6 +116,7 @@ from routes.alerts import router as alerts_router
 from routes.messages import router as messages_router
 from routes.verification import router as verification_router
 from routes.upload import router as upload_router
+from routes.income import router as income_router
 
 app.include_router(signup_router)
 app.include_router(profile_router)
@@ -128,6 +129,7 @@ app.include_router(alerts_router)
 app.include_router(messages_router)
 app.include_router(verification_router)
 app.include_router(upload_router)
+app.include_router(income_router)
 
 
 # Health check - test if server is running

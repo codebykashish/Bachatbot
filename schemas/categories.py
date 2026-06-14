@@ -8,7 +8,6 @@ class ExpenseCategoryEnum(str, Enum):
     SHOPPING = "Shopping"
     HEALTH = "Health"
     ENTERTAINMENT = "Entertainment"
-    BILLS = "Bills"
     OTHER = "Other"
 
 EXPENSE_CATEGORIES: list[str] = [
@@ -19,7 +18,6 @@ EXPENSE_CATEGORIES: list[str] = [
     "Shopping",
     "Health",
     "Entertainment",
-    "Bills",
     "Other",
 ]
 
