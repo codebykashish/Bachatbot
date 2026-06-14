@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../api_service.dart';
-import 'main_screen.dart';
+import 'onboarding_screen.dart';
 
 class SignupDetailsPage extends StatefulWidget {
   final String email;
@@ -180,7 +180,7 @@ class _SignupDetailsPageState extends State<SignupDetailsPage> {
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(
-          builder: (_) => MainScreen(firstName: firstName),
+          builder: (_) => OnboardingScreen(firstName: firstName),
         ),
         (route) => false,
       );

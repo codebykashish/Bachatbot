@@ -23,6 +23,7 @@ class ReportsScreenState extends State<ReportsScreen>
   double _totalExpense = 0;
   double _totalIncome = 0;
   double _netSavings = 0;
+  double _declaredIncome = 0; // From /income endpoint (declared, not transaction)
   Map<String, double> _categoryBreakdown = {};
   Map<String, dynamic> _categoryInsights = {};
   String _overallStatus = 'ok';
@@ -101,9 +102,12 @@ class ReportsScreenState extends State<ReportsScreen>
 
   Future<void> _loadReport() async {
     try {
-      final res = await ApiService.get(
-        '/monthly-report?monthKey=$_selectedMonthKey&view=$_selectedView',
-      );
+      final futures = await Future.wait([
+        ApiService.get('/monthly-report?monthKey=$_selectedMonthKey&view=$_selectedView'),
+        ApiService.get('/income'),
+      ]);
+      final res = futures[0];
+      final incomeRes = futures[1];
 
       if (!mounted) return;
 
@@ -111,10 +115,16 @@ class ReportsScreenState extends State<ReportsScreen>
         final data = res['data'];
         final report = data?['report'] ?? data;
 
+        double declared = 0;
+        if (incomeRes['success'] == true) {
+          declared = (incomeRes['data']?['total'] ?? 0).toDouble();
+        }
+
         setState(() {
           _totalExpense = (report?['totalExpense'] ?? 0).toDouble();
           _totalIncome = (report?['totalIncome'] ?? 0).toDouble();
           _netSavings = (report?['netSavings'] ?? 0).toDouble();
+          _declaredIncome = declared;
           _categoryBreakdown = _mapToDouble(report?['categoryBreakdown'] ?? {});
           _overallStatus = report?['insights']?['overallStatus'] ?? 'ok';
           _categoryInsights = report?['insights']?['categories'] ?? {};
@@ -272,6 +282,75 @@ class ReportsScreenState extends State<ReportsScreen>
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSavingsCard() {
+    // Use declared income if set, else fall back to transaction income
+    final incomeBase = _declaredIncome > 0 ? _declaredIncome : _totalIncome;
+    final actualSavings = incomeBase - _totalExpense;
+    if (incomeBase <= 0) return const SizedBox.shrink();
+
+    final isPositive = actualSavings >= 0;
+    final pct = incomeBase > 0
+        ? (actualSavings.abs() / incomeBase * 100).clamp(0, 100).toInt()
+        : 0;
+    final color = isPositive ? _primary : Colors.red;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48, height: 48,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              isPositive ? Icons.savings_outlined : Icons.warning_amber_rounded,
+              color: color,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isPositive ? 'You saved this month!' : 'Over budget this month',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: color),
+                ),
+                const SizedBox(height: 4),
+                RichText(
+                  text: TextSpan(
+                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                    children: [
+                      TextSpan(
+                        text: isPositive ? 'Rs ${actualSavings.toInt()}' : '-Rs ${actualSavings.abs().toInt()}',
+                        style: TextStyle(color: color),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isPositive
+                      ? '$pct% of income saved · Rs ${_totalExpense.toInt()} spent'
+                      : 'Exceeded income by $pct%',
+                  style: TextStyle(fontSize: 11, color: color.withValues(alpha: 0.75)),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -533,7 +612,12 @@ class ReportsScreenState extends State<ReportsScreen>
                     // ── Total Spending Card ───────────────────────────────
                     _buildTotalSpendingCard(),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 16),
+
+                    // ── Savings Card (only shown when income is set) ───────
+                    _buildSavingsCard(),
+                    if (_declaredIncome > 0 || _totalIncome > 0)
+                      const SizedBox(height: 16),
 
                     // ── Category Breakdown Chart ──────────────────────────
                     _buildCategoryChart(),

@@ -26,10 +26,6 @@ class CategoriesScreenState extends State<CategoriesScreen>
     {'name': 'Shopping',      'icon': Icons.shopping_bag,      'color': Color(0xFFAB47BC)},
     {'name': 'Health',        'icon': Icons.favorite,          'color': Color(0xFFEF5350)},
     {'name': 'Entertainment', 'icon': Icons.tv,                'color': Color(0xFF8D6E63)},
-    {'name': 'Bills',         'icon': Icons.receipt_long,      'color': Color(0xFF78909C)},
-    // SALARY CATEGORY REMOVED:
-    // Salary category has been excluded from the metadata list to completely remove
-    // its card from all list views, grid alignments, and categories selector UI.
     {'name': 'Other',         'icon': Icons.category,          'color': Color(0xFFFFCA28)},
   ];
 

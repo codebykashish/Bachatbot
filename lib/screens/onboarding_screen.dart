@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api_service.dart';
-import 'home_screen.dart';
+import 'income_onboarding_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   final String firstName;
@@ -13,7 +13,6 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final _formKey = GlobalKey<FormState>();
   final _monthlySpendController = TextEditingController();
-  final _monthlyIncomeController = TextEditingController();
 
   String _occupation = 'student';
   String _housingType = 'rent';
@@ -55,7 +54,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   void dispose() {
     _monthlySpendController.dispose();
-    _monthlyIncomeController.dispose();
     super.dispose();
   }
 
@@ -71,7 +69,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
       await ApiService.patch('/profile', {
         'onboarding': {
-          'isCompleted': true,
+          'isCompleted': false,
           'occupation': _occupation,
           'housingType': _housingType,
           'estimatedMonthlySpend': estimatedSpend,
@@ -80,10 +78,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
       if (!mounted) return;
 
-      Navigator.pushAndRemoveUntil(
+      Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => HomeScreen(firstName: widget.firstName)),
-        (route) => false,
+        MaterialPageRoute(
+          builder: (_) => IncomeOnboardingScreen(firstName: widget.firstName),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -191,22 +190,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     }
                     return null;
                   },
-                ),
-                const SizedBox(height: 16),
-
-                // --- Monthly Income (Optional) ---
-                _sectionLabel('Estimated monthly income (Rs) — optional'),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _monthlyIncomeController,
-                  keyboardType: TextInputType.number,
-                  textInputAction: TextInputAction.done,
-                  decoration: const InputDecoration(
-                    labelText: 'Monthly Income (optional)',
-                    prefixIcon: Icon(Icons.account_balance_wallet_outlined),
-                    hintText: 'e.g. 45000',
-                    helperText: 'This helps BachatBot calculate your savings',
-                  ),
                 ),
                 const SizedBox(height: 36),
 

@@ -10,8 +10,9 @@ import 'reports_screen.dart';
 
 class MainScreen extends StatefulWidget {
   final String firstName;
+  final bool showTour;
 
-  const MainScreen({super.key, required this.firstName});
+  const MainScreen({super.key, required this.firstName, this.showTour = false});
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -146,7 +147,7 @@ class _MainScreenState extends State<MainScreen> {
           IndexedStack(
             index: _currentIndex,
             children: [
-              HomeScreen(key: _homeKey, firstName: widget.firstName),
+              HomeScreen(key: _homeKey, firstName: widget.firstName, showTour: widget.showTour),
               CategoriesScreen(key: _categoriesKey),
               ReportsScreen(key: _reportsKey),
               const ProfileScreen(),
