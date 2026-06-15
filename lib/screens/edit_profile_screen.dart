@@ -27,6 +27,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _lastNameController = TextEditingController(
       text: (widget.profileData['lastName'] as String?) ?? '',
     );
+    // Always re-fetch so the form reflects the latest saved values,
+    // even if the parent passed stale or incomplete profile data.
+    _refreshFromApi();
+  }
+
+  Future<void> _refreshFromApi() async {
+    try {
+      final res = await ApiService.get('/profile');
+      if (!mounted) return;
+      final data = res['data'] as Map<String, dynamic>?;
+      if (data == null) return;
+      final fn = (data['firstName'] as String?) ?? '';
+      final ln = (data['lastName'] as String?) ?? '';
+      if (fn.isNotEmpty) _firstNameController.text = fn;
+      if (ln.isNotEmpty) _lastNameController.text = ln;
+    } catch (_) {}
   }
 
   @override

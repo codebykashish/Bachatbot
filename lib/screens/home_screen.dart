@@ -43,6 +43,9 @@ class HomeScreenState extends State<HomeScreen> {
   double _declaredIncome = 0;
   String _latestActivityText = '';
 
+  // Latest first name fetched from profile — overrides widget.firstName when set
+  String? _profileFirstName;
+
   static const List<Map<String, dynamic>> _catMeta = [
     {'name': 'Food', 'icon': Icons.restaurant, 'color': Color(0xFF4A90E2)},
     {'name': 'Transport', 'icon': Icons.directions_car, 'color': Color(0xFF26A69A)},
@@ -78,7 +81,7 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _fetchAll() async {
     setState(() => _isLoading = true);
     try {
-      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend(), _fetchIncome(), _fetchLatestActivity()]);
+      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend(), _fetchIncome(), _fetchLatestActivity(), _fetchProfileName()]);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -86,7 +89,18 @@ class HomeScreenState extends State<HomeScreen> {
 
   Future<void> _refreshData() async {
     try {
-      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend(), _fetchIncome(), _fetchLatestActivity()]);
+      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend(), _fetchIncome(), _fetchLatestActivity(), _fetchProfileName()]);
+    } catch (_) {}
+  }
+
+  Future<void> _fetchProfileName() async {
+    try {
+      final res = await ApiService.get('/profile');
+      if (!mounted) return;
+      final name = res['data']?['firstName'] as String?;
+      if (name != null && name.trim().isNotEmpty) {
+        setState(() => _profileFirstName = name.trim());
+      }
     } catch (_) {}
   }
 
@@ -183,6 +197,10 @@ class HomeScreenState extends State<HomeScreen> {
   String get _todaySummaryText => (_report?['todaySummaryText'] ?? '').toString();
 
   String get _greetingName {
+    // Fresh API name takes priority so profile edits reflect immediately
+    if (_profileFirstName != null && _profileFirstName!.trim().isNotEmpty) {
+      return _profileFirstName!.trim();
+    }
     if (widget.firstName.trim().isNotEmpty && widget.firstName.trim() != 'User') {
       return widget.firstName.trim();
     }
