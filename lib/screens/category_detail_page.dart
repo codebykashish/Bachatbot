@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../api_service.dart';
 import '../widgets/shared_widgets.dart';
@@ -207,6 +208,10 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                     controller: controller,
                     keyboardType: TextInputType.number,
                     autofocus: true,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(7),
+                    ],
                     decoration: InputDecoration(
                       labelText: 'Monthly Limit (Rs)',
                       prefixText: 'Rs ',
@@ -481,6 +486,10 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                   controller: _amountController,
                   keyboardType: const TextInputType.numberWithOptions(
                       decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    LengthLimitingTextInputFormatter(9),
+                  ],
                   decoration: InputDecoration(
                     labelText: 'Amount (Rs)',
                     prefixText: 'Rs ',
@@ -645,17 +654,20 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F7F9),
       appBar: AppBar(
-        title: Text(
-          widget.category,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        leading: Padding(
-          padding: const EdgeInsets.all(8),
-          child: CircleAvatar(
-            backgroundColor: Colors.green.shade50,
-            child: Icon(categoryIcon(widget.category),
-                color: Colors.green, size: 20),
-          ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 30, height: 30,
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(categoryIcon(widget.category), color: Colors.green, size: 16),
+            ),
+            const SizedBox(width: 10),
+            Text(widget.category, style: const TextStyle(fontWeight: FontWeight.bold)),
+          ],
         ),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,

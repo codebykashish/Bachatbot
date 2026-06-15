@@ -27,6 +27,7 @@ class _MainScreenState extends State<MainScreen> {
   final _homeKey = GlobalKey<HomeScreenState>();
   final _categoriesKey = GlobalKey<CategoriesScreenState>();
   final _reportsKey = GlobalKey<ReportsScreenState>();
+  final _profileKey = GlobalKey<ProfileScreenState>();
 
   // ── Month event banner ──────────────────────────────────────────────────
   MonthEvent? _activeBanner;
@@ -100,6 +101,7 @@ class _MainScreenState extends State<MainScreen> {
     if (sent == true && mounted) {
       _homeKey.currentState?.refresh();
       _categoriesKey.currentState?.refresh();
+      _profileKey.currentState?.refresh();
     }
   }
 
@@ -112,6 +114,12 @@ class _MainScreenState extends State<MainScreen> {
         backgroundColor: Colors.white,
         elevation: 0.5,
         centerTitle: true,
+        leading: _currentIndex > 0
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.black87),
+                onPressed: () => setState(() => _currentIndex = 0),
+              )
+            : null,
         title: Text(
           _appBarTitle,
           style: TextStyle(
@@ -147,10 +155,16 @@ class _MainScreenState extends State<MainScreen> {
           IndexedStack(
             index: _currentIndex,
             children: [
-              HomeScreen(key: _homeKey, firstName: widget.firstName, showTour: widget.showTour),
+              HomeScreen(
+                key: _homeKey,
+                firstName: widget.firstName,
+                showTour: widget.showTour,
+                onSeeAllCategories: () => setState(() => _currentIndex = 1),
+                onViewFullReports: () => setState(() => _currentIndex = 2),
+              ),
               CategoriesScreen(key: _categoriesKey),
               ReportsScreen(key: _reportsKey),
-              const ProfileScreen(),
+              ProfileScreen(key: _profileKey),
             ],
           ),
           // ── Month event in-app banner ─────────────────────────────────
@@ -180,16 +194,14 @@ class _MainScreenState extends State<MainScreen> {
         type: BottomNavigationBarType.fixed,
         onTap: (i) {
           setState(() => _currentIndex = i);
-          // LIVE UPDATES SYNCHRONIZATION:
-          // When switching tabs, we trigger a real-time data refresh on the active screen
-          // to ensure that the monthly bar chart and financial summary cards are always
-          // perfectly in sync with the latest transaction/budget database records.
           if (i == 0) {
             _homeKey.currentState?.refresh();
           } else if (i == 1) {
             _categoriesKey.currentState?.refresh();
           } else if (i == 2) {
             _reportsKey.currentState?.refresh();
+          } else if (i == 3) {
+            _profileKey.currentState?.refresh();
           }
         },
         items: const [

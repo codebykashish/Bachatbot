@@ -21,8 +21,6 @@ class ReportsScreenState extends State<ReportsScreen>
 
   // Report data
   double _totalExpense = 0;
-  double _totalIncome = 0;
-  double _netSavings = 0;
   double _declaredIncome = 0; // From /income endpoint (declared, not transaction)
   Map<String, double> _categoryBreakdown = {};
   Map<String, dynamic> _categoryInsights = {};
@@ -122,8 +120,6 @@ class ReportsScreenState extends State<ReportsScreen>
 
         setState(() {
           _totalExpense = (report?['totalExpense'] ?? 0).toDouble();
-          _totalIncome = (report?['totalIncome'] ?? 0).toDouble();
-          _netSavings = (report?['netSavings'] ?? 0).toDouble();
           _declaredIncome = declared;
           _categoryBreakdown = _mapToDouble(report?['categoryBreakdown'] ?? {});
           _overallStatus = report?['insights']?['overallStatus'] ?? 'ok';
@@ -263,7 +259,7 @@ class ReportsScreenState extends State<ReportsScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Income: Rs ${_totalIncome.toInt()}',
+                      'Income: Rs ${_declaredIncome.toInt()}',
                       style: const TextStyle(
                         fontSize: 12,
                         color: Colors.grey,
@@ -271,86 +267,17 @@ class ReportsScreenState extends State<ReportsScreen>
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Savings: Rs ${_netSavings.toInt()}',
+                      'Savings: Rs ${(_declaredIncome - _totalExpense).toInt()}',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: _netSavings >= 0 ? _primary : Colors.red,
+                        color: (_declaredIncome - _totalExpense) >= 0 ? _primary : Colors.red,
                       ),
                     ),
                   ],
                 ),
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSavingsCard() {
-    // Use declared income if set, else fall back to transaction income
-    final incomeBase = _declaredIncome > 0 ? _declaredIncome : _totalIncome;
-    final actualSavings = incomeBase - _totalExpense;
-    if (incomeBase <= 0) return const SizedBox.shrink();
-
-    final isPositive = actualSavings >= 0;
-    final pct = incomeBase > 0
-        ? (actualSavings.abs() / incomeBase * 100).clamp(0, 100).toInt()
-        : 0;
-    final color = isPositive ? _primary : Colors.red;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48, height: 48,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              isPositive ? Icons.savings_outlined : Icons.warning_amber_rounded,
-              color: color,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  isPositive ? 'You saved this month!' : 'Over budget this month',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: color),
-                ),
-                const SizedBox(height: 4),
-                RichText(
-                  text: TextSpan(
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                    children: [
-                      TextSpan(
-                        text: isPositive ? 'Rs ${actualSavings.toInt()}' : '-Rs ${actualSavings.abs().toInt()}',
-                        style: TextStyle(color: color),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  isPositive
-                      ? '$pct% of income saved · Rs ${_totalExpense.toInt()} spent'
-                      : 'Exceeded income by $pct%',
-                  style: TextStyle(fontSize: 11, color: color.withValues(alpha: 0.75)),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -497,20 +424,6 @@ class ReportsScreenState extends State<ReportsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F7F9),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        centerTitle: true,
-        title: const Text(
-          'Monthly Report',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Colors.black87,
-            fontSize: 20,
-          ),
-        ),
-        iconTheme: const IconThemeData(color: Colors.black87),
-      ),
       body: RefreshIndicator(
         color: _primary,
         onRefresh: _loadReport,
@@ -524,52 +437,6 @@ class ReportsScreenState extends State<ReportsScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── View selector and month navigation ──────────────────
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: Colors.grey.shade200,
-                                width: 1,
-                              ),
-                            ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<String>(
-                                value: _selectedView,
-                                isExpanded: true,
-                                items: const [
-                                  DropdownMenuItem(
-                                    value: 'month',
-                                    child: Text('Monthly View'),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: 'week',
-                                    child: Text('Weekly View'),
-                                  ),
-                                ],
-                                onChanged: (value) {
-                                  if (value != null && value != _selectedView) {
-                                    setState(() {
-                                      _selectedView = value;
-                                      _isLoading = true;
-                                    });
-                                    _loadReport();
-                                  }
-                                },
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 12),
-
                     // ── Month navigation ──────────────────────────────────
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -613,11 +480,6 @@ class ReportsScreenState extends State<ReportsScreen>
                     _buildTotalSpendingCard(),
 
                     const SizedBox(height: 16),
-
-                    // ── Savings Card (only shown when income is set) ───────
-                    _buildSavingsCard(),
-                    if (_declaredIncome > 0 || _totalIncome > 0)
-                      const SizedBox(height: 16),
 
                     // ── Category Breakdown Chart ──────────────────────────
                     _buildCategoryChart(),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../api_service.dart';
 import 'category_budget_onboarding_screen.dart';
 import 'main_screen.dart';
@@ -374,6 +375,10 @@ class _IncomeOnboardingScreenState extends State<IncomeOnboardingScreen> {
         TextField(
           controller: controller,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(7),
+          ],
           onChanged: (_) => setState(() {}),
           decoration: InputDecoration(
             hintText: hint,

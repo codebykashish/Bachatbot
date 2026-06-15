@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../api_service.dart';
 import 'notification_screen.dart';
 
@@ -385,6 +386,10 @@ class _IncomePageState extends State<IncomePage> {
                           controller: ctrl,
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           autofocus: true,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(7),
+                          ],
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                           decoration: InputDecoration(
                             prefixText: 'Rs ',
@@ -473,6 +478,10 @@ class _IncomePageState extends State<IncomePage> {
                 child: TextField(
                   controller: _addAmountCtrl,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(7),
+                  ],
                   decoration: InputDecoration(
                     prefixText: 'Rs  ',
                     hintText: 'Amount',

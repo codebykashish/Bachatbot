@@ -6,6 +6,8 @@ import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import '../api_service.dart';
 import 'edit_profile_screen.dart';
+import 'notification_screen.dart';
+import 'income_page.dart';
 import 'login_screen.dart';
 import 'mock_notification_screen.dart';
 import 'about_us_screen.dart';
@@ -27,6 +29,7 @@ class ProfileScreenState extends State<ProfileScreen> {
   bool _isLoading = true;
   bool _isLoggingOut = false;
   bool _isUploadingPhoto = false;
+  double _declaredIncome = 0.0;
 
   @override
   void initState() {
@@ -34,13 +37,23 @@ class ProfileScreenState extends State<ProfileScreen> {
     loadProfile();
   }
 
+  void refresh() => loadProfile();
+
   Future<void> loadProfile() async {
     setState(() => _isLoading = true);
     try {
-      final res = await ApiService.get('/profile');
+      final results = await Future.wait([
+        ApiService.get('/profile'),
+        ApiService.get('/income'),
+      ]);
+      final profileRes = results[0];
+      final incomeRes = results[1];
       if (mounted) {
         setState(() {
-          _profileData = res['data'] as Map<String, dynamic>?;
+          _profileData = profileRes['data'] as Map<String, dynamic>?;
+          if (incomeRes['success'] == true) {
+            _declaredIncome = (incomeRes['data']?['total'] ?? 0).toDouble();
+          }
           _isLoading = false;
         });
       }
@@ -226,8 +239,9 @@ class ProfileScreenState extends State<ProfileScreen> {
     final lastName = (_profileData?['lastName'] as String?) ?? '';
     final email = (_profileData?['email'] as String?) ?? '';
     final photoUrl = _profileData?['photoUrl'] as String?;
-    final totalIncome =
-        (_profileData?['totalIncome'] as num?)?.toDouble() ?? 0;
+    final totalIncome = _declaredIncome > 0
+        ? _declaredIncome
+        : ((_profileData?['totalIncome'] as num?)?.toDouble() ?? 0);
     final totalExpense =
         (_profileData?['totalExpense'] as num?)?.toDouble() ?? 0;
     final initials =
@@ -311,22 +325,36 @@ class ProfileScreenState extends State<ProfileScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: _statCard(
-                    icon: '💸',
-                    label: 'This Month\nExpense',
-                    value: 'Rs ${totalExpense.toStringAsFixed(0)}',
-                    color: Colors.red.shade50,
-                    valueColor: Colors.red.shade700,
+                  child: GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const NotificationScreen(initialType: 'expense'),
+                      ),
+                    ),
+                    child: _statCard(
+                      icon: '💸',
+                      label: 'This Month\nExpense',
+                      value: 'Rs ${totalExpense.toStringAsFixed(0)}',
+                      color: Colors.red.shade50,
+                      valueColor: Colors.red.shade700,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _statCard(
-                    icon: '💰',
-                    label: 'This Month\nIncome',
-                    value: 'Rs ${totalIncome.toStringAsFixed(0)}',
-                    color: const Color(0xFFEAFAF3),
-                    valueColor: _primary,
+                  child: GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const IncomePage()),
+                    ),
+                    child: _statCard(
+                      icon: '💰',
+                      label: 'My Income',
+                      value: 'Rs ${totalIncome.toStringAsFixed(0)}',
+                      color: const Color(0xFFEAFAF3),
+                      valueColor: _primary,
+                    ),
                   ),
                 ),
               ],

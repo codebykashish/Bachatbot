@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../api_service.dart';
 import 'main_screen.dart';
 
@@ -443,6 +444,10 @@ class _CategoryBudgetOnboardingScreenState
             child: TextField(
               controller: ctrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(7),
+              ],
               onChanged: (_) => setState(() {}),
               textAlign: TextAlign.right,
               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),

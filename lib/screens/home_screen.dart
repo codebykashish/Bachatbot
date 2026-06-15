@@ -13,8 +13,16 @@ import 'income_page.dart';
 class HomeScreen extends StatefulWidget {
   final String firstName;
   final bool showTour;
+  final VoidCallback? onSeeAllCategories;
+  final VoidCallback? onViewFullReports;
 
-  const HomeScreen({super.key, required this.firstName, this.showTour = false});
+  const HomeScreen({
+    super.key,
+    required this.firstName,
+    this.showTour = false,
+    this.onSeeAllCategories,
+    this.onViewFullReports,
+  });
 
   @override
   HomeScreenState createState() => HomeScreenState();
@@ -33,6 +41,7 @@ class HomeScreenState extends State<HomeScreen> {
 
   // Declared income (from /income endpoint)
   double _declaredIncome = 0;
+  String _latestActivityText = '';
 
   static const List<Map<String, dynamic>> _catMeta = [
     {'name': 'Food', 'icon': Icons.restaurant, 'color': Color(0xFF4A90E2)},
@@ -69,7 +78,7 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _fetchAll() async {
     setState(() => _isLoading = true);
     try {
-      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend(), _fetchIncome()]);
+      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend(), _fetchIncome(), _fetchLatestActivity()]);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -77,7 +86,7 @@ class HomeScreenState extends State<HomeScreen> {
 
   Future<void> _refreshData() async {
     try {
-      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend(), _fetchIncome()]);
+      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend(), _fetchIncome(), _fetchLatestActivity()]);
     } catch (_) {}
   }
 
@@ -133,6 +142,21 @@ class HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       debugPrint('[HomeScreen] /income error: $e');
     }
+  }
+
+  Future<void> _fetchLatestActivity() async {
+    try {
+      final res = await ApiService.get('/alerts?limit=1');
+      if (!mounted) return;
+      if (res['success'] == true) {
+        final alerts = res['data']?['alerts'] as List? ?? [];
+        if (alerts.isNotEmpty) {
+          setState(() {
+            _latestActivityText = alerts[0]['message']?.toString() ?? '';
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   Map<String, double> _mapToDouble(dynamic map) {
@@ -191,9 +215,25 @@ class HomeScreenState extends State<HomeScreen> {
   // ── Categories row ────────────────────────────────────────────────────────
 
   Widget _buildCategoriesRow() {
-    final Map<String, dynamic> budgetMap = {
-      for (var b in _budgets) (b['category'] ?? ''): b
-    };
+    final budgetMap = {for (var b in _budgets) (b['category'] ?? ''): b};
+    final filtered = _catMeta.where((m) => budgetMap.containsKey(m['name'])).toList();
+
+    if (filtered.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF6F7F9),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Center(
+          child: Text(
+            'No categories set yet. Go to Categories to add some.',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
 
     return Container(
       height: 148,
@@ -204,10 +244,10 @@ class HomeScreenState extends State<HomeScreen> {
       ),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        itemCount: _catMeta.length,
+        itemCount: filtered.length,
         separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (ctx, i) {
-          final meta = _catMeta[i];
+          final meta = filtered[i];
           final name = meta['name'] as String;
           final budget = budgetMap[name];
           final spent = (budget?['spent'] ?? 0).toDouble();
@@ -219,10 +259,14 @@ class HomeScreenState extends State<HomeScreen> {
             child: InkWell(
               borderRadius: BorderRadius.circular(16),
               onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const CategoriesScreen(showAppBar: true)),
-                );
+                if (widget.onSeeAllCategories != null) {
+                  widget.onSeeAllCategories!();
+                } else {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const CategoriesScreen(showAppBar: true)),
+                  );
+                }
               },
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -272,80 +316,97 @@ class HomeScreenState extends State<HomeScreen> {
 
   Widget _buildSnapshot() {
     String summaryText;
-    if (_todaySummaryText.isNotEmpty) {
+    if (_latestActivityText.isNotEmpty) {
+      summaryText = _latestActivityText;
+    } else if (_todaySummaryText.isNotEmpty) {
       summaryText = _todaySummaryText;
     } else if (_todayTotalExpense > 0 && _todayTopCategory.isNotEmpty) {
       summaryText = 'You spent Rs ${_todayTotalExpense.toInt()} on $_todayTopCategory today.';
     } else if (_todayTotalExpense > 0) {
       summaryText = 'You spent Rs ${_todayTotalExpense.toInt()} today.';
     } else {
-      summaryText = 'No expenses recorded today.';
+      summaryText = 'No activity recorded today.';
     }
 
     final isOnTrack = _totalExpense <= _incomeForCard || _incomeForCard == 0;
 
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const NotificationScreen(initialDateRange: 'today'),
+        ),
       ),
       child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: const BoxDecoration(
-          border: Border(left: BorderSide(color: _primary, width: 6)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44, height: 44,
-              decoration: BoxDecoration(
-                color: _primary.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.shopping_bag_outlined, color: _primary, size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Daily Expense Summary',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    summaryText,
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: isOnTrack ? _primary.withValues(alpha: 0.1) : Colors.red.shade50,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                isOnTrack ? 'ON TRACK' : 'OVER',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: isOnTrack ? _primary : Colors.red,
-                ),
-              ),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
             ),
           ],
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: const BoxDecoration(
+            border: Border(left: BorderSide(color: _primary, width: 6)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(
+                  color: _primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.shopping_bag_outlined, color: _primary, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Latest Activity',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      summaryText,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isOnTrack ? _primary.withValues(alpha: 0.1) : Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      isOnTrack ? 'ON TRACK' : 'OVER',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: isOnTrack ? _primary : Colors.red,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.chevron_right, size: 16, color: Colors.grey.shade400),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -442,10 +503,16 @@ class HomeScreenState extends State<HomeScreen> {
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 TextButton(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const CategoriesScreen(showAppBar: true)),
-                  ),
+                  onPressed: () {
+                    if (widget.onSeeAllCategories != null) {
+                      widget.onSeeAllCategories!();
+                    } else {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const CategoriesScreen(showAppBar: true)),
+                      );
+                    }
+                  },
                   child: const Text('See All', style: TextStyle(color: _primary, fontWeight: FontWeight.bold, fontSize: 13)),
                 ),
               ],
@@ -463,10 +530,16 @@ class HomeScreenState extends State<HomeScreen> {
               children: [
                 const Text('Monthly Report', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 TextButton(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const ReportsScreen()),
-                  ),
+                  onPressed: () {
+                    if (widget.onViewFullReports != null) {
+                      widget.onViewFullReports!();
+                    } else {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ReportsScreen()),
+                      );
+                    }
+                  },
                   child: const Text('View Full', style: TextStyle(color: _primary, fontWeight: FontWeight.bold, fontSize: 13)),
                 ),
               ],
@@ -475,10 +548,16 @@ class HomeScreenState extends State<HomeScreen> {
             showLoading
                 ? const SizedBox(height: 200, child: Center(child: CircularProgressIndicator(color: _primary)))
                 : GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const ReportsScreen()),
-                    ),
+                    onTap: () {
+                        if (widget.onViewFullReports != null) {
+                          widget.onViewFullReports!();
+                        } else {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const ReportsScreen()),
+                          );
+                        }
+                      },
                     child: ReportChart(
                       categoryBreakdown: _categoryBreakdown,
                       isCompact: false,
