@@ -80,6 +80,23 @@ async def add_manual_expense(
                 "percentUsed": percent_used,
             }
             logger.info(f"[MANUAL] budget {body.category} spent→{new_spent} ({percent_used}%)")
+
+            # Rebalance if overspent — purely additive, no other flow changes
+            if new_spent > blimit:
+                try:
+                    from services.budget_service import rebalance_on_overspend
+                    rb = rebalance_on_overspend(
+                        db, uid, body.category, new_spent, blimit, matching[0].id, month_key
+                    )
+                    if rb:
+                        budget_update["limit"] = rb["newLimit"]
+                        budget_update["remaining"] = max(0.0, rb["newLimit"] - new_spent)
+                        budget_update["percentUsed"] = round(
+                            (new_spent / rb["newLimit"]) * 100, 2
+                        ) if rb["newLimit"] > 0 else 0.0
+                        logger.info(f"[MANUAL] [REBALANCE] {body.category} covered Rs {rb['totalCovered']:.0f}")
+                except Exception as rb_err:
+                    logger.warning(f"[MANUAL] [REBALANCE] error (non-fatal): {rb_err}")
     except Exception as e:
         logger.warning(f"[MANUAL] budget update failed: {e}")
 

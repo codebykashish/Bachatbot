@@ -156,6 +156,23 @@ def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_ke
                 "monthKey": month_key,
             }
             print(f"[CHAT] [BUDGET] {category}: spent {old_spent} -> {new_spent} ({percent_used}%)")
+
+            # Rebalance if overspent — purely additive, no other flow changes
+            if new_spent > blimit:
+                try:
+                    from services.budget_service import rebalance_on_overspend
+                    rb = rebalance_on_overspend(
+                        db, uid, category, new_spent, blimit, matching[0].id, month_key
+                    )
+                    if rb:
+                        budget_update["limit"] = rb["newLimit"]
+                        budget_update["remaining"] = max(0.0, rb["newLimit"] - new_spent)
+                        budget_update["percentUsed"] = round(
+                            (new_spent / rb["newLimit"]) * 100, 2
+                        ) if rb["newLimit"] > 0 else 0.0
+                        print(f"[CHAT] [REBALANCE] covered Rs {rb['totalCovered']:.0f} of Rs {rb['overspend']:.0f}")
+                except Exception as _rb_err:
+                    print(f"[CHAT] [REBALANCE] error (non-fatal): {_rb_err}")
         else:
             print(f"[CHAT] [BUDGET] No budget for '{category}' in {month_key}")
 

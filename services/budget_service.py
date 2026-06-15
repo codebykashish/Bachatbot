@@ -41,6 +41,154 @@ from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 logger = logging.getLogger("bachatbot.budget_service")
 
 
+# ── Budget circulation / overspend rebalancing ────────────────────────────────
+
+def rebalance_on_overspend(db, uid, overspent_category, new_spent, old_limit, budget_doc_id, month_key):
+    """
+    Called immediately after budget.spent is incremented and new_spent > old_limit.
+
+    Algorithm:
+      1. Calculate savings = declared_income - sum(all budget limits for this month).
+         Use savings first to extend the overspent category's limit.
+      2. If savings are not enough (or zero), take the remainder from other categories
+         that still have unspent budget, starting from the one with the most remaining.
+      3. Increase the overspent category's limit by however much was covered.
+      4. Decrease donor categories' limits accordingly.
+      5. Create a "budget_rebalanced" alert so the user is notified.
+
+    Nothing else is changed — transactions, spent values, onboarding, other flows
+    are all untouched.
+
+    Returns a dict with details about the rebalance, or None if no rebalancing
+    was needed or possible.
+    """
+    overspend = new_spent - old_limit
+    if overspend <= 0:
+        return None
+
+    # ── Declared income ──────────────────────────────────────────────────────
+    try:
+        income_map = (
+            db.collection("users").document(uid).get().to_dict() or {}
+        ).get("income") or {}
+        declared_income = (
+            float(income_map.get("inHand") or 0)
+            + float(income_map.get("inBank") or 0)
+            + float(income_map.get("onlineBanking") or 0)
+        )
+    except Exception:
+        declared_income = 0.0
+
+    # ── All budgets this month ───────────────────────────────────────────────
+    all_docs = list(
+        db.collection("users").document(uid)
+        .collection("budgets")
+        .where("monthKey", "==", month_key)
+        .stream()
+    )
+    all_budgets = [{"_id": d.id, **d.to_dict()} for d in all_docs]
+
+    total_limits = sum(float(b.get("limit") or 0) for b in all_budgets)
+    savings = max(0.0, declared_income - total_limits) if declared_income > 0 else 0.0
+
+    remaining_gap = overspend
+    transfers = []  # list of {"from": str, "amount": float, "_donor_id": str|None, "_donor_old_limit": float}
+
+    # Step 1: use savings
+    if savings > 0 and remaining_gap > 0:
+        use = min(savings, remaining_gap)
+        transfers.append({"from": "savings", "amount": use, "_donor_id": None, "_donor_old_limit": 0})
+        remaining_gap -= use
+
+    # Step 2: take from other categories, most remaining budget first
+    if remaining_gap > 0:
+        donors = [b for b in all_budgets if b.get("category") != overspent_category]
+        donors.sort(
+            key=lambda b: float(b.get("limit") or 0) - float(b.get("spent") or 0),
+            reverse=True,
+        )
+        for donor in donors:
+            if remaining_gap <= 0:
+                break
+            avail = float(donor.get("limit") or 0) - float(donor.get("spent") or 0)
+            if avail <= 0:
+                continue
+            use = min(avail, remaining_gap)
+            transfers.append({
+                "from": donor.get("category", ""),
+                "amount": use,
+                "_donor_id": donor["_id"],
+                "_donor_old_limit": float(donor.get("limit") or 0),
+            })
+            remaining_gap -= use
+
+    if not transfers:
+        return None  # nothing to pull from
+
+    total_covered = sum(t["amount"] for t in transfers)
+    covered_fully = remaining_gap <= 0
+    new_limit = old_limit + total_covered
+
+    # ── Apply changes to budgets ─────────────────────────────────────────────
+    db.collection("users").document(uid).collection("budgets").document(budget_doc_id).update({
+        "limit": new_limit,
+        "updatedAt": SERVER_TIMESTAMP,
+    })
+    for t in transfers:
+        if t["_donor_id"]:
+            db.collection("users").document(uid).collection("budgets").document(t["_donor_id"]).update({
+                "limit": t["_donor_old_limit"] - t["amount"],
+                "updatedAt": SERVER_TIMESTAMP,
+            })
+
+    # ── Build alert message ──────────────────────────────────────────────────
+    parts = []
+    for t in transfers:
+        label = "savings" if t["from"] == "savings" else t["from"]
+        parts.append(f"Rs {int(t['amount'])} from {label}")
+    sources_desc = " + ".join(parts)
+
+    if covered_fully:
+        msg = (
+            f"⚠️ {overspent_category} budget exceeded by Rs {int(overspend)}! "
+            f"Auto-adjusted: {sources_desc} transferred to cover it."
+        )
+    else:
+        msg = (
+            f"⚠️ {overspent_category} budget exceeded by Rs {int(overspend)}! "
+            f"{sources_desc} transferred — Rs {int(remaining_gap)} still uncovered."
+        )
+
+    # ── Create alert ─────────────────────────────────────────────────────────
+    try:
+        aref = db.collection("users").document(uid).collection("alerts").document()
+        aref.set({
+            "type": "budget_rebalanced",
+            "message": msg,
+            "category": overspent_category,
+            "severity": "high",
+            "isRead": False,
+            "isDeleted": False,
+            "monthKey": month_key,
+            "createdAt": SERVER_TIMESTAMP,
+        })
+        logger.info(
+            f"[REBALANCE] uid={uid} {overspent_category} overspent Rs {overspend:.0f} "
+            f"covered Rs {total_covered:.0f} fully={covered_fully}"
+        )
+    except Exception as e:
+        logger.warning(f"[REBALANCE] alert creation failed: {e}")
+
+    return {
+        "overspend": overspend,
+        "totalCovered": total_covered,
+        "coveredFully": covered_fully,
+        "newLimit": new_limit,
+        "transfers": [{"from": t["from"], "amount": t["amount"]} for t in transfers],
+        "message": msg,
+    }
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _get_previous_month_key(year: int, month: int) -> str:

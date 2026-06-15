@@ -98,6 +98,23 @@ async def create_or_update_budget(
 
         print(f"[BUDGET] Updated existing budget id={doc_ref.id}, kept spent={spent}")
 
+        # Create a single budget_set alert for the update
+        try:
+            alert_msg = f"{body.category} budget updated to Rs {int(body.limit)}."
+            aref = db.collection("users").document(uid).collection("alerts").document()
+            aref.set({
+                "type": "budget_set",
+                "message": alert_msg,
+                "category": body.category,
+                "severity": "low",
+                "isRead": False,
+                "isDeleted": False,
+                "monthKey": month_key,
+                "createdAt": SERVER_TIMESTAMP,
+            })
+        except Exception as _ae:
+            print(f"[BUDGET] alert creation failed (non-fatal): {_ae}")
+
         return {
             "success": True,
             "message": f"Budget for '{body.category}' updated.",
@@ -128,6 +145,23 @@ async def create_or_update_budget(
 
     percent_used = round((actual_spent / body.limit) * 100, 2) if body.limit > 0 else 0.0
     print(f"[BUDGET] Created new budget id={new_ref.id} backfilled spent={actual_spent}")
+
+    # Create a single budget_set alert for the new budget
+    try:
+        alert_msg = f"{body.category} budget Rs {int(body.limit)} set gareko chu."
+        aref = db.collection("users").document(uid).collection("alerts").document()
+        aref.set({
+            "type": "budget_set",
+            "message": alert_msg,
+            "category": body.category,
+            "severity": "low",
+            "isRead": False,
+            "isDeleted": False,
+            "monthKey": month_key,
+            "createdAt": SERVER_TIMESTAMP,
+        })
+    except Exception as _ae:
+        print(f"[BUDGET] alert creation failed (non-fatal): {_ae}")
 
     return {
         "success": True,

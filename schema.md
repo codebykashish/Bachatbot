@@ -162,6 +162,7 @@ These are the `intent` values the backend processes from Gemini's response:
 - `type: "expense"` → message: `"Rs {amount} {category} expense saved."`
 - `type: "income"`  → message: `"Rs {amount} income added."`
 - `type: "budget_set"` → message: `"{category} budget Rs {limit} set gareko chu."`
+- `type: "budget_rebalanced"` → message: `"⚠️ {category} budget exceeded by Rs X! Rs Y from savings + Rs Z from {OtherCat} auto-transferred."` severity: "high". Created when overspend triggers auto-circulation.
 
 ---
 
@@ -405,7 +406,8 @@ These are the `intent` values the backend processes from Gemini's response:
     └── alerts (subcollection)
         └── {alertId}
             ├── type: "expense" | "income" | "budget_set" | "budget_warning" |
-            │         "overspent" | "low_survival_budget" | "monthly_report_ready"
+            │         "overspent" | "low_survival_budget" | "monthly_report_ready" |
+            │         "budget_rebalanced"  ← auto-created when overspend triggers circulation
             ├── category: "Food" (null for income alerts)
             ├── message: "Rs 500 Food expense saved." | "Rs 3000 income added."
             ├── severity: "low" | "medium" | "high"
