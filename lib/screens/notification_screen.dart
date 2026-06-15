@@ -128,6 +128,38 @@ class _NotificationScreenState extends State<NotificationScreen> {
     }
   }
 
+  Future<void> _onAlertTap(Map<String, dynamic> alert) async {
+    // Optimistic mark-as-read in local state
+    if (alert['isRead'] != true) {
+      final id = alert['id'] ?? alert['_id'] ?? '';
+      setState(() => alert['isRead'] = true);
+      NotificationScreen.unreadCount.value =
+          _alerts.where((a) => a['isRead'] != true).length;
+      try {
+        await ApiService.patch('/alerts/$id/read', {});
+      } catch (e) {
+        debugPrint('[NotificationScreen] markRead error: $e');
+      }
+    }
+
+    if (!mounted) return;
+
+    final type = (alert['type'] as String?)?.toLowerCase() ?? '';
+    final cat = alert['category'] as String?;
+
+    // Expense alerts and budget_rebalanced → open category detail
+    // budget_set → open category detail so user can edit
+    // income → no navigation, just marked read
+    if (cat != null && cat.isNotEmpty && type != 'income') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CategoryDetailPage(category: cat),
+        ),
+      );
+    }
+  }
+
   void _setType(String type) {
     if (_selectedType == type) return;
     setState(() {
@@ -312,20 +344,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
                           itemCount: _alerts.length,
                           itemBuilder: (ctx, i) {
                             final alert = _alerts[i] as Map<String, dynamic>;
-                            final type = (alert['type'] as String?)?.toLowerCase() ?? '';
-                            final cat = alert['category'] as String?;
                             return AlertCard(
                               alert: alert,
-                              onViewCategory: (type == 'expense' && cat != null)
-                                  ? () => Navigator.push(
-                                        ctx,
-                                        MaterialPageRoute(
-                                          builder: (_) => CategoryDetailPage(
-                                            category: cat,
-                                          ),
-                                        ),
-                                      )
-                                  : null,
+                              onTap: () => _onAlertTap(alert),
                             );
                           },
                         ),

@@ -122,14 +122,13 @@ Widget buildChoiceChip({
 }
 
 // ── AlertCard ─────────────────────────────────────────────────────────────────
-// Non-tappable activity card. Pass onViewCategory to show a "View X" link
-// at the bottom-right (expense type only).
+// Tappable activity card. Pass onTap to handle tap (mark read, navigate, etc.).
 
 class AlertCard extends StatelessWidget {
   final Map<String, dynamic> alert;
-  final VoidCallback? onViewCategory;
+  final VoidCallback? onTap;
 
-  const AlertCard({super.key, required this.alert, this.onViewCategory});
+  const AlertCard({super.key, required this.alert, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -142,7 +141,6 @@ class AlertCard extends StatelessWidget {
 
     final isBudget = rawType.contains('budget');
     final isIncome = rawType == 'income';
-    final isExpense = !isBudget && !isIncome;
 
     // ── Title
     final String title;
@@ -188,7 +186,10 @@ class AlertCard extends StatelessWidget {
       amountStr = '-Rs ${amount.toInt()}'; amountColor = Colors.red.shade600;
     }
 
-    return Stack(
+    // Budget rebalanced messages are longer — give them 3 lines
+    final int msgMaxLines = rawType == 'budget_rebalanced' ? 3 : 2;
+
+    final card = Stack(
       children: [
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -201,74 +202,51 @@ class AlertCard extends StatelessWidget {
           ),
           child: Padding(
             padding: const EdgeInsets.all(14),
-            child: Column(
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(width: 40, height: 40, child: circleIcon),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey.shade800,
-                            ),
-                          ),
-                          if (note.isNotEmpty) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              note,
-                              style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                          const SizedBox(height: 4),
-                          Text(
-                            formatAlertTime(createdAt),
-                            style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (amountStr.isNotEmpty) ...[
-                      const SizedBox(width: 8),
+                SizedBox(width: 40, height: 40, child: circleIcon),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        amountStr,
+                        title,
                         style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: amountColor,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade800,
                         ),
                       ),
+                      if (note.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          note,
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                          maxLines: msgMaxLines,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      const SizedBox(height: 4),
+                      Text(
+                        formatAlertTime(createdAt),
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+                      ),
                     ],
-                  ],
+                  ),
                 ),
-                // "View X" link — only for expense cards when callback is provided
-                if (isExpense && onViewCategory != null)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: onViewCategory,
-                      icon: const Icon(Icons.arrow_forward, size: 14, color: Colors.green),
-                      label: Text(
-                        'View $category',
-                        style: const TextStyle(fontSize: 11, color: Colors.green),
-                      ),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
+                if (amountStr.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    amountStr,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: amountColor,
                     ),
                   ),
+                ],
               ],
             ),
           ),
@@ -287,6 +265,13 @@ class AlertCard extends StatelessWidget {
             ),
           ),
       ],
+    );
+
+    if (onTap == null) return card;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: card,
     );
   }
 }

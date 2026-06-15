@@ -33,6 +33,9 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   bool _isSaving = false;
   bool _showBudgetError = false;
 
+  double _declaredIncome = 0.0;
+  double _totalAllocated = 0.0;
+
   final _amountController = TextEditingController();
   final _noteController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
@@ -50,6 +53,32 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     _budgetLimit = widget.budgetLimit;
     _budgetSpent = widget.budgetSpent;
     _fetchAlerts();
+    _fetchBudgetMeta();
+  }
+
+  Future<void> _fetchBudgetMeta() async {
+    try {
+      final results = await Future.wait([
+        ApiService.get('/income'),
+        ApiService.get('/budgets'),
+      ]);
+      if (!mounted) return;
+      final incomeData = results[0];
+      final budgetsData = results[1];
+      if (incomeData['success'] == true) {
+        final d = incomeData['data'] as Map<String, dynamic>? ?? {};
+        final income = (d['total'] ?? 0).toDouble();
+        final budgets = (budgetsData['data']?['budgets'] as List<dynamic>?) ?? [];
+        double totalAllocated = 0;
+        for (final b in budgets) {
+          totalAllocated += (b['limit'] ?? 0).toDouble();
+        }
+        setState(() {
+          _declaredIncome = income;
+          _totalAllocated = totalAllocated;
+        });
+      }
+    } catch (_) {}
   }
 
   @override
@@ -159,11 +188,25 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     }
   }
 
-  void _showBudgetBottomSheet() {
+  Future<void> _showBudgetBottomSheet() async {
+    // If income data hasn't loaded yet, wait for it now so the hint is always visible
+    if (_declaredIncome == 0) {
+      await _fetchBudgetMeta();
+    }
+    if (!mounted) return;
+
     final controller = TextEditingController(
       text: _budgetLimit > 0 ? _budgetLimit.toInt().toString() : '',
     );
     final sheetFormKey = GlobalKey<FormState>();
+    // When editing, the current category's budget is freed up → add it back to available
+    final available = _declaredIncome > 0
+        ? (_declaredIncome - _totalAllocated + _budgetLimit).clamp(0.0, double.infinity)
+        : double.infinity;
+
+    // Declare outside StatefulBuilder so they survive rebuilds
+    bool isSaving = false;
+    String? inlineError;
 
     showModalBottomSheet(
       context: context,
@@ -180,7 +223,6 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
         ),
         child: StatefulBuilder(
           builder: (_, setSheet) {
-            bool isSaving = false;
             return Form(
               key: sheetFormKey,
               child: Column(
@@ -199,11 +241,34 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Set Budget — ${widget.category}',
+                    '${_budgetLimit > 0 ? 'Edit' : 'Set'} Budget — ${widget.category}',
                     style: const TextStyle(
                         fontSize: 16, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 16),
+                  if (available != double.infinity) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.account_balance_wallet_outlined,
+                          size: 14,
+                          color: available > 0 ? _primary : Colors.orange,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          available > 0
+                              ? 'Rs ${available.toInt()} unallocated'
+                              : 'No unallocated income remaining',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: available > 0 ? _primary : Colors.orange,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 12),
                   TextFormField(
                     controller: controller,
                     keyboardType: TextInputType.number,
@@ -212,6 +277,14 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                       FilteringTextInputFormatter.digitsOnly,
                       LengthLimitingTextInputFormatter(7),
                     ],
+                    onChanged: (val) {
+                      final v = double.tryParse(val);
+                      if (available != double.infinity && v != null && v > available) {
+                        setSheet(() => inlineError = 'Exceeds available Rs ${available.toInt()}');
+                      } else {
+                        setSheet(() => inlineError = null);
+                      }
+                    },
                     decoration: InputDecoration(
                       labelText: 'Monthly Limit (Rs)',
                       prefixText: 'Rs ',
@@ -225,6 +298,8 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                       ),
                       filled: true,
                       fillColor: Colors.grey.shade50,
+                      errorText: inlineError,
+                      errorStyle: const TextStyle(fontSize: 11),
                     ),
                     validator: (v) {
                       final val = double.tryParse(v?.trim() ?? '');
@@ -239,7 +314,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                     builder: (_, setSaveBtn) => SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: isSaving
+                        onPressed: isSaving || inlineError != null
                             ? null
                             : () async {
                                 if (!sheetFormKey.currentState!.validate()) {
@@ -276,6 +351,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                                       _showBudgetError = false;
                                     });
                                     Navigator.pop(ctx);
+                                    _fetchBudgetMeta();
                                     if (mounted) {
                                       ScaffoldMessenger.of(context)
                                           .showSnackBar(SnackBar(
