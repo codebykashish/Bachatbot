@@ -470,12 +470,26 @@ async def get_current_user(request: Request):
 5. Based on intent:
 
    IF intent == "expense_log" or "income_log":
-     → Create transaction in users/{uid}/transactions
+     → If intent == "expense_log" AND no budget exists for category+monthKey:
+         · Save transaction with status = "pending"
+         · Fetch user's declared remaining income (from users/{uid}.income)
+         · Store pendingAction{waitingForBudget: true, waitingCategory: category, pendingTxIds: [txId]}
+         · Reply asks user to set a budget first, shows remaining income
+         · Return needsConfirmation: true, intent: "need_budget_before_expense" — STOP
+     → Otherwise: Create confirmed transaction in users/{uid}/transactions
      → If source == "chat": status = "confirmed"
      → If source == "notification": status = "pending"
      → Update budget spent amount (if budget exists for that category)
      → Check budget threshold → create alert if needed
      → Save notification document (if source == "notification")
+
+   IF intent == "set_budget" AND pendingAction.waitingForBudget == true
+                             AND pendingAction.waitingCategory == category:
+     → Process budget creation normally (see budget_set flow)
+     → Auto-confirm all pendingTxIds: update transactions to "confirmed",
+       increment budget.spent, check alert threshold, create alerts
+     → Delete pendingAction document
+     → Include confirmation of the original expense in reply
 
    IF intent == "budget_set":
      → Create/update budget in users/{uid}/budgets
@@ -631,6 +645,31 @@ async def get_current_user(request: Request):
   }
 }
 ```
+
+**Expense Intercepted — No Budget Set (need_budget_before_expense):**
+```json
+{
+  "success": true,
+  "data": {
+    "reply": "Food ko budget set chhaina. Pehile Food ko lagi budget set gara — tapaiko Rs 32000 income baki cha. Aba kati rakhne Food ma?",
+    "intent": "need_budget_before_expense",
+    "needsConfirmation": true,
+    "transaction": {
+      "id": "txn_pending_abc",
+      "amount": 200,
+      "category": "Food",
+      "type": "expense",
+      "status": "pending",
+      "source": "chat",
+      "description": "momo",
+      "monthKey": "2026-06"
+    },
+    "budgetUpdate": null,
+    "alerts": []
+  }
+}
+```
+> After the user replies with a budget amount, `set_budget` is processed and the pending expense is auto-confirmed. The reply acknowledges both the budget set and the original expense saved.
 
 **Budget Set via Chat:**
 ```json

@@ -238,3 +238,50 @@ async def confirm_monthly_budget(
         "success": True,
         "message": f"Budgets for {month_key} confirmed."
     }
+
+
+# ─── DELETE /budgets/{category} ──────────────────────────────────────────────
+
+@router.delete("/budgets/{category}")
+async def delete_budget(
+    category: str,
+    monthKey: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete a budget for a category. Only allowed if spent == 0 for the month."""
+    uid = current_user["uid"]
+    db = get_firestore()
+    month_key = monthKey or get_current_month_key()
+
+    docs = list(
+        db.collection("users").document(uid).collection("budgets")
+        .where("category", "==", category)
+        .where("monthKey", "==", month_key)
+        .limit(1)
+        .stream()
+    )
+
+    if not docs:
+        raise HTTPException(
+            status_code=404,
+            detail={"success": False, "error": {"code": "NOT_FOUND", "message": f"No budget found for '{category}'."}},
+        )
+
+    actual_spent = sum_category_expense(db, uid, category, month_key)
+
+    if actual_spent > 0:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "HAS_TRACKED_EXPENSES",
+                    "message": f"Cannot remove {category}: Rs {int(actual_spent)} has been tracked. Clear expenses first.",
+                    "spent": actual_spent,
+                },
+            },
+        )
+
+    docs[0].reference.delete()
+    print(f"[BUDGET] Deleted budget uid={uid} category={category} monthKey={month_key}")
+    return {"success": True, "message": f"Budget for '{category}' removed."}

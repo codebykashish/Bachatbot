@@ -133,6 +133,7 @@ These are the `intent` values the backend processes from Gemini's response:
 | set_notification_category | null            | Assign category to a pending notification tx      |
 | general_chat              | null            | Conversational reply, no DB action                |
 | greeting                  | null            | Greeting response                                 |
+| need_budget_before_expense | null           | Expense intercepted — no budget for that category. Saved as pending; user must set budget first. `needsConfirmation: true` in response. |
 
 **Income rule:** For any income message, Gemini MUST emit `income_log` with `type: "income"`.
 `expense_log` is never used for income. The alert created for income reads:
@@ -384,6 +385,8 @@ These are the `intent` values the backend processes from Gemini's response:
     │       ├── pendingTxIds: ["txn_abc"]
     │       ├── source: "chat" | "notification"
     │       ├── monthKey: "2026-04"
+    │       ├── waitingForBudget: true   ← set when expense was logged but no budget exists for that category
+    │       ├── waitingCategory: "Food"  ← the category that needs a budget before confirming
     │       └── createdAt: timestamp
     │
     ├── monthlyReports (subcollection)

@@ -161,10 +161,14 @@ def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_ke
 
     # ── Alert ────────────────────────────────────────────────────────────
     alert_out = None
+    desc = description.strip() if description else ""
     try:
         if tx_type == "expense":
-            cat_label = f"{category} " if category else ""
-            msg = f"Rs {int(amount)} {cat_label}expense saved."
+            if desc and desc.lower() not in ((category or "").lower(), "expense", ""):
+                msg = f"Rs {int(amount)} {desc} ({category or 'expense'}) saved."
+            else:
+                cat_label = f"{category} " if category else ""
+                msg = f"Rs {int(amount)} {cat_label}expense saved."
             if budget_update and percent_used >= 80:
                 msg = f"{category} Rs {int(amount)} saved, {int(percent_used)}% budget used!"
             alert_type = "expense"
@@ -196,9 +200,12 @@ def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_ke
     except Exception as e:
         print(f"[CHAT] [ALERT] FAILED: {e}")
 
-    # Reply part
+    # Reply part — include item/note if provided
     cat_display = category or "Income"
-    reply_part = f"Rs {int(amount)} {cat_display}"
+    if desc and desc.lower() not in (cat_display.lower(), "expense", "income", ""):
+        reply_part = f"Rs {int(amount)} {desc} ({cat_display})"
+    else:
+        reply_part = f"Rs {int(amount)} {cat_display}"
 
     return transaction_out, budget_update, alert_out, reply_part
 
@@ -350,13 +357,13 @@ async def chat(
         "createdAt": SERVER_TIMESTAMP,
     })
 
-    # ── Fetch Chat History (Sliding Window: last 14 messages) ───────────
+    # ── Fetch Chat History (Sliding Window: last 20 messages) ───────────
     history = []
     try:
         hist_docs = list(
             messages_ref
             .order_by("createdAt", direction="DESCENDING")
-            .limit(14)
+            .limit(20)
             .stream()
         )
         hist_docs.reverse() # Chronological order
@@ -605,32 +612,60 @@ async def chat(
             }
             
         elif is_denial(text_lower):
-            # DISCARD: mark pending transactions as cancelled
             pending_tx_ids = pending.get("pendingTxIds", [])
-            for tx_id in pending_tx_ids:
-                try:
-                    db.collection("users").document(uid).collection("transactions").document(tx_id).update({
-                        "status": "cancelled",
-                        "updatedAt": SERVER_TIMESTAMP
-                    })
-                    print(f"[CHAT][CANCEL] Marked tx {tx_id} as cancelled")
-                except Exception as ce:
-                    print(f"[CHAT][CANCEL] Error cancelling tx {tx_id}: {ce}")
 
-            pending_ref.delete()
-            reply = "Thik cha, cancel gareko chu."
-            
+            if pending.get("waitingForBudget"):
+                # User said skip/no to setting budget → confirm the expense WITHOUT a budget
+                exp_month_key = pending.get("monthKey", get_current_month_key())
+                waiting_cat = pending.get("waitingCategory", "")
+                confirmed_tx = None
+                for tx_id in pending_tx_ids:
+                    try:
+                        tx_ref_tmp = db.collection("users").document(uid).collection("transactions").document(tx_id)
+                        tx_doc_tmp = tx_ref_tmp.get()
+                        if tx_doc_tmp.exists and tx_doc_tmp.to_dict().get("status") == "pending":
+                            tx_ref_tmp.update({"status": "confirmed", "updatedAt": SERVER_TIMESTAMP})
+                            confirmed_tx = {
+                                "id": tx_id,
+                                "amount": tx_doc_tmp.to_dict().get("amount", 0),
+                                "category": waiting_cat,
+                                "type": "expense", "status": "confirmed",
+                                "monthKey": exp_month_key,
+                            }
+                    except Exception as ce:
+                        print(f"[CHAT][SKIP-BUDGET] Error confirming tx {tx_id}: {ce}")
+                pending_ref.delete()
+                reply = (
+                    f"Thik cha, {waiting_cat} ko budget ahile set gareina. "
+                    f"Expense ta save bhayeko cha ✅\n"
+                    f"Category page bata kahile pani budget set garna saknuhuncha."
+                )
+            else:
+                # DISCARD: mark pending transactions as cancelled
+                for tx_id in pending_tx_ids:
+                    try:
+                        db.collection("users").document(uid).collection("transactions").document(tx_id).update({
+                            "status": "cancelled",
+                            "updatedAt": SERVER_TIMESTAMP
+                        })
+                        print(f"[CHAT][CANCEL] Marked tx {tx_id} as cancelled")
+                    except Exception as ce:
+                        print(f"[CHAT][CANCEL] Error cancelling tx {tx_id}: {ce}")
+                pending_ref.delete()
+                reply = "Thik cha, cancel gareko chu."
+
             # Save assistant message
             assistant_msg_ref = messages_ref.document()
             assistant_msg_ref.set({
-                "role": "assistant",
+                "role": "model",
+                "parts": [{"text": reply}],
                 "content": reply,
                 "intent": "confirm_expense",
                 "extractedData": None,
                 "relatedTransactionId": None,
                 "createdAt": SERVER_TIMESTAMP,
             })
-            
+
             return {
                 "success": True,
                 "data": {
@@ -642,11 +677,14 @@ async def chat(
                     "alerts": [],
                 },
             }
-            
+
         else:
-            # User ignored the confirmation and sent a new message -> discard pending action and continue
-            pending_ref.delete()
-            print("[CHAT] Pending action discarded due to new unrelated user message.")
+            # User sent a new message — preserve pendingAction if waiting for budget set
+            if pending.get("waitingForBudget"):
+                print("[CHAT] Keeping pending action (waitingForBudget=True) for budget set handling.")
+            else:
+                pending_ref.delete()
+                print("[CHAT] Pending action discarded due to new unrelated user message.")
 
     # ════════════════════════════════════════════════════════════════════
     # NOTIFICATION BRANCH — source == "notification"
@@ -959,7 +997,109 @@ async def chat(
                 action["category"] = undone_category
 
             if action.get("category"):
-                # IMMEDIATE LOG (No confirmation if category is clear)
+                category_val = action["category"]
+                amt_val = int(float(action["amount"]))
+
+                # ── No-budget check for expenses ─────────────────────────
+                if intent == "expense_log":
+                    bud_check = list(
+                        db.collection("users").document(uid).collection("budgets")
+                        .where("category", "==", category_val)
+                        .where("monthKey", "==", month_key)
+                        .limit(1)
+                        .stream()
+                    )
+                    if not bud_check:
+                        # No budget for this category → save as pending, ask user to set budget
+                        p_tx_ref = (
+                            db.collection("users").document(uid)
+                            .collection("transactions").document()
+                        )
+                        p_tx_ref.set({
+                            "amount": float(action["amount"]),
+                            "category": category_val,
+                            "type": "expense",
+                            "status": "pending",
+                            "source": source,
+                            "description": action.get("description", user_message),
+                            "monthKey": month_key,
+                            "isDeleted": False,
+                            "deletedAt": None,
+                            "originalMessageId": None,
+                            "createdAt": SERVER_TIMESTAMP,
+                            "updatedAt": SERVER_TIMESTAMP,
+                        })
+
+                        # Fetch income remaining for helpful context
+                        try:
+                            u_doc = db.collection("users").document(uid).get()
+                            income_map = (u_doc.to_dict() or {}).get("income", {})
+                            total_income = sum(float(income_map.get(k, 0) or 0) for k in ("inHand", "inBank", "onlineBanking"))
+                            all_bud = list(db.collection("users").document(uid).collection("budgets").where("monthKey", "==", month_key).stream())
+                            total_alloc = sum(float((b.to_dict() or {}).get("limit", 0) or 0) for b in all_bud)
+                            remaining_income = max(0.0, total_income - total_alloc)
+                        except Exception:
+                            total_income = 0.0
+                            remaining_income = 0.0
+
+                        if total_income > 0:
+                            no_bud_reply = (
+                                f"{category_val} ko budget set gareko chaina yo mahina. "
+                                f"Rs {int(remaining_income)} income remaining cha. "
+                                f"Kati budget set garnu huncha {category_val} ko lagi? "
+                                f"(e.g. '{category_val} budget 5000 set gara')\n"
+                                f"Budget set garepaxi Rs {amt_val} {category_val} ma track gardinchu."
+                            )
+                        else:
+                            no_bud_reply = (
+                                f"{category_val} ko budget set gareko chaina. "
+                                f"Pahile '{category_val} budget 5000 set gara' likh, "
+                                f"ani Rs {amt_val} {category_val} ma track gardinchu."
+                            )
+
+                        # Store pendingAction with waitingForBudget flag
+                        pending_ref_nb = db.collection("users").document(uid).collection("pendingAction").document("current")
+                        pending_ref_nb.set({
+                            "actions": [{"intent": "expense_log", "amount": float(action["amount"]), "category": category_val, "type": "expense"}],
+                            "pendingTxIds": [p_tx_ref.id],
+                            "source": source,
+                            "monthKey": month_key,
+                            "waitingForBudget": True,
+                            "waitingCategory": category_val,
+                            "createdAt": SERVER_TIMESTAMP,
+                        })
+
+                        # Save assistant message
+                        assistant_msg_ref = messages_ref.document()
+                        assistant_msg_ref.set({
+                            "role": "model",
+                            "parts": [{"text": no_bud_reply}],
+                            "content": no_bud_reply,
+                            "intent": "need_budget_before_expense",
+                            "extractedData": [{"intent": "expense_log", "amount": float(action["amount"]), "category": category_val}],
+                            "relatedTransactionId": p_tx_ref.id,
+                            "status": "delivered",
+                            "createdAt": SERVER_TIMESTAMP,
+                        })
+                        try:
+                            user_msg_ref.update({"status": "delivered"})
+                        except Exception:
+                            pass
+
+                        print(f"[CHAT] No budget for {category_val} — going pending. tx={p_tx_ref.id}")
+                        return {
+                            "success": True,
+                            "data": {
+                                "reply": no_bud_reply,
+                                "intent": "need_budget_before_expense",
+                                "needsConfirmation": True,
+                                "transaction": None,
+                                "budgetUpdate": None,
+                                "alerts": [],
+                            },
+                        }
+
+                # Budget exists (or it's income_log) → immediate log
                 txn, bud, alt, rp = _handle_expense_or_income(
                     db, uid, action, source, month_key, idempotency_key
                 )
@@ -1338,6 +1478,97 @@ async def chat(
         # ── GENERAL CHAT / GREETING ──────────────────────────────────────
         else:
             print(f"[CHAT] General/greeting — no DB writes")
+
+    # ── After action loop: confirm any pending expense waiting for budget ──
+    # If user just set a budget for a category that had a pending expense,
+    # auto-confirm that expense now.
+    set_budget_categories = [
+        a.get("category") for a in actions
+        if a.get("intent") == "set_budget" and a.get("category")
+    ]
+    if set_budget_categories:
+        try:
+            wb_doc = db.collection("users").document(uid).collection("pendingAction").document("current").get()
+            if wb_doc.exists:
+                wb = wb_doc.to_dict()
+                if wb.get("waitingForBudget") and wb.get("waitingCategory") in set_budget_categories:
+                    waiting_cat = wb["waitingCategory"]
+                    wb_month_key = wb.get("monthKey", get_current_month_key())
+                    wb_tx_ids = wb.get("pendingTxIds", [])
+                    confirmed_labels = []
+                    for tx_id in wb_tx_ids:
+                        try:
+                            tx_ref_wb = db.collection("users").document(uid).collection("transactions").document(tx_id)
+                            tx_doc_wb = tx_ref_wb.get()
+                            if tx_doc_wb.exists and tx_doc_wb.to_dict().get("status") == "pending":
+                                tx_d = tx_doc_wb.to_dict()
+                                exp_amt = float(tx_d.get("amount", 0))
+                                exp_cat = tx_d.get("category", waiting_cat)
+                                exp_desc = tx_d.get("description", "")
+
+                                tx_ref_wb.update({"status": "confirmed", "updatedAt": SERVER_TIMESTAMP})
+
+                                # Increment budget spent
+                                bud_wb = list(
+                                    db.collection("users").document(uid).collection("budgets")
+                                    .where("category", "==", exp_cat)
+                                    .where("monthKey", "==", wb_month_key)
+                                    .limit(1).stream()
+                                )
+                                if bud_wb:
+                                    bud_wb[0].reference.update({"spent": Increment(exp_amt), "updatedAt": SERVER_TIMESTAMP})
+                                    upd_bud = bud_wb[0].reference.get().to_dict()
+                                    new_s = upd_bud.get("spent", 0)
+                                    blim = upd_bud.get("limit", 0)
+                                    pct_wb = round((new_s / blim * 100), 2) if blim > 0 else 0
+                                    last_budget_update = {
+                                        "id": bud_wb[0].id, "category": exp_cat,
+                                        "limit": blim, "spent": new_s,
+                                        "remaining": max(0, blim - new_s),
+                                        "percentUsed": pct_wb, "monthKey": wb_month_key,
+                                    }
+
+                                # Alert
+                                try:
+                                    a_desc = exp_desc.strip() if exp_desc else ""
+                                    if a_desc and a_desc.lower() not in (exp_cat.lower(), ""):
+                                        a_msg = f"Rs {int(exp_amt)} {a_desc} ({exp_cat}) saved."
+                                    else:
+                                        a_msg = f"Rs {int(exp_amt)} {exp_cat} expense saved."
+                                    a_ref = db.collection("users").document(uid).collection("alerts").document()
+                                    a_ref.set({
+                                        "type": "expense", "message": a_msg, "category": exp_cat,
+                                        "severity": "low", "isRead": False, "isDeleted": False,
+                                        "monthKey": wb_month_key, "relatedTransactionId": tx_id,
+                                        "createdAt": SERVER_TIMESTAMP,
+                                    })
+                                    alerts_created.append({
+                                        "id": a_ref.id, "type": "expense", "message": a_msg,
+                                        "category": exp_cat, "severity": "low",
+                                        "isRead": False, "monthKey": wb_month_key,
+                                        "relatedTransactionId": tx_id,
+                                    })
+                                except Exception:
+                                    pass
+
+                                if a_desc and a_desc.lower() not in (exp_cat.lower(), ""):
+                                    confirmed_labels.append(f"Rs {int(exp_amt)} {a_desc} ({exp_cat})")
+                                else:
+                                    confirmed_labels.append(f"Rs {int(exp_amt)} {exp_cat}")
+                                last_transaction = {
+                                    "id": tx_id, "amount": exp_amt, "category": exp_cat,
+                                    "type": "expense", "status": "confirmed", "monthKey": wb_month_key,
+                                }
+                        except Exception as ce:
+                            print(f"[CHAT][WAIT-BUDGET] confirm tx {tx_id} failed: {ce}")
+
+                    db.collection("users").document(uid).collection("pendingAction").document("current").delete()
+                    if confirmed_labels:
+                        reply_parts.append("ra " + ", ".join(confirmed_labels) + " pani track gareko chu")
+                    primary_intent = "expense_log"  # trigger frontend categories refresh
+                    print(f"[CHAT][WAIT-BUDGET] Auto-confirmed {len(confirmed_labels)} expense(s) after budget set.")
+        except Exception as wb_err:
+            print(f"[CHAT][WAIT-BUDGET] Check failed (non-critical): {wb_err}")
 
     # ── Conversational Confirmation Holding ──────────────────────────────
     if pending_actions:
