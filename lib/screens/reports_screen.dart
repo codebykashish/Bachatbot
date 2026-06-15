@@ -146,19 +146,37 @@ class ReportsScreenState extends State<ReportsScreen>
   Widget _buildOverallStatusCard() {
     String statusText;
     Color statusColor;
+    IconData statusIcon;
 
     switch (_overallStatus.toLowerCase()) {
+      case 'low':
+      case 'on track':
+      case 'ok':
+        statusText = 'Low spending — on budget';
+        statusColor = _primary;
+        statusIcon = Icons.check_circle;
+        break;
+      case 'medium':
+      case 'warning':
+        statusText = 'Medium — approaching budget limit';
+        statusColor = Colors.amber.shade700;
+        statusIcon = Icons.info_outline;
+        break;
+      case 'high':
+      case 'danger':
+        statusText = 'High — close to budget limit';
+        statusColor = Colors.orange.shade700;
+        statusIcon = Icons.warning_amber;
+        break;
       case 'overspent':
         statusText = 'Overspent this month';
         statusColor = Colors.red;
-        break;
-      case 'on track':
-        statusText = 'On track this month';
-        statusColor = _primary;
+        statusIcon = Icons.warning_amber;
         break;
       default:
         statusText = 'Overall Status: $_overallStatus';
         statusColor = _primary;
+        statusIcon = Icons.check_circle;
     }
 
     return Container(
@@ -178,9 +196,7 @@ class ReportsScreenState extends State<ReportsScreen>
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
-              _overallStatus.toLowerCase() == 'overspent'
-                  ? Icons.warning_amber
-                  : Icons.check_circle,
+              statusIcon,
               color: statusColor,
               size: 24,
             ),

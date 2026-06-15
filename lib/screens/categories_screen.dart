@@ -109,7 +109,10 @@ class CategoriesScreenState extends State<CategoriesScreen>
 
   double get _totalLimit => _budgets.fold(0.0, (s, b) => s + (b['limit'] ?? 0).toDouble());
   double get _totalSpent => _budgets.fold(0.0, (s, b) => s + (b['spent'] ?? 0).toDouble());
-  double get _netSavings => (_totalLimit - _totalSpent).clamp(0.0, double.infinity);
+  // Total savings = income − what was actually spent (not just unspent budget)
+  double get _netSavings => _declaredIncome > 0
+      ? (_declaredIncome - _totalSpent).clamp(0.0, double.infinity)
+      : (_totalLimit - _totalSpent).clamp(0.0, double.infinity);
   double get _spentPercent => _totalLimit > 0 ? (_totalSpent / _totalLimit * 100) : 0;
 
   // ── Add Category ──────────────────────────────────────────────────────────
@@ -329,9 +332,20 @@ class CategoriesScreenState extends State<CategoriesScreen>
                   children: [
                     // ── Total Budget banner ──────────────────────────────────
                     Container(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFEAFAF3),
+                        gradient: LinearGradient(
+                          colors: [
+                            _spentPercent > 100
+                                ? const Color(0xFFE53935)
+                                : const Color(0xFF2DBE7F),
+                            _spentPercent > 100
+                                ? const Color(0xFFC62828)
+                                : const Color(0xFF1DA870),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Row(
@@ -340,18 +354,27 @@ class CategoriesScreenState extends State<CategoriesScreen>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('TOTAL MONTHLY BUDGET',
-                                    style: TextStyle(fontSize: 11, color: Colors.grey, letterSpacing: 0.5)),
+                                Text(
+                                  'TOTAL MONTHLY BUDGET',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.white.withValues(alpha: 0.75),
+                                    letterSpacing: 0.8,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
                                 const SizedBox(height: 6),
                                 Row(
+                                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                                  textBaseline: TextBaseline.alphabetic,
                                   children: [
                                     Text(
                                       'Rs ${_totalSpent.toInt()}',
-                                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87),
+                                      style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.white),
                                     ),
                                     Text(
                                       ' / Rs ${_totalLimit.toInt()}',
-                                      style: const TextStyle(fontSize: 16, color: Colors.grey),
+                                      style: TextStyle(fontSize: 15, color: Colors.white.withValues(alpha: 0.75)),
                                     ),
                                   ],
                                 ),
@@ -359,19 +382,16 @@ class CategoriesScreenState extends State<CategoriesScreen>
                                 Row(
                                   children: [
                                     Icon(
-                                      _spentPercent > 100 ? Icons.warning_amber : Icons.check_circle_outline,
-                                      color: _spentPercent > 100 ? Colors.red : _primary,
-                                      size: 16,
+                                      _spentPercent > 100 ? Icons.warning_amber_rounded : Icons.check_circle_outline_rounded,
+                                      color: Colors.white,
+                                      size: 14,
                                     ),
                                     const SizedBox(width: 4),
                                     Text(
                                       _totalLimit > 0
                                           ? '${_spentPercent.toInt()}% of budget used'
                                           : 'No budgets set yet',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: _spentPercent > 100 ? Colors.red : _primary,
-                                      ),
+                                      style: const TextStyle(fontSize: 12, color: Colors.white),
                                     ),
                                   ],
                                 ),
@@ -380,8 +400,11 @@ class CategoriesScreenState extends State<CategoriesScreen>
                           ),
                           Container(
                             width: 44, height: 44,
-                            decoration: BoxDecoration(color: _primary.withValues(alpha: 0.15), shape: BoxShape.circle),
-                            child: const Icon(Icons.trending_up, color: _primary, size: 22),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.18),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.trending_up_rounded, color: Colors.white, size: 22),
                           ),
                         ],
                       ),
@@ -450,15 +473,16 @@ class CategoriesScreenState extends State<CategoriesScreen>
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFEAFAF3),
+                          color: Colors.white,
                           borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.grey.shade100),
                         ),
                         child: Row(
                           children: [
                             Container(
                               width: 40, height: 40,
-                              decoration: BoxDecoration(color: _primary.withValues(alpha: 0.15), shape: BoxShape.circle),
-                              child: const Icon(Icons.trending_up, color: _primary, size: 20),
+                              decoration: const BoxDecoration(color: _primary, shape: BoxShape.circle),
+                              child: const Icon(Icons.trending_up_rounded, color: Colors.white, size: 20),
                             ),
                             const SizedBox(width: 14),
                             Expanded(
@@ -534,8 +558,8 @@ class CategoriesScreenState extends State<CategoriesScreen>
                   children: [
                     Container(
                       width: 40, height: 40,
-                      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
-                      child: Icon(icon, color: color, size: 20),
+                      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(10)),
+                      child: Icon(icon, color: Colors.white, size: 20),
                     ),
                     if (!isNotSet)
                       Container(
@@ -574,17 +598,13 @@ class CategoriesScreenState extends State<CategoriesScreen>
         ),
         // ── Delete button ──────────────────────────────────────────────────
         Positioned(
-          top: 4,
-          right: 4,
+          top: 2,
+          right: 2,
           child: GestureDetector(
             onTap: () => _deleteCategory(item),
-            child: Container(
-              width: 22, height: 22,
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.remove, size: 12, color: Colors.red.shade400),
+            child: Padding(
+              padding: const EdgeInsets.all(5),
+              child: Icon(Icons.remove, size: 16, color: Colors.red.shade400),
             ),
           ),
         ),

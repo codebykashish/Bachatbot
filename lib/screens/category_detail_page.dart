@@ -70,12 +70,21 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
         final income = (d['total'] ?? 0).toDouble();
         final budgets = (budgetsData['data']?['budgets'] as List<dynamic>?) ?? [];
         double totalAllocated = 0;
+        Map<String, dynamic>? thisBudget;
         for (final b in budgets) {
           totalAllocated += (b['limit'] ?? 0).toDouble();
+          if ((b['category'] as String?) == widget.category) {
+            thisBudget = b as Map<String, dynamic>;
+          }
         }
         setState(() {
           _declaredIncome = income;
           _totalAllocated = totalAllocated;
+          // Update limit/spent from API so navigation from any screen works correctly
+          if (thisBudget != null) {
+            _budgetLimit = (thisBudget['limit'] ?? _budgetLimit).toDouble();
+            _budgetSpent = (thisBudget['spent'] ?? _budgetSpent).toDouble();
+          }
         });
       }
     } catch (_) {}
@@ -279,7 +288,10 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                     ],
                     onChanged: (val) {
                       final v = double.tryParse(val);
-                      if (available != double.infinity && v != null && v > available) {
+                      if (v != null && _budgetSpent > 0 && v < _budgetSpent) {
+                        setSheet(() => inlineError =
+                            'Cannot be less than amount already spent (Rs ${_budgetSpent.toInt()})');
+                      } else if (available != double.infinity && v != null && v > available) {
                         setSheet(() => inlineError = 'Exceeds available Rs ${available.toInt()}');
                       } else {
                         setSheet(() => inlineError = null);
@@ -305,6 +317,9 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                       final val = double.tryParse(v?.trim() ?? '');
                       if (val == null || val <= 0) {
                         return 'Enter a valid amount';
+                      }
+                      if (_budgetSpent > 0 && val < _budgetSpent) {
+                        return 'Cannot be less than amount already spent (Rs ${_budgetSpent.toInt()})';
                       }
                       return null;
                     },
@@ -424,45 +439,48 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.shade100),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2)),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text('Monthly Budget',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+              Text(
+                'Monthly Budget',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade500, fontWeight: FontWeight.w500),
+              ),
               const Spacer(),
-              TextButton(
-                onPressed: _showBudgetBottomSheet,
-                style: _showBudgetError
-                    ? TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        foregroundColor: Colors.green,
-                        backgroundColor: Colors.green.shade50,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          side: const BorderSide(color: Colors.green),
-                        ),
-                      )
-                    : TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        foregroundColor: Colors.green,
+              // Prominent pill button — visible even on first open
+              GestureDetector(
+                onTap: _showBudgetBottomSheet,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: _primary.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: _primary.withValues(alpha: 0.25)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.edit_outlined, size: 12, color: _primary),
+                      const SizedBox(width: 4),
+                      Text(
+                        _budgetLimit == 0 ? 'Set Budget' : 'Edit',
+                        style: TextStyle(fontSize: 12, color: _primary, fontWeight: FontWeight.w600),
                       ),
-                child: Text(
-                  _budgetLimit == 0 ? 'Set Budget' : 'Edit',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ],
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           if (_budgetLimit > 0) ...[
             Row(
               crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -471,9 +489,9 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                 Text(
                   'Rs ${_budgetSpent.toInt()}',
                   style: TextStyle(
-                      fontSize: 20,
+                      fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: Colors.grey.shade800),
+                      color: progressColor(status)),
                 ),
                 Text(
                   ' / Rs ${_budgetLimit.toInt()}',
@@ -486,47 +504,50 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
               borderRadius: BorderRadius.circular(6),
               child: LinearProgressIndicator(
                 value: barValue,
-                minHeight: 8,
+                minHeight: 7,
                 backgroundColor: Colors.grey.shade100,
-                valueColor:
-                    AlwaysStoppedAnimation<Color>(progressColor(status)),
+                valueColor: AlwaysStoppedAnimation<Color>(progressColor(status)),
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Row(
               children: [
                 statusBadge(status),
                 const Spacer(),
                 Text(
                   '$pct% used',
-                  style: TextStyle(
-                      fontSize: 12, color: progressColor(status)),
+                  style: TextStyle(fontSize: 12, color: progressColor(status)),
                 ),
               ],
             ),
           ] else ...[
-            Row(
-              children: [
-                Icon(Icons.info_outline,
-                    size: 16, color: Colors.grey.shade400),
-                const SizedBox(width: 6),
-                Text('No budget set',
-                    style: TextStyle(
-                        fontSize: 13, color: Colors.grey.shade400)),
-                const Spacer(),
-                TextButton(
-                  onPressed: _showBudgetBottomSheet,
-                  style: TextButton.styleFrom(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    foregroundColor: Colors.green,
-                  ),
-                  child: const Text('Set Budget',
-                      style: TextStyle(fontSize: 13)),
+            // "No budget set" — clear, tappable CTA so first-time users know what to do
+            GestureDetector(
+              onTap: _showBudgetBottomSheet,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: _primary.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: _primary.withValues(alpha: 0.20), width: 1),
                 ),
-              ],
+                child: Column(
+                  children: [
+                    Icon(Icons.add_circle_outline_rounded, size: 24, color: _primary),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Set a monthly budget limit',
+                      style: TextStyle(fontSize: 13, color: _primary, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Track how much you spend on ${widget.category}',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ],
@@ -535,122 +556,93 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   }
 
   Widget _buildAddExpenseSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Add Expense',
-          style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey.shade800),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.shade200),
+    final inputBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide(color: Colors.grey.shade200),
+    );
+    const focusedBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(10)),
+      borderSide: BorderSide(color: _primary, width: 1.5),
+    );
+
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Add Expense',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey.shade800),
           ),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              children: [
-                // Amount field
-                TextFormField(
-                  controller: _amountController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                    LengthLimitingTextInputFormatter(9),
-                  ],
-                  decoration: InputDecoration(
-                    labelText: 'Amount (Rs)',
-                    prefixText: 'Rs ',
-                    prefixStyle: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w500, fontSize: 15),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide:
-                            BorderSide(color: Colors.grey.shade200)),
-                    enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide:
-                            BorderSide(color: Colors.grey.shade200)),
-                    focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(
-                            color: Colors.green, width: 2)),
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                  ),
-                  validator: (v) {
-                    final val = double.tryParse(v?.trim() ?? '');
-                    if (val == null || val <= 0) {
-                      return 'Enter a valid amount';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                // Note field
-                TextFormField(
-                  controller: _noteController,
-                  maxLength: 100,
-                  decoration: InputDecoration(
-                    labelText: 'Note (optional)',
-                    hintText: 'e.g. Lunch at canteen',
-                    prefixIcon: const Icon(Icons.edit_note_outlined,
-                        size: 18),
-                    counterText: '',
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide:
-                            BorderSide(color: Colors.grey.shade200)),
-                    enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide:
-                            BorderSide(color: Colors.grey.shade200)),
-                    focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(
-                            color: Colors.green, width: 2)),
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isSaving ? null : _saveExpense,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size(double.infinity, 48),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                      elevation: 0,
-                    ),
-                    child: _isSaving
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2),
-                          )
-                        : const Text('Save Expense',
-                            style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold)),
-                  ),
-                ),
-              ],
+          const SizedBox(height: 12),
+          // Amount field — large, prominent, no redundant label
+          TextFormField(
+            controller: _amountController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+              LengthLimitingTextInputFormatter(9),
+            ],
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            decoration: InputDecoration(
+              hintText: '0',
+              hintStyle: TextStyle(fontSize: 16, color: Colors.grey.shade300, fontWeight: FontWeight.w600),
+              prefixText: 'Rs  ',
+              prefixStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey.shade700),
+              suffixText: 'NPR',
+              suffixStyle: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+              filled: true,
+              fillColor: Colors.grey.shade50,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              border: inputBorder,
+              enabledBorder: inputBorder,
+              focusedBorder: focusedBorder,
+              errorStyle: const TextStyle(fontSize: 11),
+            ),
+            validator: (v) {
+              final val = double.tryParse(v?.trim() ?? '');
+              if (val == null || val <= 0) return 'Enter a valid amount';
+              return null;
+            },
+          ),
+          const SizedBox(height: 10),
+          // Note field — compact, subtle
+          TextFormField(
+            controller: _noteController,
+            maxLength: 100,
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade800),
+            decoration: InputDecoration(
+              hintText: 'Add a note  (optional)',
+              hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+              prefixIcon: Icon(Icons.notes_outlined, size: 16, color: Colors.grey.shade400),
+              counterText: '',
+              filled: true,
+              fillColor: Colors.grey.shade50,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              border: inputBorder,
+              enabledBorder: inputBorder,
+              focusedBorder: focusedBorder,
             ),
           ),
-        ),
-      ],
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _isSaving ? null : _saveExpense,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primary,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 48),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                elevation: 0,
+              ),
+              child: _isSaving
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Text('Save Expense', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
