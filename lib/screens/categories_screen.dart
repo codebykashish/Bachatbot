@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../api_service.dart';
 import 'category_detail_page.dart';
+import 'income_page.dart';
 import 'notification_screen.dart';
 
 class CategoriesScreen extends StatefulWidget {
@@ -13,12 +14,15 @@ class CategoriesScreen extends StatefulWidget {
 }
 
 class CategoriesScreenState extends State<CategoriesScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   static const Color _primary = Color(0xFF2DBE7F);
 
   bool _isLoading = true;
   List<dynamic> _budgets = [];
   double _declaredIncome = 0;
+
+  late final AnimationController _shakeCtrl;
+  late final Animation<double> _shakeAnim;
 
   static const List<Map<String, dynamic>> _catMeta = [
     {'name': 'Food',          'icon': Icons.restaurant,        'color': Color(0xFFFF7043)},
@@ -35,13 +39,30 @@ class CategoriesScreenState extends State<CategoriesScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _shakeCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 480),
+    );
+    _shakeAnim = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: -10.0), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: -10.0, end: 10.0), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: 10.0, end: -8.0), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: -8.0, end: 8.0), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: 8.0, end: 0.0), weight: 1),
+    ]).animate(CurvedAnimation(parent: _shakeCtrl, curve: Curves.easeInOut));
     _fetchBudgets();
   }
 
   @override
   void dispose() {
+    _shakeCtrl.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _shakeIncomeCard() {
+    _shakeCtrl.reset();
+    _shakeCtrl.forward();
   }
 
   @override
@@ -118,6 +139,27 @@ class CategoriesScreenState extends State<CategoriesScreen>
   // ── Add Category ──────────────────────────────────────────────────────────
 
   Future<void> _showAddCategorySheet() async {
+    // Income must be set before budgeting
+    if (_declaredIncome == 0) {
+      _shakeIncomeCard();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Set your income first to start budgeting'),
+          backgroundColor: Colors.orange.shade700,
+          behavior: SnackBarBehavior.floating,
+          action: SnackBarAction(
+            label: 'Add Income',
+            textColor: Colors.white,
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const IncomePage()),
+            ).then((_) => _fetchBudgets()),
+          ),
+        ),
+      );
+      return;
+    }
+
     final budgetedNames = _budgets.map((b) => b['category'] as String).toSet();
     final available = _catMeta.where((m) => !budgetedNames.contains(m['name'])).toList();
 
@@ -410,7 +452,141 @@ class CategoriesScreenState extends State<CategoriesScreen>
                       ),
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 12),
+
+                    // ── Income card ───────────────────────────────────────────
+                    AnimatedBuilder(
+                      animation: _shakeAnim,
+                      builder: (_, child) => Transform.translate(
+                        offset: Offset(_shakeAnim.value, 0),
+                        child: child,
+                      ),
+                      child: _declaredIncome == 0
+                          ? GestureDetector(
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const IncomePage()),
+                              ).then((_) => _fetchBudgets()),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 18, vertical: 16),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.shade50,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                      color: Colors.orange.shade200),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 42,
+                                      height: 42,
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.shade100,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                          Icons
+                                              .account_balance_wallet_outlined,
+                                          color: Colors.orange.shade700,
+                                          size: 22),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Set Your Monthly Income',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w700,
+                                              color:
+                                                  Colors.orange.shade800,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            'Required to add budgets and track savings',
+                                            style: TextStyle(
+                                                fontSize: 11.5,
+                                                color:
+                                                    Colors.orange.shade600),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Icon(Icons.arrow_forward_ios_rounded,
+                                        size: 14,
+                                        color: Colors.orange.shade400),
+                                  ],
+                                ),
+                              ),
+                            )
+                          : GestureDetector(
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const IncomePage()),
+                              ).then((_) => _fetchBudgets()),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 11),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                      color: _primary.withValues(alpha: 0.2)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 32,
+                                      height: 32,
+                                      decoration: BoxDecoration(
+                                        color:
+                                            _primary.withValues(alpha: 0.1),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                          Icons.attach_money_rounded,
+                                          color: _primary,
+                                          size: 18),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          const Text('Monthly Income',
+                                              style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.grey)),
+                                          Text(
+                                            'Rs ${_declaredIncome.toInt()}',
+                                            style: const TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.black87),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Text('Edit',
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            color: _primary,
+                                            fontWeight: FontWeight.w600)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                    ),
+
+                    const SizedBox(height: 16),
 
                     // ── Spending Buckets header with Add button ───────────────
                     Row(
