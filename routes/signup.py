@@ -21,14 +21,32 @@ async def complete_signup(
     db = get_firestore()
 
     # ── Domain Validation ──
+    # Block known disposable / throwaway email services only.
+    # All legitimate domains (gmail, yahoo, outlook, educational .edu/.edu.np,
+    # corporate .com/.org, institutional .gov/.gov.np, etc.) are accepted.
+    _DISPOSABLE_DOMAINS = {
+        "tempmail.com", "guerrillamail.com", "mailinator.com",
+        "10minutemail.com", "throwaway.email", "yopmail.com",
+        "trashmail.com", "fakeinbox.com", "getairmail.com",
+        "dispostable.com", "maildrop.cc", "spamgourmet.com",
+        "sharklasers.com", "grr.la", "guerrillamailblock.com",
+        "spam4.me", "trashmail.me", "discard.email",
+    }
     domain = body.email.lower().strip().split("@")[-1]
-    if domain != "gmail.com":
-        print(f"[SIGNUP] email={body.email} rejected due to invalid domain")
+    domain_parts = domain.split(".")
+    tld = domain_parts[-1] if domain_parts else ""
+    if (
+        len(domain_parts) < 2
+        or len(tld) < 2
+        or len(tld) > 6
+        or domain in _DISPOSABLE_DOMAINS
+    ):
+        print(f"[SIGNUP] email={body.email} rejected: invalid or disposable domain")
         raise HTTPException(
             status_code=400,
             detail={
                 "error": "INVALID_EMAIL_DOMAIN",
-                "message": "Please use a Gmail address ending with @gmail.com."
+                "message": "Please use a valid email address (gmail.com, edu.np, outlook.com, etc.)."
             }
         )
 

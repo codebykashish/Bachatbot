@@ -1,562 +1,302 @@
-# 💰 BachatBot (बचत-बोट)
+# BachatBot (बचत-बोट)
 
 <div align="center">
 
 **Know your kharcha, grow your bachat.**
 
-[![Status](https://img.shields.io/badge/Status-In%20Development-yellow)](https://github.com/yourusername/bachatbot)
+[![Status](https://img.shields.io/badge/Status-Shipped-brightgreen)](https://github.com/yourusername/bachatbot)
 [![License](https://img.shields.io/badge/License-Educational-blue)](LICENSE)
-[![Week](https://img.shields.io/badge/Progress-Week%208%2F14-green)](GANTT.md)
+[![Flutter](https://img.shields.io/badge/Flutter-3.19+-blue)](https://flutter.dev)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green)](https://fastapi.tiangolo.com)
 
-*Nepal's first truly conversational expense tracker for students and young professionals.*
+*Nepal's first truly conversational expense tracker — chat in Nepali, Roman Nepali, or English.*
 
-[Features](#-features) • [Demo](#-demo) • [Architecture](#-architecture) • [Setup](#-getting-started) • [Team](#-team)
+[Features](#-features) • [Architecture](#-architecture) • [Setup](#-getting-started) • [API](#-api-endpoints) • [Team](#-team)
 
 </div>
 
 ---
 
-## 🎯 The Problem
+## The Problem
 
 Traditional expense tracking apps in Nepal are:
-- ❌ **Form-heavy** — boring input fields kill motivation
-- ❌ **English-only** — excludes Roman Nepali speakers
-- ❌ **Manual** — users forget to log expenses
-- ❌ **No context** — just numbers, no financial insights
-- ❌ **Designed abroad** — don't understand Nepali spending patterns
+- **Form-heavy** — boring input fields kill motivation
+- **English-only** — excludes Roman Nepali speakers
+- **Manual** — users forget to log expenses
+- **No context** — just numbers, no real insights
 
-**Result:** 87% of users abandon within first week (our research, 2025)
+**BachatBot removes all friction through conversational AI.**
 
 ---
 
-## 💡 Our Solution
+## How It Works
 
-BachatBot removes all friction through **conversational AI**.
+Instead of filling forms, users just chat:
 
-### Instead of this:
-```
-[Form Field] Amount: ____
-[Dropdown] Category: ____
-[Date Picker] Date: ____
-[Text Area] Description: ____
-[Button] Submit
-```
-
-### Users just chat:
 ```
 User: Momo khada 250 gayo
-Bot:  Rs 250 Food ma save gareko chu ✅
-      Food budget: Rs 2,250 / 5,000 (45% used)
+Bot:  Rs 250 Food ma save gareko chu ✓
+      Food: Rs 2,250 / 5,000 used (45%)
 ```
 
-Even better — **bank/eSewa notifications auto-parse**:
+Bank/eSewa notifications are auto-parsed:
+
 ```
 eSewa SMS: "Payment of Rs 1,250 successful"
-         ↓
+         ↓ (auto-detected in background)
 Bot:  eSewa bata Rs 1,250 Shopping ma kharcha bhako jasto cha.
-      Thik cha? [Yes] [No]
+      Confirm garnu hos? [Yes] [No]
 ```
 
 No manual entry. Zero effort.
 
 ---
 
-## ✨ Core Features (MVP)
+## Features
 
-### 1️⃣ Natural Language Expense Tracking
-Log expenses in **Nepali**, **Roman Nepali**, or **English**:
+### Natural Language Expense Tracking
+Log in **Nepali**, **Roman Nepali**, or **English** — even mixed:
 ```
-✅ "Momo 250"
-✅ "Bhatbhateni ma 3400 shopping gareko"
-✅ "Rent 12k pathaye"
-✅ "Salary 45k aayo"
+"Momo 250"
+"Bhatbhateni ma 3400 shopping gareko"
+"Rent 12k pathaye"
+"Salary 45k aayo"
+"200 momo, 20 bus ma kharcha"   ← multiple at once
 ```
-AI extracts amount, category, merchant, and type automatically.
+AI extracts amount, category, and type automatically.
 
-### 2️⃣ Smart Bank Notification Sync
-- Flutter listens to SMS/notifications in background
-- Auto-detects eSewa, Khalti, IME Pay, banks
-- Parses transaction → saves as **pending**
+### Smart Bank Notification Sync
+- Listens to eSewa, Khalti, IME Pay, and Nepali bank SMS in the background
+- Parses amount + category → saved as **pending**
 - User confirms in chat → becomes permanent
-- **Zero manual typing for digital payments**
+- Zero typing for digital payments
 
-### 3️⃣ Intelligent Budget Alerts
-Set monthly budgets per category (via chat or UI):
+### Budget Management
+Set and manage monthly budgets per category from the app or via chat:
 ```
-User: Food ko lagi 8k rakhchu yo mahina
-Bot:  Food budget Rs 8,000 set gareko chu ✅
+"Set my food budget to 5000"
+"Change rent to 12k"
 ```
+- Cannot set a budget lower than what you've already spent that month
+- "Unallocated income" shown when editing — you always know how much is left to assign
+- Budget alerts at 80% and 100% usage
 
-As you spend, bot warns you **before it's too late**:
-```
-⚠️ Food ma Rs 6,400 / 8,000 spend bhaisakyo!
-   Only Rs 1,600 left and 18 days remaining.
-   Daily limit: Rs 89/day. Aaja momo nahkaanu hola 😅
-```
+### Activity Feed (Notifications)
+- All budget warnings, income logs, and expense alerts in one feed
+- Tap any alert to jump directly to the related category page
+- Filter by type, time range, and category
 
-**Alert triggers:**
-- 80% budget used
-- 100% budget exceeded
-- Spending pace faster than month pace
-- Low survival budget (<Rs 500/day remaining)
+### Monthly Reports
+- Total income, total expense, net savings
+- Category-by-category spending breakdown
+- Spending status: **Low** (green) / **Medium** (yellow) / **High** (red)
+- Month navigation to view past history
 
-### 4️⃣ Monthly Financial Reports
-On 1st of every month, bot generates:
-- 📊 **Bar graph** (category-wise spending)
-- 📈 **Income vs Expense vs Savings**
-- 🎯 **Budget utilization** (which categories went over)
-- 💸 **Survival budget per day** for remaining month
+### Category Savings Tracker
+- Savings = **Declared Income − Total Spent** (when income is set)
+- Falls back to Total Budget − Total Spent when no income declared
+- Prominent income card on Categories screen nudges users to set income first
 
-Example:
-```
-April 2026 Report:
-━━━━━━━━━━━━━━━━━━━━━━
-Total Income:   Rs 45,000
-Total Expense:  Rs 18,400
-Net Savings:    Rs 26,600 ✅
-
-Category Breakdown:
-Food          Rs 8,500 / 8,000  🔥 106% (overspent!)
-Transport     Rs 3,200 / 4,000  ✅  80%
-Rent          Rs 12,000 / 12,000 ✅ 100%
-Shopping      Rs 1,800 / 3,000  ✅  60%
-
-Survival Budget: Rs 460/day for next 10 days
-```
-
-### 5️⃣ Onboarding Memory
-Bot asks profile questions **only once**:
-- Student or working?
-- Rent or own house?
-- Approximate monthly income?
-
-Never repeats. Remembers forever.
-
-### 6️⃣ Multi-Language Support
-- Nepali Devanagari (नयाँ मोबाइल ४५०००)
-- Roman Nepali (Momo khada 250 gayo)
-- English (Bought groceries 3400)
-
-All work perfectly.
+### Profile & Account
+- Profile photo upload (via Cloudinary)
+- Edit first name and last name (always fetches fresh data so name is current)
+- Home screen greeting updates immediately after name change
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Flutter App (Frontend)                  │
-│  • Firebase Auth (Email/Password)                           │
-│  • Chat UI • Transaction List • Budget Setup • Reports      │
-│  • Notification Listener (Background Service)               │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ HTTPS (Authorization: Bearer idToken)
-                     │
-┌────────────────────▼────────────────────────────────────────┐
-│                  FastAPI Backend (Python)                    │
-│  • Firebase Admin SDK (Token Verification)                  │
-│  • Google Gemini 1.5 Flash (NLP Processing)                 │
-│  • Business Logic (Budgets, Alerts, Reports)                │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Firebase Admin SDK
-                     │
-┌────────────────────▼────────────────────────────────────────┐
-│                  Firestore Database                          │
-│  users/{uid}/                                               │
-│    ├── profile, onboarding, preferences                     │
-│    ├── transactions (subcollection)                         │
-│    ├── budgets (subcollection)                              │
-│    ├── messages (subcollection)                             │
-│    ├── notifications (subcollection)                        │
-│    ├── monthlyReports (subcollection)                       │
-│    └── alerts (subcollection)                               │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────┐
+│              Flutter App (Frontend)            │
+│  Firebase Auth · Chat UI · Reports · Budgets  │
+│  Background Notification Listener (Android)   │
+└──────────────────┬────────────────────────────┘
+                   │ HTTPS  Authorization: Bearer <idToken>
+┌──────────────────▼────────────────────────────┐
+│           FastAPI Backend (Python)             │
+│  Firebase Admin SDK · Google Gemini 2.5 Flash │
+│  Budget Logic · Alert Engine · Report Builder │
+└──────────────────┬────────────────────────────┘
+                   │ Firebase Admin SDK
+┌──────────────────▼────────────────────────────┐
+│              Cloud Firestore                   │
+│  users/{uid}/                                  │
+│    transactions · budgets · alerts · messages  │
+└───────────────────────────────────────────────┘
 ```
 
-**Key Principle:** Frontend never writes to database directly. All data flows through secure backend APIs.
+**Key principle:** Flutter never writes to Firestore directly. All data flows through the backend API, which verifies identity on every request.
 
 ---
 
-## 🗄️ Database Schema
+## Tech Stack
 
-```
-users (collection)
-└── {uid} ← Firebase Auth User ID
-    ├── firstName, lastName, email, phone
-    ├── createdAt, updatedAt
-    │
-    ├── onboarding (map)
-    │   ├── isCompleted: boolean
-    │   ├── occupation: "student" | "employed" | "business"
-    │   ├── housingType: "rent" | "own"
-    │   └── estimatedMonthlySpend: number
-    │
-    ├── preferences (map)
-    │   ├── language: "ne" | "en"
-    │   ├── currency: "NPR"
-    │   └── alertThreshold: 80
-    │
-    ├── budgets (subcollection)
-    │   └── {budgetId}
-    │       ├── category: "Food" | "Transport" | ...
-    │       ├── limit: 5000
-    │       ├── spent: 2500 ← Auto-updated
-    │       ├── alertThreshold: 80
-    │       ├── monthKey: "2026-04"
-    │       └── createdAt, updatedAt
-    │
-    ├── transactions (subcollection)
-    │   └── {transactionId}
-    │       ├── amount: 250
-    │       ├── category: "Food"
-    │       ├── type: "expense" | "income" | "transfer"
-    │       ├── status: "confirmed" | "pending" | "rejected"
-    │       ├── source: "chat" | "manual" | "notification"
-    │       ├── description: "Momo khada 250 gayo"
-    │       ├── monthKey: "2026-04"
-    │       ├── isDeleted: false
-    │       ├── originalMessageId: string
-    │       └── createdAt, updatedAt
-    │
-    ├── messages (subcollection) ← Full chat history
-    │   └── {messageId}
-    │       ├── role: "user" | "assistant"
-    │       ├── content: "Momo 250"
-    │       ├── intent: "expense_log" | "general_chat" | ...
-    │       ├── extractedData: { amount, category, type }
-    │       ├── relatedTransactionId: string
-    │       └── createdAt
-    │
-    ├── notifications (subcollection) ← Raw bank messages
-    │   └── {notificationId}
-    │       ├── rawText: "eSewa: Payment of Rs 250"
-    │       ├── parsedAmount: 250
-    │       ├── parsedCategory: "Food"
-    │       ├── sourceApp: "eSewa" | "Khalti" | ...
-    │       ├── status: "pending" | "confirmed"
-    │       ├── transactionId: string
-    │       └── createdAt
-    │
-    ├── monthlyReports (subcollection)
-    │   └── {monthKey} ← "2026-04"
-    │       ├── totalExpense, totalIncome, netSavings
-    │       ├── categoryBreakdown: { Food: 8500, ... }
-    │       ├── budgetUtilization: { Food: 106, ... }
-    │       ├── daysRemaining: 10
-    │       ├── survivalBudgetPerDay: 380
-    │       └── generatedAt
-    │
-    └── alerts (subcollection)
-        └── {alertId}
-            ├── type: "budget_warning" | "overspent" | ...
-            ├── category: "Food"
-            ├── message: "Only Rs 1200 left..."
-            ├── severity: "low" | "medium" | "high"
-            ├── isRead: false
-            ├── monthKey: "2026-04"
-            └── createdAt
-```
-
-**Schema Status:** 🔒 Locked for MVP (no changes without team approval)
+| Layer | Technology |
+|-------|-----------|
+| **Frontend** | Flutter 3.19+, Dart 3 |
+| **Backend** | FastAPI (Python 3.11+) |
+| **Database** | Cloud Firestore |
+| **Auth** | Firebase Authentication (Email/Password) |
+| **AI / NLP** | Google Gemini 2.5 Flash |
+| **Image Storage** | Cloudinary |
+| **Notifications** | flutter_notification_listener |
+| **Charts** | fl_chart |
 
 ---
 
-## 🛠️ Tech Stack
+## Database Schema
 
-| Layer | Technology | Why |
-|-------|-----------|-----|
-| **Frontend** | Flutter 3.19+ | Cross-platform, beautiful UI, fast development |
-| **Backend** | FastAPI (Python 3.11+) | Async, fast, auto-docs, type safety |
-| **Database** | Cloud Firestore | NoSQL, real-time, scalable, free tier |
-| **Auth** | Firebase Authentication | Secure, battle-tested, auto token refresh |
-| **AI/NLP** | Google Gemini 1.5 Flash | Free, fast, Nepali-aware, structured output |
-| **Deployment** | Railway / Render | Free, auto-deploy from Git, HTTPS |
-| **Notification** | flutter_notification_listener | Background SMS parsing |
-| **Charts** | fl_chart | Beautiful Flutter graphs |
-| **HTTP** | Dio | Flutter HTTP client with interceptors |
-
----
-
-## 🔐 Security & Privacy
-
-### Authentication Flow
 ```
-1. User signs up via Firebase Auth (email + password)
-2. Firebase returns idToken (expires in 1 hour)
-3. Flutter SDK auto-refreshes token using refreshToken
-4. Every API call includes: Authorization: Bearer <idToken>
-5. Backend verifies token → extracts uid → isolates data
-6. User never re-logs in unless they manually logout
-```
-
-### Data Isolation
-- Each user's data stored under `users/{uid}`
-- Backend always uses verified `uid` from token
-- No user can access another user's data
-- Firebase Security Rules enforce this at database level
-
-### Token Auto-Refresh (No Re-Login Required)
-```dart
-// Flutter handles this automatically
-final idToken = await FirebaseAuth.instance.currentUser!.getIdToken(true);
-// ↑ Force refresh if expired. User stays logged in forever.
+users/{uid}
+  ├── firstName, lastName, email, phone
+  ├── photoUrl
+  ├── income: { inHand, inBank, onlineBanking }  ← total = sum of three
+  ├── onboarding: { isCompleted, occupation, housingType }
+  ├── preferences: { language, currency, alertThreshold }
+  ├── createdAt, updatedAt
+  │
+  ├── transactions/{txId}
+  │     amount, category, type (expense|income), status (confirmed|pending|rejected)
+  │     source (chat|manual|notification), description, monthKey, isDeleted
+  │
+  ├── budgets/{budgetId}
+  │     category, limit, spent, alertThreshold, monthKey
+  │
+  ├── alerts/{alertId}
+  │     type (expense|income|budget_set|budget_warning|overspent|budget_rebalanced)
+  │     category, message, severity, isRead, monthKey
+  │
+  └── messages/{msgId}
+        role (user|assistant), content, intent, extractedData, relatedTransactionId
 ```
 
 ---
 
-## 🚀 Getting Started
+## Security
+
+- Every API call requires `Authorization: Bearer <Firebase idToken>`
+- Backend always uses the verified `uid` from the token — never a user-supplied value
+- Users can only read and write their own data
+- Token auto-refresh happens client-side; users stay logged in without re-authenticating
+
+---
+
+## Getting Started
 
 ### Prerequisites
-```bash
-# Backend
-Python 3.11+
-Firebase Project with Firestore enabled
-Google Cloud project with Gemini API enabled
 
-# Frontend
-Flutter 3.19+
-Dart 3.0+
+```
+Backend:  Python 3.11+, Firebase project (Firestore enabled), Gemini API key
+Frontend: Flutter 3.19+, Dart 3, Android Studio / Xcode
 ```
 
-### Backend Setup
+### Backend
 
-1. **Clone repository:**
 ```bash
-git clone https://github.com/yourusername/bachatbot.git
-cd bachatbot/backend
-```
-
-2. **Create virtual environment:**
-```bash
+cd backend
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. **Install dependencies:**
-```bash
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. **Add Firebase credentials:**
-- Download `serviceAccountKey.json` from Firebase Console
-- Place in `backend/` folder
-
-5. **Create `.env` file:**
-```env
-GEMINI_API_KEY=your_gemini_api_key_here
+Add credentials:
+```
+backend/serviceAccountKey.json    ← Firebase service account (from Firebase Console)
+backend/.env                      ← GEMINI_API_KEY=your_key_here
 ```
 
-6. **Run backend:**
+Run:
 ```bash
 uvicorn main:app --reload
-```
-Backend runs at: `http://localhost:8000`  
-API docs at: `http://localhost:8000/docs`
-
-### Frontend Setup
-
-1. **Navigate to Flutter app:**
-```bash
-cd ../flutter_app
+# API docs: http://localhost:8000/docs
 ```
 
-2. **Install dependencies:**
+### Frontend
+
 ```bash
+cd frontend
 flutter pub get
+flutterfire configure               # links Firebase project
 ```
 
-3. **Configure Firebase:**
-```bash
-flutterfire configure
-```
-
-4. **Update API base URL:**
+Set the API base URL in `lib/api_service.dart`:
 ```dart
-// lib/services/api_service.dart
-final String baseUrl = "http://localhost:8000"; // or your deployed URL
+static const String baseUrl = 'http://localhost:8000';  // or your deployed URL
 ```
 
-5. **Run app:**
+Run:
 ```bash
 flutter run
 ```
 
 ---
 
-## 📡 API Endpoints (Summary)
+## API Endpoints
 
-See [ENDPOINTS.md](ENDPOINTS.md) for complete specifications.
+Full specs in [endpoints.md](endpoints.md).
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/complete-signup` | POST | Create user profile after signup |
-| `/api/v1/user/profile` | GET | Get user profile |
-| `/api/v1/user/profile` | PATCH | Update onboarding/preferences |
-| `/chat` | POST | Main AI endpoint (chat + notifications) |
-| `/transactions` | GET | List transactions with filters |
-| `/confirm-transaction/{id}` | POST | Confirm pending notification |
-| `/reject-transaction/{id}` | POST | Reject pending notification |
-| `/transactions/{id}` | DELETE | Soft delete transaction |
-| `/budgets` | POST | Create/update budget |
-| `/budgets` | GET | List budgets for month |
-| `/monthly-report` | GET | Generate monthly report |
-| `/alerts` | GET | Get alerts |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/complete-signup` | POST | Create profile after Firebase signup |
+| `/profile` | GET | Get full user profile |
+| `/profile` | PATCH | Update name, photo, preferences |
+| `/income` | GET / POST | Declare monthly income |
+| `/chat` | POST | Main AI endpoint — NLP + transaction logging |
+| `/transactions` | GET | List transactions (filters: month, category, type) |
+| `/transactions/{id}` | DELETE | Soft-delete a transaction |
+| `/budgets` | GET / POST | List or create/update budgets |
+| `/budgets/{category}` | DELETE | Remove a category budget |
+| `/monthly-report` | GET | Full month report with category breakdown |
+| `/alerts` | GET | Activity feed (filters: type, dateRange, category) |
 | `/alerts/{id}/read` | PATCH | Mark alert as read |
-| `/messages` | GET | Get chat history |
+| `/messages` | GET | Chat history |
+| `/upload/profile-photo` | POST | Upload photo to Cloudinary |
 
-All endpoints require: `Authorization: Bearer <idToken>`
-
----
-
-## 🎨 Demo (Coming Soon)
-
-### Screenshots
-*Will be added in Week 13*
-
-### Demo Video
-*Final demo video will be ready by Week 14*
-
-### Try it yourself
-*APK link will be shared after Week 14*
+All endpoints: `Authorization: Bearer <idToken>` required.
 
 ---
 
-## 📊 Project Status
+## Email Policy
 
-**Current Phase:** Week 8/14 — Foundation & Auth Setup  
-**Progress:** 35% Complete  
-**Expected Launch:** End of April 2025
+Signup accepts any legitimate email domain:
+- `gmail.com`, `yahoo.com`, `outlook.com`, `hotmail.com`, `icloud.com`
+- Educational: `.edu`, `.edu.np`, `.ac.uk`, `.ac.in`, and similar
+- Institutional: `.org`, `.gov`, `.gov.np`
 
-### Completed ✅
-- Problem research & SDG mapping
-- Market analysis & competitor study
-- System design (UI/UX)
-- Database schema finalization
-- API contract documentation
-- Initial chatbot logic
-
-### In Progress 🔄
-- Backend endpoint implementation
-- Firebase Auth integration (Flutter)
-- Chat UI development
-- Transaction management
-
-### Upcoming 📅
-- Notification sync (Week 9–10)
-- Budget system (Week 10–11)
-- Smart alerts (Week 11–12)
-- Monthly reports (Week 12–13)
-- Testing & deployment (Week 13–14)
-
-See [GANTT.md](GANTT.md) for detailed timeline.
+Known disposable/throwaway services are blocked.
 
 ---
 
-## 👥 Team
+## Team
 
-| Name | Role | Responsibilities |
-|------|------|------------------|
-| **Kashish** | Backend Lead | FastAPI, Firebase Admin, Gemini AI, API design, deployment |
-| **Namrata** | Frontend Lead | Flutter UI, screens, widgets, user experience |
-| **Luniva** | Database & Architecture | Schema design, reports logic, graph data structure |
-| **Sabitra** | DevOps & Testing | Deployment, notification listener, QA testing |
+| Name | Role |
+|------|------|
+| **Kashish** | Backend — FastAPI, Gemini AI, Firebase Admin, deployment |
+| **Namrata** | Frontend — Flutter UI, screens, widgets, UX |
+| **Luniva** | Database & Architecture — schema, reports, analytics |
+| **Sabitra** | DevOps & QA — notification sync, testing, deployment |
 
-**Mentored by:** [Your mentor name]  
-**Institution:** [Your college name]  
-**Project Duration:** 14 weeks (Jan–Apr 2025)
-
----
-
-## 🌍 Impact & SDG Alignment
-
-### Target Audience
-- 🎓 **Students** (college, +2) managing pocket money
-- 💼 **Young professionals** (first job, 22–30 age)
-- 🏠 **Hostel residents** tracking shared expenses
-- 👨‍👩‍👧 **Young families** budgeting household costs
-
-### Sustainable Development Goals (SDGs)
-- **SDG 1:** No Poverty — Helps low-income users avoid debt through budget awareness
-- **SDG 8:** Decent Work & Economic Growth — Promotes financial literacy
-- **SDG 10:** Reduced Inequalities — Nepali language support makes finance tech accessible
-- **SDG 12:** Responsible Consumption — Encourages conscious spending
-
-### Expected Impact (Year 1)
-- 5,000+ active users in Nepal
-- Average 30% improvement in savings rate
-- 70% reduction in manual expense tracking time
-- Financial literacy increase through AI conversations
+**Institution:** Sunway College, Kathmandu  
+**Program:** BIT (Bachelor of Information Technology)
 
 ---
 
-## 🔮 Future Roadmap (Post-MVP)
+## SDG Alignment
 
-### Phase 2 (Q3 2025)
-- Shared wallets (roommates, couples)
-- Recurring expenses (rent, subscriptions)
-- Investment suggestions based on savings
-- Export reports (PDF, Excel)
-
-### Phase 3 (Q4 2025)
-- Voice input support
-- WhatsApp bot integration
-- Bill splitting with friends
-- Merchant offers integration
-
-### Phase 4 (2026)
-- AI financial advisor
-- Predictive budgeting
-- Credit score insights
-- Integration with Nepali banks
-
----
-
-## 🤝 Contributing
-
-Currently in private development for academic project.  
-After April 2025 launch, we'll open-source the project.
-
-Interested in collaborating? Contact: [your-email@example.com]
-
----
-
-## 📄 License
-
-Educational Project — [Your Institution Name]  
-Not for commercial use without permission.
-
----
-
-## 🙏 Acknowledgments
-
-- **Firebase** for free infrastructure
-- **Google Gemini** for AI capabilities
-- **FastAPI** community for excellent docs
-- **Flutter** team for beautiful framework
-- Our beta testers for brutal honest feedback
-
----
-
-## 📞 Contact
-
-- **Project Lead:** Kashish ([your-email])
-- **Frontend Lead:** Namrata ([namrata-email])
-- **GitHub:** [github.com/yourusername/bachatbot](https://github.com/yourusername/bachatbot)
-- **Demo:** (Coming soon)
+| SDG | Connection |
+|-----|-----------|
+| **SDG 1** No Poverty | Budget awareness reduces unnecessary debt |
+| **SDG 8** Decent Work | Promotes financial literacy for young workers |
+| **SDG 10** Reduced Inequalities | Nepali-language support makes finance tech accessible |
+| **SDG 12** Responsible Consumption | Encourages mindful, data-driven spending |
 
 ---
 
 <div align="center">
 
-**Made with ❤️ in Nepal**
+Made with ❤️ in Nepal
 
 *Because tracking kharcha shouldn't feel like kharcha.*
 
-[⬆ Back to top](#-bachatbot-बचत-बोट)
-
 </div>
-
----
-
