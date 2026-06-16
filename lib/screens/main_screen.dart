@@ -161,6 +161,12 @@ class _MainScreenState extends State<MainScreen> {
                 showTour: widget.showTour,
                 onSeeAllCategories: () => setState(() => _currentIndex = 1),
                 onViewFullReports: () => setState(() => _currentIndex = 2),
+                onAddCategory: () {
+                  setState(() => _currentIndex = 1);
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _categoriesKey.currentState?.openAddSheet();
+                  });
+                },
               ),
               CategoriesScreen(key: _categoriesKey),
               ReportsScreen(key: _reportsKey),

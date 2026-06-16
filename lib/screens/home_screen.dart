@@ -15,6 +15,7 @@ class HomeScreen extends StatefulWidget {
   final bool showTour;
   final VoidCallback? onSeeAllCategories;
   final VoidCallback? onViewFullReports;
+  final VoidCallback? onAddCategory;
 
   const HomeScreen({
     super.key,
@@ -22,6 +23,7 @@ class HomeScreen extends StatefulWidget {
     this.showTour = false,
     this.onSeeAllCategories,
     this.onViewFullReports,
+    this.onAddCategory,
   });
 
   @override
@@ -262,9 +264,60 @@ class HomeScreenState extends State<HomeScreen> {
       ),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        itemCount: filtered.length,
+        itemCount: filtered.length + 1,
         separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (ctx, i) {
+          // Last item: "+" add category button
+          if (i == filtered.length) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () {
+                  if (widget.onAddCategory != null) {
+                    widget.onAddCategory!();
+                  } else if (widget.onSeeAllCategories != null) {
+                    widget.onSeeAllCategories!();
+                  } else {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const CategoriesScreen(showAppBar: true)),
+                    );
+                  }
+                },
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.grey.shade300, width: 1.5),
+                      ),
+                      child: Icon(Icons.add_rounded, color: Colors.grey.shade500, size: 28),
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: 60,
+                      child: Text(
+                        'Add',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade600),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    const SizedBox(height: 14),
+                  ],
+                ),
+              ),
+            );
+          }
+
           final meta = filtered[i];
           final name = meta['name'] as String;
           final budget = budgetMap[name];

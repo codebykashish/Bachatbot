@@ -52,7 +52,7 @@ class _FaqsScreenState extends State<FaqsScreen> {
     {
       'section': 'Getting Started',
       'q': 'How do I log my first expense?',
-      'a': 'Open the Chat screen and type naturally:\n• "Momo 250"\n• "Bus bhada 40 tiryo"\n• "Bhatbhateni ma 3400 shopping gareko"\n\nBachatBot confirms the amount and category, then saves it.',
+      'a': 'Two ways:\n\n1. Chat — tap the green button and type naturally:\n   • "Momo 250"\n   • "Bus bhada 40 tiryo"\n   • "Bhatbhateni 3400"\n   BachatBot confirms and saves it instantly.\n\n2. Manual — go to Categories → tap any category → use the Add Expense form to enter the amount.',
     },
     {
       'section': 'Getting Started',
@@ -120,8 +120,8 @@ class _FaqsScreenState extends State<FaqsScreen> {
     },
     {
       'section': 'Notifications',
-      'q': 'How does bank notification sync work?',
-      'a': 'When you receive an eSewa, Khalti, or bank SMS, BachatBot detects it in the background, parses the amount and category, then asks you to confirm.\n\nOnce you confirm, it\'s saved as a transaction — no typing needed.',
+      'q': 'Will bank notification sync be available?',
+      'a': 'Automatic eSewa, Khalti, and bank SMS parsing is a planned feature coming in a future update. When available, BachatBot will detect payments in the background and ask you to confirm — no typing needed.\n\nFor now, log expenses via Chat or the manual entry form in Categories.',
     },
     {
       'section': 'Notifications',

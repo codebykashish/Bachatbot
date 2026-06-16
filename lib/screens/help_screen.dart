@@ -9,24 +9,24 @@ class HelpScreen extends StatelessWidget {
   // ── Quick tips shown as horizontal scroll cards at the top ───────────────
   static const List<Map<String, String>> _tips = [
     {
-      'emoji': '💬',
-      'title': 'Chat naturally',
-      'body': 'Type like you\'d text a friend — "Momo 250" is all you need',
+      'icon': 'chat',
+      'title': 'Chat to log',
+      'body': 'Type naturally — "Momo 250" or "Bus 40 gayo" — BachatBot handles the rest',
     },
     {
-      'emoji': '📊',
+      'icon': 'edit_note',
+      'title': 'Add manually',
+      'body': 'Categories → tap any category → Add Expense form for quick manual entry',
+    },
+    {
+      'icon': 'bar_chart',
       'title': 'View reports',
-      'body': 'Tap Reports in the bottom bar for your monthly breakdown',
+      'body': 'Tap Reports in the bottom bar for your full monthly breakdown',
     },
     {
-      'emoji': '🔔',
+      'icon': 'notifications',
       'title': 'Tap alerts',
-      'body': 'Each notification links directly to its category page',
-    },
-    {
-      'emoji': '💰',
-      'title': 'Set budgets',
-      'body': 'From Categories screen or just say it in the chat',
+      'body': 'Each notification card links directly to its category page',
     },
   ];
 
@@ -208,6 +208,7 @@ class HelpScreen extends StatelessWidget {
 
   IconData _iconFor(String name) {
     switch (name) {
+      case 'chat':                return Icons.chat_bubble_outline_rounded;
       case 'edit_note':           return Icons.edit_note_rounded;
       case 'attach_money':        return Icons.attach_money_rounded;
       case 'tune':                return Icons.tune_rounded;
@@ -329,8 +330,7 @@ class HelpScreen extends StatelessWidget {
                           children: [
                             Row(
                               children: [
-                                Text(tip['emoji']!,
-                                    style: const TextStyle(fontSize: 16)),
+                                Icon(_iconFor(tip['icon']!), size: 16, color: _primary),
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(

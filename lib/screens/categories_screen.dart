@@ -72,6 +72,8 @@ class CategoriesScreenState extends State<CategoriesScreen>
 
   void refresh() => _fetchBudgets();
 
+  void openAddSheet() => _showAddCategorySheet();
+
   Future<void> _fetchBudgets() async {
     setState(() => _isLoading = true);
     try {

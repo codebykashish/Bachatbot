@@ -140,6 +140,19 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     setState(() => _showBudgetError = false);
 
     if (!_formKey.currentState!.validate()) return;
+
+    final rawAmount = double.tryParse(_amountController.text.trim()) ?? 0;
+    if (rawAmount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Amount Rs 0 hunna hunna — at least Rs 1 enter gara'),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     FocusScope.of(context).unfocus();
     setState(() => _isSaving = true);
 
@@ -585,7 +598,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
             ],
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             decoration: InputDecoration(
-              hintText: '0',
+              hintText: 'e.g. 250',
               hintStyle: TextStyle(fontSize: 16, color: Colors.grey.shade300, fontWeight: FontWeight.w600),
               prefixText: 'Rs  ',
               prefixStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey.shade700),

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// A simple first-time user guide overlay.
-/// Wraps the home screen content and shows a sequential spotlight tour
-/// when [showTour] is true and SharedPreferences 'tour_done' is not set.
+/// First-time user guide overlay.
+/// When [showTour] is true (coming from onboarding), resets the done-flag and
+/// always shows the tour, so new accounts always see the guide.
 class AppTourOverlay extends StatefulWidget {
   final Widget child;
   final bool showTour;
@@ -19,60 +19,69 @@ class AppTourOverlay extends StatefulWidget {
 }
 
 class _AppTourOverlayState extends State<AppTourOverlay>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   static const Color _primary = Color(0xFF2DBE7F);
 
   bool _tourActive = false;
   int _step = 0;
-  late AnimationController _animCtrl;
+  late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
+  late AnimationController _bounceCtrl;
+  late Animation<double> _bounceAnim;
 
   static const List<_TourStep> _steps = [
     _TourStep(
-      icon: Icons.dashboard_outlined,
-      title: 'Your Dashboard',
+      icon: Icons.waving_hand_outlined,
+      title: 'Welcome to BachatBot!',
       description:
-          'Welcome! This is your financial hub — see your savings, income, and expenses at a glance.',
+          'This is your financial dashboard — income, expenses, and savings all in one place. Let us show you around in 4 quick steps.',
       arrowDirection: ArrowDirection.none,
     ),
     _TourStep(
-      icon: Icons.visibility_off_outlined,
-      title: 'Hide Your Amounts',
+      icon: Icons.account_balance_wallet_outlined,
+      title: 'Step 1 — Set your income',
       description:
-          'Tap the eye icon (top right of the summary) to show or hide your amounts for privacy.',
-      arrowDirection: ArrowDirection.up,
+          'Scroll down on this screen to find the Income card. Tap it to enter how much money you have this month. Budgets and savings depend on this.',
+      arrowDirection: ArrowDirection.down,
     ),
     _TourStep(
       icon: Icons.grid_view_outlined,
-      title: 'Category Budgets',
+      title: 'Step 2 — Set category budgets',
       description:
-          'Scroll down to see your spending categories. Tap any category to set a budget or log an expense.',
-      arrowDirection: ArrowDirection.down,
-    ),
-    _TourStep(
-      icon: Icons.insert_chart_outlined,
-      title: 'Monthly Reports',
-      description:
-          'Your spending chart is just below. Tap "View Full" to see detailed monthly reports and insights.',
-      arrowDirection: ArrowDirection.down,
+          'Tap the Categories tab in the navigation bar below. Add a monthly spending limit for Food, Transport, Shopping, and more.',
+      arrowDirection: ArrowDirection.downLeft,
     ),
     _TourStep(
       icon: Icons.smart_toy_outlined,
-      title: 'Chat to Track',
+      title: 'Step 3 — Log expenses by chat',
       description:
-          'Tap the green chat button (bottom right) anytime to log an expense or income just by typing!',
+          'Tap the green robot button at the bottom right. Just type: "Momo 250" or "Bus 40" — BachatBot saves it instantly. No forms needed.',
       arrowDirection: ArrowDirection.downRight,
+    ),
+    _TourStep(
+      icon: Icons.insert_chart_outlined,
+      title: 'Step 4 — Check your reports',
+      description:
+          'Tap the Reports tab to see your monthly income, total expenses, and net savings — with a clear Low / Medium / High spending status.',
+      arrowDirection: ArrowDirection.downCenter,
     ),
   ];
 
   @override
   void initState() {
     super.initState();
-    _animCtrl = AnimationController(
+    _fadeCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
-    _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeInOut);
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeInOut);
+
+    _bounceCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..repeat(reverse: true);
+    _bounceAnim = CurvedAnimation(parent: _bounceCtrl, curve: Curves.easeInOut);
+
     if (widget.showTour) {
       _checkAndStartTour();
     }
@@ -80,25 +89,30 @@ class _AppTourOverlayState extends State<AppTourOverlay>
 
   @override
   void dispose() {
-    _animCtrl.dispose();
+    _fadeCtrl.dispose();
+    _bounceCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _checkAndStartTour() async {
     final prefs = await SharedPreferences.getInstance();
+    // Coming straight from onboarding — always show the tour for this fresh account
+    if (widget.showTour) {
+      await prefs.setBool('tour_done', false);
+    }
     final done = prefs.getBool('tour_done') ?? false;
     if (!done && mounted) {
-      await Future.delayed(const Duration(milliseconds: 800));
+      await Future.delayed(const Duration(milliseconds: 900));
       if (mounted) {
         setState(() => _tourActive = true);
-        _animCtrl.forward();
+        _fadeCtrl.forward();
       }
     }
   }
 
   Future<void> _completeTour() async {
-    await _animCtrl.reverse();
-    setState(() => _tourActive = false);
+    await _fadeCtrl.reverse();
+    if (mounted) setState(() => _tourActive = false);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('tour_done', true);
   }
@@ -120,19 +134,22 @@ class _AppTourOverlayState extends State<AppTourOverlay>
     return Stack(
       children: [
         widget.child,
-        // Semi-transparent overlay
+        // Semi-transparent overlay — keep it lighter so the UI is visible
         FadeTransition(
           opacity: _fadeAnim,
           child: GestureDetector(
             onTap: _nextStep,
-            child: Container(color: Colors.black.withValues(alpha: 0.6)),
+            child: Container(color: Colors.black.withValues(alpha: 0.50)),
           ),
         ),
-        // Tour card — anchored at bottom
+        // Bouncing direction arrow
+        if (step.arrowDirection != ArrowDirection.none)
+          _buildBouncingArrow(step.arrowDirection),
+        // Tour card
         Positioned(
           left: 16,
           right: 16,
-          bottom: 90,
+          bottom: 96,
           child: FadeTransition(
             opacity: _fadeAnim,
             child: _buildTourCard(step),
@@ -142,19 +159,117 @@ class _AppTourOverlayState extends State<AppTourOverlay>
     );
   }
 
+  Widget _buildBouncingArrow(ArrowDirection dir) {
+    final alignment = _arrowAlignment(dir);
+    final icon = _arrowIcon(dir);
+
+    return Positioned.fill(
+      child: FadeTransition(
+        opacity: _fadeAnim,
+        child: Align(
+          alignment: alignment,
+          child: Padding(
+            padding: _arrowPadding(dir),
+            child: AnimatedBuilder(
+              animation: _bounceAnim,
+              builder: (_, __) {
+                final offset = _bounceOffset(dir, _bounceAnim.value);
+                return Transform.translate(
+                  offset: offset,
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _primary.withValues(alpha: 0.90),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: _primary.withValues(alpha: 0.45),
+                          blurRadius: 12,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: Icon(icon, color: Colors.white, size: 22),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Alignment _arrowAlignment(ArrowDirection dir) {
+    switch (dir) {
+      case ArrowDirection.down:
+        return Alignment.bottomCenter;
+      case ArrowDirection.downLeft:
+        return Alignment.bottomLeft;
+      case ArrowDirection.downRight:
+        return Alignment.bottomRight;
+      case ArrowDirection.downCenter:
+        return Alignment.bottomCenter;
+      default:
+        return Alignment.bottomCenter;
+    }
+  }
+
+  EdgeInsets _arrowPadding(ArrowDirection dir) {
+    switch (dir) {
+      case ArrowDirection.downLeft:
+        return const EdgeInsets.only(left: 60, bottom: 165);
+      case ArrowDirection.downRight:
+        return const EdgeInsets.only(right: 16, bottom: 165);
+      case ArrowDirection.downCenter:
+        return const EdgeInsets.only(bottom: 165);
+      default:
+        return const EdgeInsets.only(bottom: 165);
+    }
+  }
+
+  Offset _bounceOffset(ArrowDirection dir, double t) {
+    final dy = 8.0 * t;
+    switch (dir) {
+      case ArrowDirection.downLeft:
+        return Offset(-4.0 * t, dy);
+      case ArrowDirection.downRight:
+        return Offset(4.0 * t, dy);
+      default:
+        return Offset(0, dy);
+    }
+  }
+
+  IconData _arrowIcon(ArrowDirection dir) {
+    switch (dir) {
+      case ArrowDirection.downLeft:
+        return Icons.south_west;
+      case ArrowDirection.downRight:
+        return Icons.south_east;
+      default:
+        return Icons.arrow_downward;
+    }
+  }
+
   Widget _buildTourCard(_TourStep step) {
     return Material(
       color: Colors.transparent,
       child: Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: _primary.withValues(alpha: 0.20), width: 1.5),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.25),
-              blurRadius: 24,
-              offset: const Offset(0, 8),
+              color: Colors.black.withValues(alpha: 0.22),
+              blurRadius: 28,
+              offset: const Offset(0, 10),
+            ),
+            BoxShadow(
+              color: _primary.withValues(alpha: 0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
@@ -162,38 +277,68 @@ class _AppTourOverlayState extends State<AppTourOverlay>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Step indicator + skip
+            // Step dots + counter + skip
             Row(
               children: [
                 Row(
                   children: List.generate(_steps.length, (i) => AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    width: i == _step ? 18 : 6,
+                    width: i == _step ? 20 : 6,
                     height: 6,
                     margin: const EdgeInsets.only(right: 4),
                     decoration: BoxDecoration(
-                      color: i == _step ? _primary : Colors.grey.shade300,
+                      color: i == _step ? _primary : Colors.grey.shade200,
                       borderRadius: BorderRadius.circular(3),
                     ),
                   )),
                 ),
+                const SizedBox(width: 8),
+                Text(
+                  '${_step + 1} / ${_steps.length}',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey.shade400,
+                      fontWeight: FontWeight.w500),
+                ),
                 const Spacer(),
-                TextButton(
-                  onPressed: _completeTour,
-                  style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                  child: const Text('Skip', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                GestureDetector(
+                  onTap: _completeTour,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      'Skip',
+                      style: TextStyle(
+                          color: Colors.grey.shade500,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             // Icon + title
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: 44, height: 44,
+                  width: 46,
+                  height: 46,
                   decoration: BoxDecoration(
-                    color: _primary.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
+                    gradient: LinearGradient(
+                      colors: [
+                        _primary.withValues(alpha: 0.15),
+                        _primary.withValues(alpha: 0.06),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(13),
                   ),
                   child: Icon(step.icon, color: _primary, size: 22),
                 ),
@@ -202,50 +347,39 @@ class _AppTourOverlayState extends State<AppTourOverlay>
                   child: Text(
                     step.title,
                     style: const TextStyle(
-                      fontSize: 17,
+                      fontSize: 16,
                       fontWeight: FontWeight.bold,
                       color: Colors.black87,
+                      height: 1.3,
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Text(
               step.description,
-              style: const TextStyle(fontSize: 13, color: Colors.black54, height: 1.5),
+              style: const TextStyle(
+                  fontSize: 13.5, color: Colors.black54, height: 1.55),
             ),
             const SizedBox(height: 16),
-            // Direction hint
-            if (step.arrowDirection != ArrowDirection.none)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Row(
-                  children: [
-                    Icon(_arrowIcon(step.arrowDirection), size: 16, color: Colors.grey.shade400),
-                    const SizedBox(width: 4),
-                    Text(
-                      _arrowLabel(step.arrowDirection),
-                      style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
-                    ),
-                  ],
-                ),
-              ),
-            // Next button
+            // Next / Done button
             SizedBox(
               width: double.infinity,
-              height: 46,
+              height: 48,
               child: ElevatedButton(
                 onPressed: _nextStep,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _primary,
                   foregroundColor: Colors.white,
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(13)),
                 ),
                 child: Text(
-                  _step == _steps.length - 1 ? 'Got it! 🎉' : 'Next  →',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                  _step == _steps.length - 1 ? "Let's Go! 🚀" : 'Next  →',
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.bold),
                 ),
               ),
             ),
@@ -254,35 +388,9 @@ class _AppTourOverlayState extends State<AppTourOverlay>
       ),
     );
   }
-
-  IconData _arrowIcon(ArrowDirection dir) {
-    switch (dir) {
-      case ArrowDirection.up:
-        return Icons.arrow_upward;
-      case ArrowDirection.down:
-        return Icons.arrow_downward;
-      case ArrowDirection.downRight:
-        return Icons.south_east;
-      default:
-        return Icons.arrow_forward;
-    }
-  }
-
-  String _arrowLabel(ArrowDirection dir) {
-    switch (dir) {
-      case ArrowDirection.up:
-        return 'Look at the top of the screen';
-      case ArrowDirection.down:
-        return 'Scroll down to see it';
-      case ArrowDirection.downRight:
-        return 'Check the bottom-right corner';
-      default:
-        return '';
-    }
-  }
 }
 
-enum ArrowDirection { none, up, down, downRight }
+enum ArrowDirection { none, down, downLeft, downRight, downCenter }
 
 class _TourStep {
   final IconData icon;

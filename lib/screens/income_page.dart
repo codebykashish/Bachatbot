@@ -33,6 +33,8 @@ class _IncomePageState extends State<IncomePage> {
   final _addAmountCtrl = TextEditingController();
   bool _isAdding = false;
 
+  double _totalSpent = 0;
+
   double get _total => _inHand + _inBank + _onlineBanking;
   double get _unallocated => _total - _totalBudgeted;
 
@@ -57,10 +59,12 @@ class _IncomePageState extends State<IncomePage> {
       final results = await Future.wait([
         ApiService.get('/income'),
         ApiService.get('/budgets?monthKey=${_currentMonthKey()}'),
+        ApiService.get('/monthly-report?monthKey=${_currentMonthKey()}'),
       ]);
 
       final incomeRes = results[0];
       final budgetRes = results[1];
+      final reportRes = results[2];
 
       if (!mounted) return;
       setState(() {
@@ -76,6 +80,10 @@ class _IncomePageState extends State<IncomePage> {
             0.0,
             (sum, b) => sum + (b['limit'] ?? 0).toDouble(),
           );
+        }
+        if (reportRes['success'] == true) {
+          final d = reportRes['data'];
+          _totalSpent = ((d?['totalExpense'] ?? d?['expense'] ?? 0)).toDouble();
         }
       });
     } catch (e) {
@@ -95,6 +103,27 @@ class _IncomePageState extends State<IncomePage> {
   }
 
   Future<void> _saveSource(String field, double newValue) async {
+    final newInHand = field == 'inHand' ? newValue : _inHand;
+    final newInBank = field == 'inBank' ? newValue : _inBank;
+    final newOnline = field == 'onlineBanking' ? newValue : _onlineBanking;
+    final newTotal = newInHand + newInBank + newOnline;
+
+    if (_totalSpent > 0 && newTotal < _totalSpent) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Timile yo mahina Rs ${_totalSpent.toInt()} already kharcha garyo. Income Rs ${_totalSpent.toInt()} bhandha kom garna mildaina.',
+            ),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+      return;
+    }
+
     try {
       await ApiService.post('/income', {field: newValue});
       await _fetchData();

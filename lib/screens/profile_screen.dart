@@ -333,8 +333,8 @@ class ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                     child: _statCard(
-                      icon: '💸',
-                      label: 'This Month\nExpense',
+                      icon: Icons.receipt_long_outlined,
+                      label: 'This Month Expense',
                       value: 'Rs ${totalExpense.toStringAsFixed(0)}',
                       color: Colors.red.shade50,
                       valueColor: Colors.red.shade700,
@@ -349,7 +349,7 @@ class ProfileScreenState extends State<ProfileScreen> {
                       MaterialPageRoute(builder: (_) => const IncomePage()),
                     ),
                     child: _statCard(
-                      icon: '💰',
+                      icon: Icons.account_balance_wallet_outlined,
                       label: 'My Income',
                       value: 'Rs ${totalIncome.toStringAsFixed(0)}',
                       color: const Color(0xFFEAFAF3),
@@ -488,7 +488,7 @@ class ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _statCard({
-    required String icon,
+    required IconData icon,
     required String label,
     required String value,
     required Color color,
@@ -503,7 +503,7 @@ class ProfileScreenState extends State<ProfileScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(icon, style: const TextStyle(fontSize: 22)),
+          Icon(icon, color: valueColor, size: 22),
           const SizedBox(height: 8),
           Text(label,
               style: const TextStyle(
