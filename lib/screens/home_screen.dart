@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../api_service.dart';
 import '../widgets/report_chart.dart';
 import '../widgets/balance_card.dart';
-import '../widgets/app_tour_overlay.dart';
 import 'categories_screen.dart';
 import 'notification_screen.dart';
 import 'reports_screen.dart';
@@ -16,6 +15,7 @@ class HomeScreen extends StatefulWidget {
   final VoidCallback? onSeeAllCategories;
   final VoidCallback? onViewFullReports;
   final VoidCallback? onAddCategory;
+  final VoidCallback? onEyeTapped;
 
   const HomeScreen({
     super.key,
@@ -24,6 +24,7 @@ class HomeScreen extends StatefulWidget {
     this.onSeeAllCategories,
     this.onViewFullReports,
     this.onAddCategory,
+    this.onEyeTapped,
   });
 
   @override
@@ -32,6 +33,9 @@ class HomeScreen extends StatefulWidget {
 
 class HomeScreenState extends State<HomeScreen> {
   static const Color _primary = Color(0xFF2DBE7F);
+
+  // GlobalKey so MainScreen can locate the eye icon for the spotlight tour
+  final GlobalKey eyeIconKey = GlobalKey();
 
   bool _isLoading = true;
   List<dynamic> _budgets = [];
@@ -549,12 +553,16 @@ class HomeScreenState extends State<HomeScreen> {
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
                 ),
                 IconButton(
+                  key: eyeIconKey,
                   icon: Icon(
                     _hideAmounts ? Icons.visibility_off_outlined : Icons.visibility_outlined,
                     color: Colors.grey[700],
                     size: 22,
                   ),
-                  onPressed: () => setState(() => _hideAmounts = !_hideAmounts),
+                  onPressed: () {
+                    setState(() => _hideAmounts = !_hideAmounts);
+                    widget.onEyeTapped?.call();
+                  },
                 ),
               ],
             ),
@@ -647,10 +655,6 @@ class HomeScreenState extends State<HomeScreen> {
       ),
     );
 
-    // Wrap with the first-time tour overlay
-    return AppTourOverlay(
-      showTour: widget.showTour,
-      child: content,
-    );
+    return content;
   }
 }
