@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from firebase_config import get_firestore
 from auth import get_current_user
 from gemini import process_chat_message, parse_notification_text
-from schemas.categories import EXPENSE_CATEGORIES
+from schemas.categories import EXPENSE_CATEGORIES, normalize_expense_category
 from utils import (
     get_current_month_key, serialize_doc,
     sum_month_expense, sum_category_expense, fetch_budget,
@@ -78,8 +78,11 @@ def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_ke
             "originalMessageId": None,
             "deduplicated": True,
         }
-        cat_display = category or "Income"
-        reply_part = f"Rs {int(amount)} {cat_display}"
+        cat_display = category or "income"
+        if tx_type == "income":
+            reply_part = f"Rs {int(amount)} income thapeko"
+        else:
+            reply_part = f"Rs {int(amount)} {cat_display} ma kharcha gareko"
         # Still check budget status for the reply but don't increment
         return transaction_out, None, None, reply_part
 
@@ -181,13 +184,13 @@ def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_ke
     desc = description.strip() if description else ""
     try:
         if tx_type == "expense":
+            cat_label = category or "Expense"
             if desc and desc.lower() not in ((category or "").lower(), "expense", ""):
-                msg = f"Rs {int(amount)} {desc} ({category or 'expense'}) saved."
+                msg = f"{cat_label}: Rs {int(amount)} spent on {desc}."
             else:
-                cat_label = f"{category} " if category else ""
-                msg = f"Rs {int(amount)} {cat_label}expense saved."
+                msg = f"{cat_label}: Rs {int(amount)} spent."
             if budget_update and percent_used >= 80:
-                msg = f"{category} Rs {int(amount)} saved, {int(percent_used)}% budget used!"
+                msg = f"{category}: Rs {int(amount)} spent, {int(percent_used)}% budget used!"
             alert_type = "expense"
         else:
             cat_label = category or "income"
@@ -218,11 +221,17 @@ def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_ke
         print(f"[CHAT] [ALERT] FAILED: {e}")
 
     # Reply part — include item/note if provided
-    cat_display = category or "Income"
-    if desc and desc.lower() not in (cat_display.lower(), "expense", "income", ""):
-        reply_part = f"Rs {int(amount)} {desc} ({cat_display})"
+    cat_display = category or "income"
+    if tx_type == "income":
+        if desc and desc.lower() not in (cat_display.lower(), "expense", "income", ""):
+            reply_part = f"Rs {int(amount)} income ({desc}) thapeko"
+        else:
+            reply_part = f"Rs {int(amount)} income thapeko"
     else:
-        reply_part = f"Rs {int(amount)} {cat_display}"
+        if desc and desc.lower() not in (cat_display.lower(), "expense", "income", ""):
+            reply_part = f"Rs {int(amount)} {cat_display} ({desc}) ma kharcha gareko"
+        else:
+            reply_part = f"Rs {int(amount)} {cat_display} ma kharcha gareko"
 
     return transaction_out, budget_update, alert_out, reply_part
 
@@ -597,11 +606,11 @@ async def chat(
             
             # Synthesize combined reply
             if len(reply_parts) > 1:
-                reply = ", ".join(reply_parts) + " ma save gareko chu ✅"
+                reply = ", ".join(reply_parts) + " ✅"
             elif reply_parts:
-                reply = reply_parts[0] + " ma save gareko chu ✅"
+                reply = reply_parts[0] + " ✅"
             else:
-                reply = "Kharcha save gareko chu ✅"
+                reply = "Kharcha gareko chu ✅"
                 
             assistant_msg_ref.set({
                 "role": "model",
@@ -1006,8 +1015,64 @@ async def chat(
         raw_mk = action.get("monthKey")
         month_key = resolve_month_key(raw_mk) if raw_mk else get_current_month_key()
 
-        # ── EXPENSE / INCOME ─────────────────────────────────────────────
-        if intent in ("expense_log", "income_log") and action.get("amount"):
+        # ── INCOME LOG ───────────────────────────────────────────────────
+        if intent == "income_log" and action.get("amount"):
+            income_source = action.get("incomeSource") or "inHand"
+            amount_val = float(action["amount"])
+
+            # Save transaction (type=income, no category needed)
+            txn, bud, alt, rp = _handle_expense_or_income(
+                db, uid, action, source, month_key, idempotency_key
+            )
+            last_transaction = txn
+            if bud:
+                last_budget_update = bud
+            if alt:
+                alerts_created.append(alt)
+            reply_parts.append(rp)
+
+            # Update the income source on the user document (inHand / inBank / onlineBanking)
+            try:
+                user_ref = db.collection("users").document(uid)
+                user_doc = user_ref.get()
+                if user_doc.exists:
+                    cur_income = (user_doc.to_dict() or {}).get("income", {}) or {}
+                    cur_val = float(cur_income.get(income_source, 0) or 0)
+                    user_ref.update({
+                        f"income.{income_source}": cur_val + amount_val,
+                        "updatedAt": SERVER_TIMESTAMP,
+                    })
+                    logger.info(f"[CHAT] Income source updated: {income_source} +{amount_val} uid={uid}")
+
+                    # Create income alert with incomeSource + incomeDelta for undo support
+                    source_labels = {"inHand": "In Hand", "inBank": "In Bank", "onlineBanking": "Online Banking"}
+                    src_label = source_labels.get(income_source, income_source)
+                    alert_msg = f"Rs {int(amount_val)} added to {src_label} income."
+                    a_ref = db.collection("users").document(uid).collection("alerts").document()
+                    a_ref.set({
+                        "type": "income",
+                        "message": alert_msg,
+                        "amount": amount_val,
+                        "incomeSource": income_source,
+                        "incomeDelta": amount_val,
+                        "category": None,
+                        "severity": "low",
+                        "isRead": False,
+                        "isDeleted": False,
+                        "monthKey": month_key,
+                        "relatedTransactionId": txn["id"] if txn else None,
+                        "createdAt": SERVER_TIMESTAMP,
+                    })
+                    alerts_created.append({
+                        "id": a_ref.id, "type": "income", "message": alert_msg,
+                        "amount": amount_val, "incomeSource": income_source, "incomeDelta": amount_val,
+                        "isRead": False, "monthKey": month_key,
+                    })
+            except Exception as inc_err:
+                logger.warning(f"[CHAT] Income source update failed (non-fatal): {inc_err}")
+
+        # ── EXPENSE LOG ──────────────────────────────────────────────────
+        elif intent == "expense_log" and action.get("amount"):
             # Correction inheritance: if no category but we just did an undo
             if not action.get("category") and undone_category:
                 print(f"[CHAT] Correction: inheriting category '{undone_category}' for new {intent}")
@@ -1110,13 +1175,14 @@ async def chat(
                                 "reply": no_bud_reply,
                                 "intent": "need_budget_before_expense",
                                 "needsConfirmation": True,
+                                "waitingCategory": category_val,
                                 "transaction": None,
                                 "budgetUpdate": None,
                                 "alerts": [],
                             },
                         }
 
-                # Budget exists (or it's income_log) → immediate log
+                # Budget exists → log expense immediately
                 txn, bud, alt, rp = _handle_expense_or_income(
                     db, uid, action, source, month_key, idempotency_key
                 )
@@ -1462,6 +1528,84 @@ async def chat(
                 reply_parts.append("Kei expense fela parena undo garna lai")
                 print("[CHAT] [UNDO] No matching expense")
 
+        # ── CORRECTION (undo last + relog in correct category) ──────────────
+        elif intent == "correction":
+            undo_cat = action.get("undoCategory")
+            new_cat_raw = action.get("newCategory") or action.get("category")
+            new_cat = normalize_expense_category(new_cat_raw) if new_cat_raw else None
+            new_note = (action.get("newNote") or "").strip()
+            correction_amount = float(action.get("amount") or 0)
+
+            tx_col = db.collection("users").document(uid).collection("transactions")
+            q = (tx_col
+                 .where("type", "==", "expense")
+                 .where("status", "==", "confirmed")
+                 .where("isDeleted", "==", False)
+                 .order_by("createdAt", direction="DESCENDING")
+                 .limit(10))
+            candidates = list(q.stream())
+
+            # Find the most recent expense in undoCategory (or newest if none specified)
+            undone_doc = None
+            for doc in candidates:
+                d = doc.to_dict()
+                if undo_cat and d.get("category", "").lower() != undo_cat.lower():
+                    continue
+                undone_doc = doc
+                break
+
+            if undone_doc:
+                ud = undone_doc.to_dict()
+                u_amt = float(ud.get("amount", correction_amount or 0))
+                u_cat = ud.get("category", undo_cat or "")
+                u_mk = ud.get("monthKey", month_key)
+
+                # Soft-delete old transaction
+                undone_doc.reference.update({
+                    "isDeleted": True,
+                    "deletedAt": SERVER_TIMESTAMP,
+                    "updatedAt": SERVER_TIMESTAMP,
+                })
+                print(f"[CHAT][CORRECTION] Undid tx={undone_doc.id} Rs {u_amt} {u_cat}")
+
+                # Decrement old budget
+                if u_cat:
+                    old_bud = list(
+                        db.collection("users").document(uid).collection("budgets")
+                        .where("category", "==", u_cat)
+                        .where("monthKey", "==", u_mk)
+                        .limit(1).stream()
+                    )
+                    if old_bud:
+                        old_bud[0].reference.update({"spent": Increment(-u_amt), "updatedAt": SERVER_TIMESTAMP})
+
+                # Log new expense in correct category (if we have a target)
+                relog_amt = correction_amount if correction_amount > 0 else u_amt
+                if new_cat:
+                    new_action = {
+                        "intent": "expense_log",
+                        "amount": relog_amt,
+                        "category": new_cat,
+                        "type": "expense",
+                        "description": new_note or u_cat,
+                    }
+                    txn, bud, alt, rp = _handle_expense_or_income(db, uid, new_action, source, u_mk)
+                    last_transaction = txn
+                    if bud:
+                        last_budget_update = bud
+                    if alt:
+                        alerts_created.append(alt)
+                    note_label = f" ({new_note})" if new_note else ""
+                    reply_parts.append(
+                        f"Rs {int(u_amt)} {u_cat} hatako chu ra Rs {int(relog_amt)} {new_cat}{note_label} ma kharcha gareko chu ✅"
+                    )
+                    print(f"[CHAT][CORRECTION] Relogged Rs {relog_amt} → {new_cat}")
+                else:
+                    reply_parts.append(f"Rs {int(u_amt)} {u_cat} undo gareko chu ✅")
+            else:
+                reply_parts.append("Correction garna recent expense bhetiyena.")
+                print("[CHAT][CORRECTION] No matching expense found")
+
         # ── QUERY TOP SPENDING CATEGORY ──────────────────────────────────
         elif intent == "query_top_spend_category":
             top = get_top_spending_category(db, uid, month_key)
@@ -1729,7 +1873,7 @@ async def chat(
 
             pieces = []
             if expense_parts:
-                pieces.append(", ".join(expense_parts) + " ma save gareko chu")
+                pieces.append(", ".join(expense_parts))
             if budget_parts:
                 pieces.append(" ra ".join(budget_parts) + " gareko chu")
 
@@ -1737,9 +1881,9 @@ async def chat(
 
         elif has_expense:
             if len(reply_parts) > 1:
-                reply = ", ".join(reply_parts) + " ma save gareko chu ✅"
+                reply = ", ".join(reply_parts) + " ✅"
             else:
-                reply = reply_parts[0] + " ma save gareko chu ✅"
+                reply = reply_parts[0] + " ✅"
 
         elif has_budget:
             reply = " ra ".join(reply_parts) + " gareko chu ✅"
@@ -2398,7 +2542,7 @@ async def chat_sync(
                             budget_parts.append(rp)
                     pieces = []
                     if expense_parts:
-                        pieces.append(", ".join(expense_parts) + " ma save gareko chu")
+                        pieces.append(", ".join(expense_parts))
                     if budget_parts:
                         pieces.append(" ra ".join(budget_parts) + " gareko chu")
                     reply = " ra ".join(pieces) + " ✅"

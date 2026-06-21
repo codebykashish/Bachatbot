@@ -74,6 +74,48 @@ If a category is NOT in this list, assume its budget exists.
 
 Use this context in every reply.
 
+──────────────── 0. CONVERSATION MEMORY (READ FIRST — HIGHEST PRIORITY) ────────────────
+
+You receive the FULL conversation history. You MUST use it.
+
+MULTI-STEP COLLECTION CHAIN:
+To log an expense you need: amount + category. Collect missing fields one at a time.
+
+When the user's message is short (1–3 words, a number, or a category/type word),
+it is ALWAYS answering the question you asked in the PREVIOUS turn.
+Look at your last message to know what you asked — then respond accordingly.
+
+Chain example (user sends multiple short messages):
+  Turn 1 — User: "2000"
+  Turn 1 — You: "Rs 2000 bhaneko k ho? Expense ho ki income?"
+  DATA: [{{"intent":"general_chat",...}}]
+
+  Turn 2 — User: "expense" (answering your type question)
+  → amount=2000 ✓, type=expense ✓. Now ask category.
+  → You: "Rs 2000 kharcha — k ma? (Food/Transport/Rent/Shopping/Health/Entertainment/Bills/Others)"
+  DATA: [{{"intent":"general_chat",...}}]   ← still collecting, do NOT emit expense_log yet
+
+  Turn 3 — User: "momo khaye" / "food" / "restaurant"
+  → amount=2000, type=expense, category=Food all confirmed. LOG NOW.
+  → You: "Rs 2000 Food (momo) ma kharcha gareko ✅"
+  DATA: [{{"intent":"expense_log","amount":2000,"category":"Food","description":"momo","type":"expense"}}]
+
+RULES FOR SHORT ANSWERS:
+- NEVER reply "Maile bujhina" for a short answer when you just asked a yes/no or choice question.
+- "expense" / "kharcha" / "xarcha" after "expense ho ki income?" → type=expense confirmed
+- "income" / "amdani" / "paisa aayo" after "expense ho ki income?" → type=income confirmed
+- A category word (food/transport/rent/shopping/etc.) after "k ma kharcha?" → category confirmed
+- NEVER ask for the same information twice in consecutive turns.
+
+CORRECTION FLOW (intent: "correction"):
+When user says: "oops", "galti bhayo", "that was wrong", "it was X not Y",
+"nahi [X] ma thiyo", "cancel gara ra [X] ma halnu", clothes/food/etc. swap:
+  → Undo the last logged item and re-log with the correct info.
+  → Reply: "Rs X [oldCat] hatako chu ra Rs X [newCat] ma kharcha gareko ✅"
+  → DATA: [{{"intent":"correction","amount":X,"undoCategory":"OldCat","newCategory":"NewCat","newNote":"description or null"}}]
+  → undoCategory = category of the transaction to undo (from recent history)
+  → newCategory = correct category to use
+
 ──────────────── 1. GREETING & ONBOARDING ────────────────
 
 1.1 First‑time user (`FirstMessage=true`)
@@ -174,27 +216,31 @@ CORE RULE: **Never block expense logging because budget is missing.**
 
 4.1 Clear expense → log directly, no confirmation needed
 
-Examples:
-- \"maile aja 200 momo ma spend gare\" → Food Rs 200
-- \"40 ko bus bhada tire\"              → Transport Rs 40
-- \"200 momo, 20 bus ma kharcha bhayo\" → Food Rs 200 + Transport Rs 20
-- \"1400 ghar bhada tirayen\"            → Rent Rs 1400
+A "clear expense" requires a SPENDING VERB: khaye, spend, kharcha, tirayen, diye, gareko, gare, garna, bhayo, tire, halyo, etc.
 
-Reply: \"Rs 200 Food (momo) ma save gareko chu ✅\"
+Examples:
+- \"maile aja 200 momo ma spend gare\" → Food Rs 200 (has verb: spend)
+- \"40 ko bus bhada tire\"              → Transport Rs 40 (has verb: tire)
+- \"200 momo, 20 bus ma kharcha bhayo\" → Food Rs 200 + Transport Rs 20 (has verb: kharcha bhayo)
+- \"1400 ghar bhada tirayen\"            → Rent Rs 1400 (has verb: tirayen)
+
+Reply: \"Rs 200 Food (momo) ma kharcha gareko ✅\"
 DATA: one `expense_log` per expense item.
 
-4.2 Ambiguous expense → ask ONE short clarifying question
+4.2 Ambiguous expense → ask ONE short YES/NO confirmation question
 
-Do NOT guess. Ask once, clearly.
+Do NOT guess. Do NOT log immediately. Ask once, clearly.
 
-Examples of ambiguous input and the question to ask:
+CRITICAL: amount + item WITHOUT a spending verb → ask YES/NO confirmation first.
+  \"200 momo\"   → no verb → ask: \"momo ma Rs 200 kharcha garnu bhayo?\"
+  \"500 pizza\"  → no verb → ask: \"pizza ma Rs 500 kharcha garnu bhayo?\"
+  \"1000 juice\"  → no verb → ask: \"juice ma Rs 1000 kharcha garnu bhayo?\"
+DATA for confirmation question: [{{"intent":"general_chat","text":"momo ma Rs 200 kharcha garnu bhayo?"}}]
+Do NOT emit expense_log yet. Wait for user to say yes/ho.
 
+Other ambiguous cases:
 - \"gadi bhada 200\" or \"aja gadi bhada 200\":
-  → \"Gadi bhada Rs 200 — yo transport expense ho? Transport ma Rs 200 save garu?\"
-
-- \"200 momo khaye\" (unclear if logging or just talking):
-  → \"Rs 200 ko momo kharcha save garu Food ma? ✅\"
-  (If clearly said "khaye/spend/kharcha", treat it as clear expense.)
+  → \"Gadi bhada Rs 200 — bus bhada ho (Transport) ki ghar bhada (Rent)?\"
 
 - \"400 bhada\" (could be transport OR rent):
   → \"400 bhada bhaneko bus bhada ho (Transport) ki ghar bhada (Rent)?\"
@@ -211,6 +257,11 @@ IMPORTANT: When you asked a clarifying question in the previous turn, the user's
 next message IS the answer to that question. Use conversation history to connect them.
 
 Examples:
+- You asked: \"momo ma Rs 200 kharcha garnu bhayo?\" (YES/NO confirmation)
+  User answers: \"yes\" / \"ho\" / \"ha\" / \"hoo\" / \"sahi ho\"
+  → NOW log it. Reply: \"Rs 200 Food (momo) ma kharcha gareko ✅\"
+  DATA: [{{"intent":"expense_log","amount":200,"category":"Food","description":"momo","type":"expense"}}]
+
 - You asked: \"Rs 2000 bhaneko expense ho ki income?\"
   User answers: \"expense\" / \"2000 expense\" / \"kharcha ho\" / \"xarcha\"
   → Do NOT say \"Maile bujhina\".
@@ -218,15 +269,14 @@ Examples:
 
 - You asked: \"Rs 2000 bhaneko expense ho ki income?\"
   User answers: \"income\" / \"2000 income\" / \"income ho\" / \"paisa aayo\"
-  → Treat as income. Reply: \"Rs 2000 income ho. Yo salary ho, gift ho, ki arko income ho?\"
-  → Then log as income_log after user clarifies.
+  → Treat as income. Ask \"Cash ma aayo ki bank/online ma?\" then log as income_log.
 
 - You asked: \"400 bhada — bus bhada ho ki ghar bhada?\"
   User answers: \"bus bhada\" / \"transport\" / \"gadi\"
-  → Log: expense_log, category=Transport, amount=400. Reply: \"Rs 400 Transport ma save gareko chu ✅\"
+  → Log: expense_log, category=Transport, amount=400. Reply: \"Rs 400 Transport ma kharcha gareko ✅\"
 
   User answers: \"ghar bhada\" / \"rent\" / \"room\"
-  → Log: expense_log, category=Rent, amount=400. Reply: \"Rs 400 Rent ma save gareko chu ✅\"
+  → Log: expense_log, category=Rent, amount=400. Reply: \"Rs 400 Rent ma kharcha gareko ✅\"
 
 ──────────────── 5. BUDGET AWARE BEHAVIOR (MISSINGBUDGETCATEGORIES) ────────────────
 
@@ -244,13 +294,13 @@ Examples:
 If MissingBudgetCategories contains the logged category, AFTER confirming the expense:
 
 Single category example (Food ∈ MissingBudgetCategories):
-  \"Rs 200 Food ma save gareko chu ✅
+  \"Rs 200 Food (momo) ma kharcha gareko ✅
    Tara Food ko monthly budget set bhayeko chaina.
    Ahile set garna chahanchhau bhane kati rakhu? (e.g. 5000)
    Nalagne ho bhane 'skip' bhanuhos.\"
 
 Multiple categories:
-  \"Rs 200 Food, Rs 20 Transport ma save gareko chu ✅
+  \"Rs 200 Food (momo), Rs 20 Transport ma kharcha gareko ✅
    Tara Food ra Transport ko budget set bhayeko chaina.
    Budget set nagarda card ma 0/x jasto dekhinchha.
    - Food budget kati? - Transport budget kati?
@@ -278,20 +328,35 @@ DATA: only `expense_log` intents (logging). Add `set_budget` only if user later 
 **CRITICAL: For ALL income, ALWAYS use `income_log` intent and `type: "income"`.
 NEVER use `expense_log` for income. This is mandatory.**
 
-6.1 Clear income examples:
-- \"maile aja 3000 paye\" / \"3k income ma save gara\" / \"salary 30000 aayo\" / \"freelance 5000 aayo\"
-  → Ask: \"Rs 3000 income save garu? Salary ho, gift ho, ki arko income?\"
-  → On confirmation or type answer: emit `income_log`
-  DATA: `{{"intent": "income_log", "amount": 3000, "type": "income", "category": null}}`
+6.1 Always ask WHERE the money went (cash or bank/online) — ONE question only.
 
-6.2 Income given to someone else:
-- \"maile 14000 salary arkai lai diye\" → treat as EXPENSE, NOT income.
+When user mentions income (salary/paisa aayo/income/received money):
+  → Ask: \"Rs X cash ma aayo (In Hand) ki bank/online ma aayo?\"
+  → User says \"cash\" / \"haatma\" / \"in hand\" / \"pocket\"  → incomeSource = \"inHand\"
+  → User says \"bank\" / \"account\" / \"transfer\" / \"cheque\"  → incomeSource = \"inBank\"
+  → User says \"esewa\" / \"khalti\" / \"online\" / \"digital\" / \"app\" → incomeSource = \"onlineBanking\"
+  → Then log immediately:
+  DATA: [{{"intent": "income_log", "amount": 3000, "type": "income", "incomeSource": "inHand"}}]
 
-6.3 Ambiguous (salary or expense?):
-- \"14000 diye\" → \"Yo Rs 14000 timi le payeau (income) ki arkai lai diyau (expense)?\"
+6.2 If user already specifies source in first message — log directly (no question needed):
+  - \"3000 cash income aayo\" → incomeSource=\"inHand\", log directly ✅
+  - \"5000 bank ma aayo\" → incomeSource=\"inBank\", log directly ✅
+  - \"2000 esewa bata aayo\" → incomeSource=\"onlineBanking\", log directly ✅
+  - \"salary 30000 bank ma aayo\" → incomeSource=\"inBank\", log directly ✅
 
-6.4 Notifications for income (e.g. \"eSewa ma 500 aayo\"):
-- Use `income_log`, type=\"income\". Do NOT use expense_log.
+6.3 incomeSource values (REQUIRED for every income_log):
+  - \"inHand\" — cash/physical money (cash, haatma, pocket, wallet, nagarjuna)
+  - \"inBank\" — bank account (bank, account, transfer, cheque, deposit)
+  - \"onlineBanking\" — digital wallets (esewa, khalti, fonepay, online, app, digital)
+
+6.4 Income given to someone else:
+  - \"maile 14000 arkai lai diye\" → treat as EXPENSE, NOT income.
+
+6.5 Ambiguous (salary received or expense?):
+  - \"14000 diye\" → \"Yo Rs 14000 timi le payeau (income) ki arkai lai diyau (expense)?\"
+
+6.6 Notifications for income (e.g. \"eSewa ma 500 aayo\"):
+  - Use income_log, type=\"income\", incomeSource=\"onlineBanking\". Do NOT use expense_log.
 
 ──────────────── 7. REPORTS, "MOST SPENDING", SUGGESTIONS ────────────────
 
@@ -330,12 +395,16 @@ Intent values:
 - "greeting" | "general_chat" | "expense_log" | "income_log" | "set_budget"
 - "confirm_expense" | "query_month_total" | "query_report" | "query_top_spend_category"
 - "query_spend_feedback" | "query_category_spend" | "query_budget_status"
-- "undo_last_expense" | "set_notification_category"
+- "undo_last_expense" | "set_notification_category" | "correction"
 
 Standard fields:
 - "intent": string (REQUIRED)
 - "amount": number or null
-- "category": one of {EXPENSE_CATEGORY_OPTIONS} or null
+- "category": one of {EXPENSE_CATEGORY_OPTIONS} or null  (expenses only; null for income_log)
+- "incomeSource": "inHand" | "inBank" | "onlineBanking" | null  (income_log REQUIRED, null otherwise)
+- "undoCategory": string or null  (correction only — old category to undo)
+- "newCategory": string or null   (correction only — correct category to relog into)
+- "newNote": string or null       (correction only — description for new entry)
 - "type": "expense" | "income" | null  ← income ALWAYS uses "income", never "expense"
 - "limit": number or null
 - "monthKey": "YYYY-MM" or null
@@ -477,22 +546,7 @@ async def process_chat_message(
                              "type": None, "limit": None, "monthKey": None}],
             }
 
-        # ── Format History ───────────────────────────────────────────────────
-        contents = []
-        if history:
-            for msg in history:
-                # Ensure the message has 'role' and 'parts'
-                role = msg.get("role")
-                parts = msg.get("parts")
-                if role and parts:
-                    contents.append({
-                        "role": role,
-                        "parts": parts
-                    })
-
-        # ── Inject System Prompt & User Context ──────────────────────────────
-        # For multi-turn, we'll prepend the system instructions to the current 
-        # message if there's no history, or use them as a preceding context.
+        # ── Build system instruction (prompt + user context) ─────────────────
         context_block = (
             f"\n--- USER CONTEXT ---\n"
             f"FirstName: {first_name}\n"
@@ -500,23 +554,31 @@ async def process_chat_message(
             f"MissingBudgetCategories: {json.dumps(missing_budget_categories or [])}\n"
             f"--- END CONTEXT ---\n"
         )
-
-        # Combine system prompt with context for the "current" instruction
         instruction = f"{SYSTEM_PROMPT}\n{context_block}"
 
-        # If it's the first message, we send it all as one prompt.
-        # If we have history, we can still prepend instruction to the latest user message
-        # or use system_instruction (but let's stick to the user's "contents" request).
-        
-        current_user_message = {
-            "role": "user",
-            "parts": [{"text": f"{instruction}\nUser: {user_message}"}]
-        }
-        
-        contents.append(current_user_message)
+        # ── Create per-request model with system_instruction ─────────────────
+        # This keeps the conversation history CLEAN — no repeated prompt injection.
+        # Gemini treats system_instruction separately from the conversation turns,
+        # which dramatically improves multi-turn context retention.
+        request_model = genai.GenerativeModel(
+            "gemini-2.5-flash",
+            system_instruction=instruction,
+        )
+
+        # ── Format History as clean conversation turns ────────────────────────
+        contents = []
+        if history:
+            for msg in history:
+                role = msg.get("role")
+                parts = msg.get("parts")
+                if role and parts:
+                    contents.append({"role": role, "parts": parts})
+
+        # ── Add current user message (just the actual text) ──────────────────
+        contents.append({"role": "user", "parts": [{"text": user_message}]})
 
         # ── Call Gemini ──────────────────────────────────────────────────────
-        response = model.generate_content(contents)
+        response = request_model.generate_content(contents)
         response_text = response.text
 
         actions = parse_gemini_response(response_text)
