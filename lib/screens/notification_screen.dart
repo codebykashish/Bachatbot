@@ -3,6 +3,7 @@ import '../api_service.dart';
 import '../widgets/shared_widgets.dart';
 import '../widgets/chat_fab.dart';
 import 'category_detail_page.dart';
+import 'income_page.dart';
 
 // ── NotificationScreen ───────────────────────────────────────────────────────
 
@@ -147,16 +148,60 @@ class _NotificationScreenState extends State<NotificationScreen> {
     final type = (alert['type'] as String?)?.toLowerCase() ?? '';
     final cat = alert['category'] as String?;
 
-    // Expense alerts and budget_rebalanced → open category detail
-    // budget_set → open category detail so user can edit
-    // income → no navigation, just marked read
-    if (cat != null && cat.isNotEmpty && type != 'income') {
+    if (type == 'income') {
+      // Income alerts → open income page
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const IncomePage()));
+    } else if (cat != null && cat.isNotEmpty) {
+      // Expense / budget alerts → open category detail
       Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (_) => CategoryDetailPage(category: cat),
-        ),
+        MaterialPageRoute(builder: (_) => CategoryDetailPage(category: cat)),
       );
+    }
+  }
+
+  Future<void> _onUndoAlert(Map<String, dynamic> alert) async {
+    final id = (alert['id'] ?? alert['_id'] ?? '') as String;
+    if (id.isEmpty) return;
+
+    // Optimistically remove from list
+    setState(() {
+      _alerts.remove(alert);
+      NotificationScreen.unreadCount.value =
+          _alerts.where((a) => a['isRead'] != true).length;
+    });
+
+    try {
+      final res = await ApiService.post('/alerts/$id/undo', {});
+      if (mounted) {
+        final msg = (res['message'] as String?) ?? 'Undo successful.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: Colors.orange.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[NotificationScreen] undo error: $e');
+      await _fetchAlerts();
+      if (mounted) {
+        final errorStr = e.toString();
+        String displayMsg = 'Undo failed. Please try again.';
+        try {
+          final match = RegExp(r'"message"\s*:\s*"([^"]+)"').firstMatch(errorStr);
+          if (match != null) displayMsg = match.group(1)!;
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(displayMsg),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     }
   }
 
@@ -347,6 +392,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                             return AlertCard(
                               alert: alert,
                               onTap: () => _onAlertTap(alert),
+                              onUndo: () => _onUndoAlert(alert),
                             );
                           },
                         ),

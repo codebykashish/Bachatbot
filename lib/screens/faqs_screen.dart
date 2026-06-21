@@ -77,8 +77,13 @@ class _FaqsScreenState extends State<FaqsScreen> {
     },
     {
       'section': 'Chat & Logging',
-      'q': 'How do I undo an expense?',
-      'a': 'In the chat, say:\n• "Undo last expense"\n• "Food ko last kharcha hatau"\n• "Delete last"\n\nBachatBot removes the most recent matching transaction. You can also swipe-delete from the Transactions screen.',
+      'q': 'How do I undo an expense or income entry?',
+      'a': 'Every transaction has an Undo button:\n\n• Activity screen — tap the orange "Undo" button on any expense or income entry.\n• Category page — each expense in the Recent Activity list has an "Undo" button.\n• Income page — each income entry shows an "Undo" button in the Income History section.\n\nTapping Undo removes the record and reverses the financial effect — the budget spent amount decreases for expenses, or the income total adjusts for income entries.',
+    },
+    {
+      'section': 'Chat & Logging',
+      'q': 'What happens when I undo an expense?',
+      'a': 'The expense entry is removed and your budget is restored:\n\n1. The expense record disappears from the category activity list.\n2. The category\'s "spent" amount decreases by that exact amount.\n3. Your remaining budget goes back up.\n\nA snackbar confirms the undo with the amount and category.',
     },
     {
       'section': 'Chat & Logging',

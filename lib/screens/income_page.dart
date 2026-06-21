@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../api_service.dart';
+import '../widgets/shared_widgets.dart';
 import 'notification_screen.dart';
 
 class IncomePage extends StatefulWidget {
@@ -34,6 +35,10 @@ class _IncomePageState extends State<IncomePage> {
   bool _isAdding = false;
 
   double _totalSpent = 0;
+
+  // Income history
+  List<dynamic> _incomeAlerts = [];
+  bool _isLoadingHistory = false;
 
   double get _total => _inHand + _inBank + _onlineBanking;
   double get _unallocated => _total - _totalBudgeted;
@@ -95,6 +100,77 @@ class _IncomePageState extends State<IncomePage> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+    await _fetchIncomeHistory();
+  }
+
+  Future<void> _fetchIncomeHistory() async {
+    setState(() => _isLoadingHistory = true);
+    try {
+      final res = await ApiService.get('/alerts?type=income');
+      if (!mounted) return;
+      if (res['success'] == true) {
+        final raw = List<dynamic>.from(res['data']?['alerts'] ?? []);
+        raw.sort((a, b) {
+          final da = (a['createdAt'] ?? '').toString();
+          final db = (b['createdAt'] ?? '').toString();
+          return db.compareTo(da);
+        });
+        setState(() => _incomeAlerts = raw);
+      }
+    } catch (e) {
+      debugPrint('[IncomePage] fetchIncomeHistory error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingHistory = false);
+    }
+  }
+
+  Future<void> _undoIncomeAlert(Map<String, dynamic> alert) async {
+    final id = (alert['id'] ?? '') as String;
+    if (id.isEmpty) return;
+    final delta = (alert['incomeDelta'] as num?)?.toDouble() ??
+        (alert['amount'] as num?)?.toDouble() ?? 0;
+    final source = (alert['incomeSource'] as String?) ?? '';
+
+    // Optimistic update
+    setState(() {
+      _incomeAlerts.remove(alert);
+      if (source == 'inHand') _inHand = (_inHand - delta).clamp(0, double.infinity);
+      if (source == 'inBank') _inBank = (_inBank - delta).clamp(0, double.infinity);
+      if (source == 'onlineBanking') _onlineBanking = (_onlineBanking - delta).clamp(0, double.infinity);
+    });
+
+    try {
+      final res = await ApiService.post('/alerts/$id/undo', {});
+      if (mounted) {
+        final msg = (res['message'] as String?) ?? 'Income entry reversed.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: Colors.orange.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[IncomePage] undo error: $e');
+      await _fetchData();
+      if (mounted) {
+        final errorStr = e.toString();
+        String displayMsg = 'Undo failed. Please try again.';
+        try {
+          final match = RegExp(r'"message"\s*:\s*"([^"]+)"').firstMatch(errorStr);
+          if (match != null) displayMsg = match.group(1)!;
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(displayMsg),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
   }
 
   String _currentMonthKey() {
@@ -108,12 +184,28 @@ class _IncomePageState extends State<IncomePage> {
     final newOnline = field == 'onlineBanking' ? newValue : _onlineBanking;
     final newTotal = newInHand + newInBank + newOnline;
 
+    if (_totalBudgeted > 0 && newTotal < _totalBudgeted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Your total budget allocation is Rs ${_totalBudgeted.toInt()}. Cannot decrease income below that. Remove or reduce a category budget first.',
+            ),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+      return;
+    }
+
     if (_totalSpent > 0 && newTotal < _totalSpent) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Timile yo mahina Rs ${_totalSpent.toInt()} already kharcha garyo. Income Rs ${_totalSpent.toInt()} bhandha kom garna mildaina.',
+              'You have already spent Rs ${_totalSpent.toInt()} this month. Income cannot be set below that amount.',
             ),
             backgroundColor: Colors.red.shade700,
             behavior: SnackBarBehavior.floating,
@@ -147,7 +239,16 @@ class _IncomePageState extends State<IncomePage> {
 
   Future<void> _addIncome() async {
     final amount = double.tryParse(_addAmountCtrl.text.trim()) ?? 0;
-    if (amount <= 0) return;
+    if (amount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid amount greater than 0.'),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     setState(() => _isAdding = true);
     try {
@@ -205,6 +306,62 @@ class _IncomePageState extends State<IncomePage> {
       default:
         return key;
     }
+  }
+
+  Widget _buildIncomeHistory() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Income History',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+        ),
+        const SizedBox(height: 12),
+        if (_isLoadingHistory)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: CircularProgressIndicator(color: _primary),
+            ),
+          )
+        else if (_incomeAlerts.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 28),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.grey.shade100),
+            ),
+            child: Column(
+              children: [
+                Icon(Icons.account_balance_wallet_outlined, size: 40, color: Colors.grey.shade200),
+                const SizedBox(height: 8),
+                Text(
+                  'No income entries yet',
+                  style: TextStyle(fontSize: 14, color: Colors.grey.shade400),
+                ),
+              ],
+            ),
+          )
+        else
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: EdgeInsets.zero,
+            itemCount: _incomeAlerts.length,
+            itemBuilder: (_, i) {
+              final alert = _incomeAlerts[i] as Map<String, dynamic>;
+              final incomeDelta = (alert['incomeDelta'] as num?)?.toDouble() ?? 0;
+              return TransactionCard(
+                item: alert,
+                isIncome: true,
+                onUndo: incomeDelta > 0 ? () => _undoIncomeAlert(alert) : null,
+              );
+            },
+          ),
+      ],
+    );
   }
 
   @override
@@ -311,6 +468,10 @@ class _IncomePageState extends State<IncomePage> {
 
                     // ── Add income section ──────────────────────────────
                     _buildAddIncomeSection(),
+                    const SizedBox(height: 24),
+
+                    // ── Income history ───────────────────────────────────
+                    _buildIncomeHistory(),
                   ],
                 ),
               ),

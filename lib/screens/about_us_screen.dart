@@ -38,6 +38,12 @@ class AboutUsScreen extends StatelessWidget {
       'desc':
           'Prefer tapping over typing? Go to Categories → tap any category → use the Add Expense form for quick manual logging.',
     },
+    {
+      'icon': Icons.undo_rounded,
+      'title': 'Undo Any Transaction',
+      'desc':
+          'Made a mistake? Every expense and income entry has an Undo button. Tap it to remove the record and automatically restore your budget or income — no manual correction needed.',
+    },
   ];
 
   // ── Coming Soon ──────────────────────────────────────────────────────────

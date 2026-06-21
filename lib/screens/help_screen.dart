@@ -28,6 +28,11 @@ class HelpScreen extends StatelessWidget {
       'title': 'Tap alerts',
       'body': 'Each notification card links directly to its category page',
     },
+    {
+      'icon': 'undo',
+      'title': 'Undo entries',
+      'body': 'Tap the orange Undo button on any expense or income card to reverse it instantly',
+    },
   ];
 
   // ── Help items ───────────────────────────────────────────────────────────
