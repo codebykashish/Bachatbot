@@ -801,7 +801,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
               return TransactionCard(
                 item: alert,
                 isIncome: false,
-                onUndo: () => _undoAlert(alert),
+                onUndo: i == 0 ? () => _undoAlert(alert) : null,
               );
             },
           ),

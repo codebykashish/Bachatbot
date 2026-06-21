@@ -199,8 +199,8 @@ class AlertCard extends StatelessWidget {
     // Budget rebalanced messages are longer — give them 3 lines
     final int msgMaxLines = rawType == 'budget_rebalanced' ? 3 : 2;
 
-    // Income unread → green bg; all others → white
-    final bool showGreenBg = isIncome && !isRead;
+    // Unread → subtle green highlight (like Facebook unread); read → white
+    final bool showGreenBg = !isRead;
 
     final card = Stack(
       children: [

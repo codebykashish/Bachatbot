@@ -356,7 +356,7 @@ class _IncomePageState extends State<IncomePage> {
               return TransactionCard(
                 item: alert,
                 isIncome: true,
-                onUndo: incomeDelta > 0 ? () => _undoIncomeAlert(alert) : null,
+                onUndo: (i == 0 && incomeDelta > 0) ? () => _undoIncomeAlert(alert) : null,
               );
             },
           ),
