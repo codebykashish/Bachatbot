@@ -85,6 +85,13 @@ Set and manage monthly budgets per category from the app or via chat:
 - All budget warnings, income logs, and expense alerts in one feed
 - Tap any alert to jump directly to the related category page
 - Filter by type, time range, and category
+- Income alerts are highlighted in green; tap to mark as read
+
+### Undo System
+- Every manually-added expense or income entry has an **Undo** button
+- Undoing an expense removes the record and decrements `budget.spent` automatically
+- Undoing an income entry reverses the income delta for the correct source (in-hand / bank / online)
+- Available in the Activity feed, Category detail page, and Income history page
 
 ### Monthly Reports
 - Total income, total expense, net savings
@@ -250,6 +257,7 @@ Full specs in [endpoints.md](endpoints.md).
 | `/monthly-report` | GET | Full month report with category breakdown |
 | `/alerts` | GET | Activity feed (filters: type, dateRange, category) |
 | `/alerts/{id}/read` | PATCH | Mark alert as read |
+| `/alerts/{id}/undo` | POST | Undo an entry — reverses financial effect + soft-deletes alert |
 | `/messages` | GET | Chat history |
 | `/upload/profile-photo` | POST | Upload photo to Cloudinary |
 

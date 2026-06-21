@@ -110,6 +110,8 @@ async def add_manual_expense(
             "type": "expense",
             "message": msg,
             "category": body.category,
+            "amount": body.amount,
+            "note": body.note or "",
             "severity": "medium" if percent_used >= 80 else "low",
             "isRead": False,
             "isDeleted": False,

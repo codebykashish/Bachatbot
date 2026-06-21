@@ -5,8 +5,10 @@ from firebase_config import get_firestore
 from auth import get_current_user
 from utils import get_current_month_key, sum_category_expense
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ─── Request Schemas ─────────────────────────────────────────────────────────
@@ -74,6 +76,104 @@ async def create_or_update_budget(
         .collection("budgets")
     )
 
+    # ── Income allocation + rebalancing check ─────────────────────────────
+    rebalanced: list[dict] = []
+    try:
+        user_doc = db.collection("users").document(uid).get()
+        income_total = 0.0
+        if user_doc.exists:
+            inc = user_doc.to_dict().get("income", {})
+            income_total = float(inc.get("inHand", 0)) + float(inc.get("inBank", 0)) + float(inc.get("onlineBanking", 0))
+
+        if income_total > 0:
+            all_budget_docs = list(budgets_ref.where("monthKey", "==", month_key).stream())
+
+            # Find old limit for this category (0 if new)
+            old_limit = 0.0
+            for b in all_budget_docs:
+                bd = b.to_dict()
+                if bd.get("category") == body.category:
+                    old_limit = float(bd.get("limit", 0))
+                    break
+
+            # What would total allocation be after this change?
+            current_total = sum(float(b.to_dict().get("limit", 0)) for b in all_budget_docs)
+            new_total_allocated = current_total - old_limit + body.limit
+
+            if new_total_allocated > income_total:
+                shortfall = new_total_allocated - income_total
+
+                # Build list of other categories with unused budget buffer
+                other_buffers = []
+                for b in all_budget_docs:
+                    bd = b.to_dict()
+                    cat = bd.get("category", "")
+                    if cat == body.category:
+                        continue
+                    limit = float(bd.get("limit", 0))
+                    # Use stored spent as floor (kept in sync via Increment)
+                    spent = float(bd.get("spent", 0))
+                    buffer = max(0.0, limit - spent)
+                    if buffer > 0:
+                        other_buffers.append({
+                            "ref": b.reference,
+                            "category": cat,
+                            "limit": limit,
+                            "spent": spent,
+                            "buffer": buffer,
+                        })
+
+                total_buffer = sum(ob["buffer"] for ob in other_buffers)
+
+                if total_buffer < shortfall:
+                    unallocated = max(0.0, income_total - (current_total - old_limit))
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "success": False,
+                            "error": {
+                                "code": "BUDGET_EXCEEDS_INCOME",
+                                "message": (
+                                    f"Cannot set budget to Rs {int(body.limit)}. "
+                                    f"Rs {int(unallocated)} is unallocated from income and "
+                                    f"Rs {int(total_buffer)} can be freed from other categories — "
+                                    f"only Rs {int(unallocated + total_buffer)} total available."
+                                ),
+                            },
+                        },
+                    )
+
+                # Auto-rebalance: reduce other categories proportionally from their unused buffer
+                for ob in other_buffers:
+                    reduction = round((ob["buffer"] / total_buffer) * shortfall, 2)
+                    new_limit = max(ob["spent"], ob["limit"] - reduction)
+                    ob["ref"].update({"limit": new_limit, "updatedAt": SERVER_TIMESTAMP})
+                    rebalanced.append({
+                        "category": ob["category"],
+                        "oldLimit": ob["limit"],
+                        "newLimit": new_limit,
+                    })
+                    # Create alert so user can see what changed in Activity feed
+                    try:
+                        db.collection("users").document(uid).collection("alerts").document().set({
+                            "type": "budget_rebalanced",
+                            "message": f"{ob['category']} budget reduced from Rs {int(ob['limit'])} to Rs {int(new_limit)} to fit {body.category} budget.",
+                            "category": ob["category"],
+                            "severity": "low",
+                            "isRead": False,
+                            "isDeleted": False,
+                            "monthKey": month_key,
+                            "createdAt": SERVER_TIMESTAMP,
+                        })
+                    except Exception:
+                        pass
+
+                logger.info(f"[BUDGET] Rebalanced {len(rebalanced)} categories for uid={uid} to fit {body.category} Rs {body.limit}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"[BUDGET] income/rebalance check failed (non-fatal): {e}")
+
     # Check for an existing budget for this category + month
     existing_query = (
         budgets_ref
@@ -119,14 +219,17 @@ async def create_or_update_budget(
             "success": True,
             "message": f"Budget for '{body.category}' updated.",
             "data": {
-                "id": doc_ref.id,
-                "category": body.category,
-                "limit": body.limit,
-                "spent": spent,
-                "remaining": max(0.0, body.limit - spent),
-                "percentUsed": percent_used,
-                "alertThreshold": threshold,
-                "monthKey": month_key,
+                "budget": {
+                    "id": doc_ref.id,
+                    "category": body.category,
+                    "limit": body.limit,
+                    "spent": spent,
+                    "remaining": max(0.0, body.limit - spent),
+                    "percentUsed": percent_used,
+                    "alertThreshold": threshold,
+                    "monthKey": month_key,
+                },
+                "rebalanced": rebalanced,
             },
         }
 
@@ -167,14 +270,17 @@ async def create_or_update_budget(
         "success": True,
         "message": f"Budget for '{body.category}' created.",
         "data": {
-            "id": new_ref.id,
-            "category": body.category,
-            "limit": body.limit,
-            "spent": actual_spent,
-            "remaining": max(0.0, body.limit - actual_spent),
-            "percentUsed": percent_used,
-            "alertThreshold": threshold,
-            "monthKey": month_key,
+            "budget": {
+                "id": new_ref.id,
+                "category": body.category,
+                "limit": body.limit,
+                "spent": actual_spent,
+                "remaining": max(0.0, body.limit - actual_spent),
+                "percentUsed": percent_used,
+                "alertThreshold": threshold,
+                "monthKey": month_key,
+            },
+            "rebalanced": rebalanced,
         },
     }
 

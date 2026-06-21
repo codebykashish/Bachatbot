@@ -75,37 +75,40 @@ async def update_income(
         month_key = get_current_month_key()
         alerts_ref = db.collection("users").document(uid).collection("alerts")
 
-        messages: list[str] = []
+        # Build one alert per changed source, with undo metadata
+        source_changes: list[tuple[str, str, float]] = []  # (field, label, delta)
 
         if in_hand != old_in_hand:
             diff = in_hand - old_in_hand
-            if diff > 0:
-                messages.append(f"Rs {int(diff)} added to In Hand income.")
-            else:
-                messages.append(f"In Hand income updated to Rs {int(in_hand)}.")
+            label = "In Hand"
+            msg = f"Rs {int(diff)} added to {label} income." if diff > 0 else f"{label} income updated to Rs {int(in_hand)}."
+            source_changes.append(("inHand", msg, diff))
 
         if in_bank != old_in_bank:
             diff = in_bank - old_in_bank
-            if diff > 0:
-                messages.append(f"Rs {int(diff)} added to In Bank income.")
-            else:
-                messages.append(f"In Bank income updated to Rs {int(in_bank)}.")
+            label = "In Bank"
+            msg = f"Rs {int(diff)} added to {label} income." if diff > 0 else f"{label} income updated to Rs {int(in_bank)}."
+            source_changes.append(("inBank", msg, diff))
 
         if online_banking != old_online:
             diff = online_banking - old_online
-            if diff > 0:
-                messages.append(f"Rs {int(diff)} added to Online Banking income.")
-            else:
-                messages.append(f"Online Banking income updated to Rs {int(online_banking)}.")
+            label = "Online Banking"
+            msg = f"Rs {int(diff)} added to {label} income." if diff > 0 else f"{label} income updated to Rs {int(online_banking)}."
+            source_changes.append(("onlineBanking", msg, diff))
 
-        if not messages:
-            messages.append(f"Rs {int(total)} total income set.")
+        if not source_changes:
+            source_changes.append(("", f"Rs {int(total)} total income set.", 0.0))
 
-        for msg in messages:
+        for (source_field, msg, delta) in source_changes:
+            # Only positive additions are undoable (incomeSource + incomeDelta)
+            is_addition = source_field and delta > 0
             alerts_ref.document().set({
                 "type": "income",
                 "message": msg,
                 "category": None,
+                "amount": abs(delta),           # always show the real change amount
+                "incomeSource": source_field if is_addition else None,
+                "incomeDelta": delta if is_addition else 0.0,
                 "severity": "low",
                 "isRead": False,
                 "isDeleted": False,
