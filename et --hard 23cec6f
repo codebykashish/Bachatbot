@@ -1,0 +1,20 @@
+[33m9630c89[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mnam[m[33m, [m[1;31morigin/sabsync[m[33m, [m[1;31morigin/nam[m[33m)[m HEAD@{0}: reset: moving to origin/sabsync
+[33m9630c89[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mnam[m[33m, [m[1;31morigin/sabsync[m[33m, [m[1;31morigin/nam[m[33m)[m HEAD@{1}: reset: moving to origin/sabsync
+[33m9630c89[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mnam[m[33m, [m[1;31morigin/sabsync[m[33m, [m[1;31morigin/nam[m[33m)[m HEAD@{2}: reset: moving to origin/sabsync
+[33m23cec6f[m HEAD@{3}: commit (merge): Resolved merge conflicts from sabsync
+[33me3d1793[m HEAD@{4}: reset: moving to HEAD
+[33me3d1793[m HEAD@{5}: merge sabsync: Merge made by the 'ort' strategy.
+[33m88b3860[m HEAD@{6}: checkout: moving from sabsync to nam
+[33me894ab1[m[33m ([m[1;32msabsync[m[33m)[m HEAD@{7}: pull origin sabsync: Merge made by the 'ort' strategy.
+[33mcd4babc[m HEAD@{8}: checkout: moving from nam to sabsync
+[33m88b3860[m HEAD@{9}: commit: change link
+[33mf70435a[m HEAD@{10}: commit (merge): Merge latest sabsync changes into nam
+[33m3fc6572[m HEAD@{11}: rebase (finish): returning to refs/heads/nam
+[33m3fc6572[m HEAD@{12}: rebase (pick): sabsync code
+[33mc101683[m HEAD@{13}: rebase (pick): RE-chat
+[33m9604df6[m HEAD@{14}: rebase (continue): pull sabsync
+[33m8233346[m HEAD@{15}: rebase (continue): addition of splash screen,feature ubboarding page linking signin sinup page
+[33m8d9f3b0[m HEAD@{16}: pull origin nam --rebase (start): checkout 8d9f3b0f0b7810c9b509c617e536a1a936a9199b
+[33m72239c2[m HEAD@{17}: checkout: moving from sabsync to nam
+[33mcd4babc[m HEAD@{18}: commit (merge): Resolve merge conflict with sabsync
+[33mde6cda0[m HEAD@{19}: checkout: moving from nam to sabsync
