@@ -95,7 +95,7 @@ class _IncomeOnboardingScreenState extends State<IncomeOnboardingScreen> {
   void _skipAll() {
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (_) => MainScreen(firstName: widget.firstName)),
+      MaterialPageRoute(builder: (_) => MainScreen(firstName: widget.firstName, showTour: true)),
       (route) => false,
     );
   }

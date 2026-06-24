@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/notification_sync_service.dart';
 import '../services/month_event_service.dart';
 import 'home_screen.dart';
@@ -18,78 +19,189 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   static const Color _primary = Color(0xFF2DBE7F);
 
   int _currentIndex = 0;
 
-  // Keys so we can call refresh on each tab without re-creating widgets
-  final _homeKey = GlobalKey<HomeScreenState>();
+  final _homeKey       = GlobalKey<HomeScreenState>();
   final _categoriesKey = GlobalKey<CategoriesScreenState>();
-  final _reportsKey = GlobalKey<ReportsScreenState>();
-  final _profileKey = GlobalKey<ProfileScreenState>();
+  final _reportsKey    = GlobalKey<ReportsScreenState>();
+  final _profileKey    = GlobalKey<ProfileScreenState>();
 
-  // ── Month event banner ──────────────────────────────────────────────────
+  // Keys for spotlight positioning
+  final _fabKey        = GlobalKey();
+  final _bottomNavKey  = GlobalKey();
+
+  // ── Tour state ────────────────────────────────────────────────────────────
+  bool _tourActive = false;
+  int  _tourStep   = 0;
+
+  late final AnimationController _tourFadeCtrl;
+  late final Animation<double>   _tourFadeAnim;
+  late final AnimationController _pulseCtrl;
+  late final Animation<double>   _pulseAnim;
+
+  static const List<_TourStep> _tourSteps = [
+    _TourStep(
+      icon: Icons.waving_hand_outlined,
+      title: 'Welcome to BachatBot!',
+      body: 'Quick 5-step tour — tap each highlighted element to continue, or press Next to skip ahead.',
+      targetType: _TargetType.none,
+    ),
+    _TourStep(
+      icon: Icons.visibility_outlined,
+      title: 'Show / hide your amounts',
+      body: 'Tap the eye icon to toggle your balance and spending amounts on or off.',
+      targetType: _TargetType.eyeIcon,
+    ),
+    _TourStep(
+      icon: Icons.grid_view_outlined,
+      title: 'Set your budgets here',
+      body: 'Tap the Categories tab — add monthly spending limits for Food, Transport, Shopping, and more.',
+      targetType: _TargetType.navCategories,
+    ),
+    _TourStep(
+      icon: Icons.smart_toy_outlined,
+      title: 'Log expenses by chatting',
+      body: 'Tap the green robot button and type something like "Momo 250" or "Bus 40". BachatBot saves it instantly.',
+      targetType: _TargetType.fab,
+    ),
+    _TourStep(
+      icon: Icons.insert_chart_outlined,
+      title: 'Check your monthly report',
+      body: 'Tap the Reports tab to see your income, spending, and savings — with a Low / Medium / High status.',
+      targetType: _TargetType.navReports,
+    ),
+    _TourStep(
+      icon: Icons.person_outline_rounded,
+      title: 'Manage your profile',
+      body: 'Tap Profile to edit your info, update income, view FAQs, or reach out to us.',
+      targetType: _TargetType.navProfile,
+    ),
+  ];
+
+  // ── Month event banner ────────────────────────────────────────────────────
   MonthEvent? _activeBanner;
   late final VoidCallback _monthBannerListener;
 
-  String get _appBarTitle {
-    switch (_currentIndex) {
-      case 0:
-        return 'BachatBot';
-      case 1:
-        return 'Categories';
-      case 2:
-        return 'Reports';
-      case 3:
-        return 'Profile';
-      default:
-        return 'BachatBot';
-    }
-  }
-
+  // ─────────────────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
-    // Initialize real notification sync listener (Android only)
+
+    _tourFadeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 350));
+    _tourFadeAnim = CurvedAnimation(parent: _tourFadeCtrl, curve: Curves.easeInOut);
+
+    _pulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))
+      ..repeat(reverse: true);
+    _pulseAnim = CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut);
+
     NotificationSyncService().init();
-    // Initialize month event polling service
     MonthEventService().init();
-    // Listen for month events to show in-app banners
+
     _monthBannerListener = () {
       final event = MonthEventService.eventNotifier.value;
       if (event != null && mounted) {
         setState(() => _activeBanner = event);
-        // Auto-dismiss after 8 seconds
         Future.delayed(const Duration(seconds: 8), () {
           if (mounted) setState(() => _activeBanner = null);
         });
       }
     };
     MonthEventService.eventNotifier.addListener(_monthBannerListener);
+
+    if (widget.showTour) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkAndStartTour());
+    }
   }
 
   @override
   void dispose() {
+    _tourFadeCtrl.dispose();
+    _pulseCtrl.dispose();
     MonthEventService.eventNotifier.removeListener(_monthBannerListener);
     super.dispose();
   }
 
-  /// Intent-based real-time refresh callback from chat.
-  /// Called while chat is still open, immediately after bot responds.
-  void _onChatRefreshNeeded({
-    bool refreshHome = false,
-    bool refreshCategories = false,
-  }) {
-    if (refreshHome) {
-      _homeKey.currentState?.refresh();
-    }
-    if (refreshCategories) {
-      _categoriesKey.currentState?.refresh();
+  // ── Tour helpers ──────────────────────────────────────────────────────────
+
+  Future<void> _checkAndStartTour() async {
+    final prefs = await SharedPreferences.getInstance();
+    // Always show tour for a fresh account coming through onboarding
+    await prefs.setBool('tour_done', false);
+    await Future.delayed(const Duration(milliseconds: 1000));
+    if (mounted) {
+      setState(() {
+        _tourActive = true;
+        _tourStep   = 0;
+      });
+      _tourFadeCtrl.forward();
     }
   }
 
-  // Open chat; if a message was sent (returns true) → refresh home totals
+  void _tourAdvance() {
+    if (_tourStep < _tourSteps.length - 1) {
+      setState(() => _tourStep++);
+    } else {
+      _tourFinish();
+    }
+  }
+
+  Future<void> _tourFinish() async {
+    await _tourFadeCtrl.reverse();
+    if (mounted) setState(() => _tourActive = false);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('tour_done', true);
+  }
+
+  /// Returns the screen-space Rect for the element the current step highlights.
+  Rect? _spotlightRect(BuildContext context) {
+    final step = _tourSteps[_tourStep];
+    switch (step.targetType) {
+      case _TargetType.none:
+        return null;
+
+      case _TargetType.eyeIcon:
+        final box = _homeKey.currentState?.eyeIconKey.currentContext
+            ?.findRenderObject() as RenderBox?;
+        if (box == null) return null;
+        final pos = box.localToGlobal(Offset.zero);
+        return (pos - const Offset(6, 6)) &
+            Size(box.size.width + 12, box.size.height + 12);
+
+      case _TargetType.fab:
+        final box = _fabKey.currentContext?.findRenderObject() as RenderBox?;
+        if (box == null) return null;
+        final pos = box.localToGlobal(Offset.zero);
+        return (pos - const Offset(10, 10)) &
+            Size(box.size.width + 20, box.size.height + 20);
+
+      case _TargetType.navCategories:
+        return _navItemRect(1, context);
+      case _TargetType.navReports:
+        return _navItemRect(2, context);
+      case _TargetType.navProfile:
+        return _navItemRect(3, context);
+    }
+  }
+
+  Rect? _navItemRect(int tabIndex, BuildContext context) {
+    final navBox = _bottomNavKey.currentContext?.findRenderObject() as RenderBox?;
+    if (navBox == null) return null;
+    final navPos  = navBox.localToGlobal(Offset.zero);
+    final navSize = navBox.size;
+    final itemW   = navSize.width / 4;
+    return Rect.fromLTWH(navPos.dx + itemW * tabIndex, navPos.dy, itemW, navSize.height);
+  }
+
+  // ── Chat ──────────────────────────────────────────────────────────────────
+
+  void _onChatRefreshNeeded({bool refreshHome = false, bool refreshCategories = false}) {
+    if (refreshHome) _homeKey.currentState?.refresh();
+    if (refreshCategories) _categoriesKey.currentState?.refresh();
+  }
+
   Future<void> _openChat() async {
     final sent = await Navigator.push<bool>(
       context,
@@ -97,7 +209,6 @@ class _MainScreenState extends State<MainScreen> {
         builder: (_) => ChatBotPage(onRefreshNeeded: _onChatRefreshNeeded),
       ),
     );
-    // Also refresh on pop as a safety net
     if (sent == true && mounted) {
       _homeKey.currentState?.refresh();
       _categoriesKey.currentState?.refresh();
@@ -105,135 +216,322 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  // ── App bar title ─────────────────────────────────────────────────────────
+
+  String get _appBarTitle {
+    switch (_currentIndex) {
+      case 0: return 'BachatBot';
+      case 1: return 'Categories';
+      case 2: return 'Reports';
+      case 3: return 'Profile';
+      default: return 'BachatBot';
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF6F7F9),
-      // ── Single AppBar (no child screen has its own) ───────────────────────
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        centerTitle: true,
-        leading: _currentIndex > 0
-            ? IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.black87),
-                onPressed: () => setState(() => _currentIndex = 0),
-              )
-            : null,
-        title: Text(
-          _appBarTitle,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: _currentIndex == 0 ? _primary : Colors.black87,
-            fontSize: 20,
-          ),
-        ),
-        iconTheme: const IconThemeData(color: Colors.black87),
-        actions: [
-          IconButton(
-            icon: ValueListenableBuilder<int>(
-              valueListenable: NotificationScreen.unreadCount,
-              builder: (context, count, child) {
-                return Badge(
-                  isLabelVisible: count > 0,
-                  label: Text(count > 99 ? '99+' : count.toString()),
-                  child: const Icon(Icons.notifications_none),
-                );
-              },
-            ),
-            tooltip: 'Notifications',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const NotificationScreen()),
-            ),
-          ),
-        ],
-      ),
-      // ── IndexedStack keeps each tab's scroll/state alive ─────────────────
-      body: Stack(
-        children: [
-          IndexedStack(
-            index: _currentIndex,
-            children: [
-              HomeScreen(
-                key: _homeKey,
-                firstName: widget.firstName,
-                showTour: widget.showTour,
-                onSeeAllCategories: () => setState(() => _currentIndex = 1),
-                onViewFullReports: () => setState(() => _currentIndex = 2),
+    return Stack(
+      children: [
+        Scaffold(
+          backgroundColor: const Color(0xFFF6F7F9),
+          appBar: AppBar(
+            backgroundColor: Colors.white,
+            elevation: 0.5,
+            centerTitle: true,
+            leading: _currentIndex > 0
+                ? IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.black87),
+                    onPressed: () => setState(() => _currentIndex = 0),
+                  )
+                : null,
+            title: Text(
+              _appBarTitle,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: _currentIndex == 0 ? _primary : Colors.black87,
+                fontSize: 20,
               ),
-              CategoriesScreen(key: _categoriesKey),
-              ReportsScreen(key: _reportsKey),
-              ProfileScreen(key: _profileKey),
+            ),
+            iconTheme: const IconThemeData(color: Colors.black87),
+            actions: [
+              IconButton(
+                icon: ValueListenableBuilder<int>(
+                  valueListenable: NotificationScreen.unreadCount,
+                  builder: (context, count, child) => Badge(
+                    isLabelVisible: count > 0,
+                    label: Text(count > 99 ? '99+' : count.toString()),
+                    child: const Icon(Icons.notifications_none),
+                  ),
+                ),
+                tooltip: 'Notifications',
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const NotificationScreen()),
+                ),
+              ),
             ],
           ),
-          // ── Month event in-app banner ─────────────────────────────────
-          if (_activeBanner != null)
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: _buildMonthBanner(_activeBanner!),
+          body: Stack(
+            children: [
+              IndexedStack(
+                index: _currentIndex,
+                children: [
+                  HomeScreen(
+                    key: _homeKey,
+                    firstName: widget.firstName,
+                    showTour: false, // tour is now managed here
+                    onSeeAllCategories: () => setState(() => _currentIndex = 1),
+                    onViewFullReports:  () => setState(() => _currentIndex = 2),
+                    onAddCategory: () {
+                      setState(() => _currentIndex = 1);
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        _categoriesKey.currentState?.openAddSheet();
+                      });
+                    },
+                    onEyeTapped: () {
+                      if (_tourActive && _tourStep == 1) _tourAdvance();
+                    },
+                  ),
+                  CategoriesScreen(key: _categoriesKey),
+                  ReportsScreen(key: _reportsKey),
+                  ProfileScreen(key: _profileKey),
+                ],
+              ),
+              if (_activeBanner != null)
+                Positioned(
+                  top: 0, left: 0, right: 0,
+                  child: _buildMonthBanner(_activeBanner!),
+                ),
+            ],
+          ),
+          floatingActionButton: FloatingActionButton(
+            key: _fabKey,
+            backgroundColor: _primary,
+            tooltip: 'Chat with BachatBot',
+            onPressed: () {
+              if (_tourActive && _tourStep == 3) _tourAdvance();
+              _openChat();
+            },
+            child: const Icon(Icons.smart_toy_outlined, color: Colors.white),
+          ),
+          bottomNavigationBar: BottomNavigationBar(
+            key: _bottomNavKey,
+            currentIndex: _currentIndex,
+            selectedItemColor: _primary,
+            unselectedItemColor: Colors.grey,
+            backgroundColor: Colors.white,
+            elevation: 8,
+            type: BottomNavigationBarType.fixed,
+            onTap: (i) {
+              setState(() => _currentIndex = i);
+              // Tour advancement for nav items
+              if (_tourActive) {
+                if (_tourStep == 2 && i == 1) Future.delayed(const Duration(milliseconds: 150), _tourAdvance);
+                if (_tourStep == 4 && i == 2) Future.delayed(const Duration(milliseconds: 150), _tourAdvance);
+                if (_tourStep == 5 && i == 3) Future.delayed(const Duration(milliseconds: 150), _tourAdvance);
+              }
+              if (i == 0) { _homeKey.currentState?.refresh(); }
+              else if (i == 1) { _categoriesKey.currentState?.refresh(); }
+              else if (i == 2) { _reportsKey.currentState?.refresh(); }
+              else if (i == 3) { _profileKey.currentState?.refresh(); }
+            },
+            items: const [
+              BottomNavigationBarItem(icon: Icon(Icons.home_outlined),          activeIcon: Icon(Icons.home),           label: 'Home'),
+              BottomNavigationBarItem(icon: Icon(Icons.grid_view_outlined),      activeIcon: Icon(Icons.grid_view),      label: 'Categories'),
+              BottomNavigationBarItem(icon: Icon(Icons.insert_chart_outlined),   activeIcon: Icon(Icons.insert_chart),   label: 'Reports'),
+              BottomNavigationBarItem(icon: Icon(Icons.person_outline),          activeIcon: Icon(Icons.person),         label: 'Profile'),
+            ],
+          ),
+        ),
+
+        // ── Spotlight tour overlay ────────────────────────────────────────
+        if (_tourActive)
+          FadeTransition(
+            opacity: _tourFadeAnim,
+            child: _buildTourOverlay(context),
+          ),
+      ],
+    );
+  }
+
+  // ── Tour overlay ──────────────────────────────────────────────────────────
+
+  Widget _buildTourOverlay(BuildContext context) {
+    final step      = _tourSteps[_tourStep];
+    final spotlight = _spotlightRect(context);
+    final size      = MediaQuery.of(context).size;
+
+    // Position tour card above spotlight when spotlight is in the lower half
+    final bool spotlightIsLow =
+        spotlight != null && spotlight.top > size.height * 0.55;
+    final double cardBottom =
+        spotlightIsLow ? (size.height - spotlight.top + 12) : 90;
+
+    return Stack(
+      children: [
+        // Dark overlay with spotlight hole — IgnorePointer so real widgets work
+        IgnorePointer(
+          child: CustomPaint(
+            size: size,
+            painter: _SpotlightPainter(spotlight: spotlight, pulse: _pulseAnim.value),
+          ),
+        ),
+
+        // Pulsing ring around spotlight — purely decorative
+        if (spotlight != null)
+          IgnorePointer(
+            child: AnimatedBuilder(
+              animation: _pulseAnim,
+              builder: (_, __) => CustomPaint(
+                size: size,
+                painter: _SpotlightPainter(spotlight: spotlight, pulse: _pulseAnim.value),
+              ),
             ),
+          ),
+
+        // Tour card
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: cardBottom,
+          child: Material(
+            color: Colors.transparent,
+            child: _buildTourCard(step, spotlight, size),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTourCard(_TourStep step, Rect? spotlight, Size screenSize) {
+    final isLast = _tourStep == _tourSteps.length - 1;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _primary.withValues(alpha: 0.22), width: 1.5),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 32, offset: const Offset(0, 12)),
+          BoxShadow(color: _primary.withValues(alpha: 0.10), blurRadius: 16, offset: const Offset(0, 4)),
         ],
       ),
-      // ── FAB → chat ────────────────────────────────────────────────────────
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: _primary,
-        tooltip: 'Chat with BachatBot',
-        onPressed: _openChat,
-        child: const Icon(Icons.smart_toy_outlined, color: Colors.white),
-      ),
-      // ── Bottom nav ────────────────────────────────────────────────────────
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        selectedItemColor: _primary,
-        unselectedItemColor: Colors.grey,
-        backgroundColor: Colors.white,
-        elevation: 8,
-        type: BottomNavigationBarType.fixed,
-        onTap: (i) {
-          setState(() => _currentIndex = i);
-          if (i == 0) {
-            _homeKey.currentState?.refresh();
-          } else if (i == 1) {
-            _categoriesKey.currentState?.refresh();
-          } else if (i == 2) {
-            _reportsKey.currentState?.refresh();
-          } else if (i == 3) {
-            _profileKey.currentState?.refresh();
-          }
-        },
-        items: const [
-          BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home),
-              label: 'Home'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.grid_view_outlined),
-              activeIcon: Icon(Icons.grid_view),
-              label: 'Categories'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.insert_chart_outlined),
-              activeIcon: Icon(Icons.insert_chart),
-              label: 'Reports'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              activeIcon: Icon(Icons.person),
-              label: 'Profile'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Progress dots + counter + skip
+          Row(
+            children: [
+              ...List.generate(_tourSteps.length, (i) => AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                width: i == _tourStep ? 20 : 6,
+                height: 6,
+                margin: const EdgeInsets.only(right: 4),
+                decoration: BoxDecoration(
+                  color: i == _tourStep ? _primary : Colors.grey.shade200,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              )),
+              const SizedBox(width: 8),
+              Text(
+                '${_tourStep + 1} / ${_tourSteps.length}',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontWeight: FontWeight.w500),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: _tourFinish,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(12)),
+                  child: Text('Skip', style: TextStyle(color: Colors.grey.shade500, fontSize: 12, fontWeight: FontWeight.w500)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Icon + title
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 46, height: 46,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [_primary.withValues(alpha: 0.15), _primary.withValues(alpha: 0.06)],
+                    begin: Alignment.topLeft, end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(step.icon, color: _primary, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  step.title,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87, height: 1.3),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          Text(step.body, style: const TextStyle(fontSize: 13.5, color: Colors.black54, height: 1.55)),
+
+          // "Tap the highlighted element" hint
+          if (step.targetType != _TargetType.none) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                AnimatedBuilder(
+                  animation: _pulseAnim,
+                  builder: (_, __) => Icon(
+                    Icons.touch_app_outlined,
+                    size: 14,
+                    color: _primary.withValues(alpha: 0.5 + 0.5 * _pulseAnim.value),
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  'Tap the highlighted area above',
+                  style: TextStyle(fontSize: 11.5, color: _primary.withValues(alpha: 0.75), fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          ],
+
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(
+              onPressed: _tourAdvance,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primary,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+              ),
+              child: Text(
+                isLast ? "Let's Go! 🚀" : 'Next  →',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  // ── Month event banner widget ───────────────────────────────────────────
+  // ── Month event banner ────────────────────────────────────────────────────
 
   Widget _buildMonthBanner(MonthEvent event) {
-    final isPreMonth = event.type == MonthEventType.preNewMonth;
-    final bannerColor =
-        isPreMonth ? const Color(0xFF4F6CFF) : const Color(0xFF2DBE7F);
+    final isPreMonth  = event.type == MonthEventType.preNewMonth;
+    final bannerColor = isPreMonth ? const Color(0xFF4F6CFF) : _primary;
     final title = isPreMonth ? 'Naya mahina aaudaichha' : 'Naya mahina suru bhayo!';
-    final body = isPreMonth
+    final body  = isPreMonth
         ? 'Agami mahina ko budget herera set / update garnu hola.'
         : 'Paila ko mahina ko kharcha ko base ma timro yo mahina ko budget set gariyeko chha.';
 
@@ -247,44 +545,19 @@ class _MainScreenState extends State<MainScreen> {
         decoration: BoxDecoration(
           color: bannerColor,
           borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: bannerColor.withValues(alpha: 0.3),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: bannerColor.withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6))],
         ),
         child: Row(
           children: [
-            Icon(
-              isPreMonth
-                  ? Icons.calendar_month_outlined
-                  : Icons.celebration_outlined,
-              color: Colors.white,
-              size: 22,
-            ),
+            Icon(isPreMonth ? Icons.calendar_month_outlined : Icons.celebration_outlined, color: Colors.white, size: 22),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13.5,
-                    ),
-                  ),
+                  Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13.5)),
                   const SizedBox(height: 2),
-                  Text(
-                    body,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.88),
-                      fontSize: 12,
-                    ),
-                  ),
+                  Text(body, style: TextStyle(color: Colors.white.withValues(alpha: 0.88), fontSize: 12)),
                 ],
               ),
             ),
@@ -299,4 +572,63 @@ class _MainScreenState extends State<MainScreen> {
       ),
     );
   }
+}
+
+// ── Spotlight painter ─────────────────────────────────────────────────────────
+
+class _SpotlightPainter extends CustomPainter {
+  final Rect? spotlight;
+  final double pulse; // 0.0–1.0 for pulsing ring
+
+  const _SpotlightPainter({this.spotlight, this.pulse = 0});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Dark overlay with evenOdd cutout
+    final path = Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
+
+    if (spotlight != null) {
+      final padded = spotlight!.inflate(10);
+      path.addRRect(RRect.fromRectAndRadius(padded, const Radius.circular(18)));
+      path.fillType = PathFillType.evenOdd;
+    }
+
+    canvas.drawPath(path, Paint()..color = Colors.black.withValues(alpha: 0.62));
+
+    // Green pulsing border around spotlight
+    if (spotlight != null) {
+      final ringInflate = 10.0 + 5.0 * pulse;
+      final borderPaint = Paint()
+        ..color = const Color(0xFF2DBE7F).withValues(alpha: 0.55 + 0.35 * pulse)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(spotlight!.inflate(ringInflate), const Radius.circular(20)),
+        borderPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SpotlightPainter old) =>
+      old.spotlight != spotlight || old.pulse != pulse;
+}
+
+// ── Data classes ──────────────────────────────────────────────────────────────
+
+enum _TargetType { none, eyeIcon, navCategories, navReports, navProfile, fab }
+
+class _TourStep {
+  final IconData  icon;
+  final String    title;
+  final String    body;
+  final _TargetType targetType;
+
+  const _TourStep({
+    required this.icon,
+    required this.title,
+    required this.body,
+    required this.targetType,
+  });
 }

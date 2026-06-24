@@ -85,74 +85,80 @@ class _GetStartedScreenState extends State<GetStartedScreen> with SingleTickerPr
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            SizedBox(height: isLandscape ? 10 : screenHeight * 0.08),
-                            // Large Creative Money Flow Illustration
+                            SizedBox(height: isLandscape ? 10 : screenHeight * 0.06),
+                            // Mini chat preview
                             Container(
-                              width: illustrationSize,
-                              height: illustrationSize,
+                              width: illustrationSize * 1.15,
+                              padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: primaryColor.withValues(alpha: 0.05),
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(22),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: primaryColor.withValues(alpha: 0.12),
+                                    blurRadius: 24,
+                                    offset: const Offset(0, 8),
+                                  ),
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.04),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                                border: Border.all(color: primaryColor.withValues(alpha: 0.1)),
                               ),
-                              child: Stack(
-                                alignment: Alignment.center,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // Floating circles behind
-                                  Positioned(
-                                    left: illustrationSize * 0.1,
-                                    top: illustrationSize * 0.1,
-                                    child: CircleAvatar(
-                                      radius: illustrationSize * 0.08,
-                                      backgroundColor: const Color(0xFFFFB300).withValues(alpha: 0.15),
-                                      child: const Icon(Icons.attach_money, color: Color(0xFFFFB300)),
-                                    ),
+                                  Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 14,
+                                        backgroundColor: primaryColor.withValues(alpha: 0.12),
+                                        child: const Icon(Icons.smart_toy_outlined, color: primaryColor, size: 16),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'BachatBot',
+                                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 12),
+                                      ),
+                                      const Spacer(),
+                                      Container(
+                                        width: 7, height: 7,
+                                        decoration: const BoxDecoration(color: Color(0xFF4CAF50), shape: BoxShape.circle),
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text('Online', style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                                    ],
                                   ),
-                                  Positioned(
-                                    right: illustrationSize * 0.12,
-                                    bottom: illustrationSize * 0.15,
-                                    child: CircleAvatar(
-                                      radius: illustrationSize * 0.07,
-                                      backgroundColor: primaryColor.withValues(alpha: 0.15),
-                                      child: const Icon(Icons.trending_up, color: primaryColor),
-                                    ),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                    child: Divider(height: 1, color: Colors.grey.shade100),
                                   ),
-                                  // Hand holding phone representation
-                                  Icon(
-                                    Icons.phone_android_rounded,
-                                    size: illustrationSize * 0.55,
-                                    color: Colors.grey.shade800,
-                                  ),
-                                  Positioned(
-                                    top: illustrationSize * 0.32,
-                                    child: Icon(
-                                      Icons.touch_app_rounded,
-                                      size: illustrationSize * 0.2,
-                                      color: primaryColor,
-                                    ),
-                                  ),
-                                  // Floating coins/dollars
-                                  Positioned(
-                                    top: illustrationSize * 0.18,
-                                    right: illustrationSize * 0.18,
-                                    child: const Icon(
-                                      Icons.monetization_on_rounded,
-                                      color: Color(0xFFFFB300),
-                                      size: 32,
-                                    ),
-                                  ),
-                                  Positioned(
-                                    bottom: illustrationSize * 0.28,
-                                    left: illustrationSize * 0.15,
-                                    child: const Icon(
-                                      Icons.savings_rounded,
-                                      color: Color(0xFFFFB300),
-                                      size: 36,
-                                    ),
-                                  ),
+                                  _chatBubble(isUser: true, text: 'Momo khayo 250 😋', primaryColor: primaryColor),
+                                  const SizedBox(height: 7),
+                                  _chatBubble(isUser: false, text: '✓ Rs 250 Food ma save bhayo!\nFood: Rs 2,250 / 5,000 (45%)', primaryColor: primaryColor),
+                                  const SizedBox(height: 7),
+                                  _chatBubble(isUser: true, text: 'Bus 40 gayo', primaryColor: primaryColor),
+                                  const SizedBox(height: 7),
+                                  _chatBubble(isUser: false, text: '✓ Rs 40 Transport ma save bhayo!', primaryColor: primaryColor),
                                 ],
                               ),
                             ),
-                            SizedBox(height: screenHeight * 0.06),
+                            const SizedBox(height: 18),
+                            // Value badges
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _valueBadge('⚡', '5 seconds', primaryColor),
+                                const SizedBox(width: 8),
+                                _valueBadge('💬', 'Nepali OK', primaryColor),
+                                const SizedBox(width: 8),
+                                _valueBadge('🆓', 'Free', primaryColor),
+                              ],
+                            ),
+                            SizedBox(height: screenHeight * 0.04),
                             // Bold Title
                             Text(
                               OnboardingStrings.getStartedTitle,
@@ -252,6 +258,59 @@ class _GetStartedScreenState extends State<GetStartedScreen> with SingleTickerPr
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _chatBubble({required bool isUser, required String text, required Color primaryColor}) {
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 220),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+        decoration: BoxDecoration(
+          color: isUser ? primaryColor : const Color(0xFFF6F7F9),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(12),
+            topRight: const Radius.circular(12),
+            bottomLeft: Radius.circular(isUser ? 12 : 2),
+            bottomRight: Radius.circular(isUser ? 2 : 12),
+          ),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            color: isUser ? Colors.white : Colors.black87,
+            fontSize: 11,
+            height: 1.4,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _valueBadge(String emoji, String label, Color primaryColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: primaryColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: primaryColor.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 12)),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF1B5E20),
+            ),
+          ),
+        ],
       ),
     );
   }

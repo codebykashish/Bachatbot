@@ -35,6 +35,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
 
   double _declaredIncome = 0.0;
   double _totalAllocated = 0.0;
+  double _otherUnspentBuffer = 0.0;
 
   final _amountController = TextEditingController();
   final _noteController = TextEditingController();
@@ -67,19 +68,27 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
       final budgetsData = results[1];
       if (incomeData['success'] == true) {
         final d = incomeData['data'] as Map<String, dynamic>? ?? {};
-        final income = (d['total'] ?? 0).toDouble();
+        final income = (d['inHand'] ?? 0).toDouble() +
+            (d['inBank'] ?? 0).toDouble() +
+            (d['onlineBanking'] ?? 0).toDouble();
         final budgets = (budgetsData['data']?['budgets'] as List<dynamic>?) ?? [];
         double totalAllocated = 0;
+        double otherBuffer = 0;
         Map<String, dynamic>? thisBudget;
         for (final b in budgets) {
-          totalAllocated += (b['limit'] ?? 0).toDouble();
+          final bLimit = (b['limit'] ?? 0).toDouble();
+          totalAllocated += bLimit;
           if ((b['category'] as String?) == widget.category) {
             thisBudget = b as Map<String, dynamic>;
+          } else {
+            final bSpent = (b['spent'] ?? 0).toDouble();
+            otherBuffer += (bLimit - bSpent).clamp(0.0, double.infinity);
           }
         }
         setState(() {
           _declaredIncome = income;
           _totalAllocated = totalAllocated;
+          _otherUnspentBuffer = otherBuffer;
           // Update limit/spent from API so navigation from any screen works correctly
           if (thisBudget != null) {
             _budgetLimit = (thisBudget['limit'] ?? _budgetLimit).toDouble();
@@ -140,6 +149,19 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     setState(() => _showBudgetError = false);
 
     if (!_formKey.currentState!.validate()) return;
+
+    final rawAmount = double.tryParse(_amountController.text.trim()) ?? 0;
+    if (rawAmount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid amount (greater than 0).'),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     FocusScope.of(context).unfocus();
     setState(() => _isSaving = true);
 
@@ -197,6 +219,51 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     }
   }
 
+  Future<void> _undoAlert(Map<String, dynamic> alert) async {
+    final id = (alert['id'] ?? '') as String;
+    if (id.isEmpty) return;
+    final amount = (alert['amount'] as num?)?.toDouble() ?? 0;
+
+    // Optimistic update
+    setState(() {
+      _alerts.remove(alert);
+      _budgetSpent = (_budgetSpent - amount).clamp(0, double.infinity);
+    });
+
+    try {
+      final res = await ApiService.post('/alerts/$id/undo', {});
+      if (mounted) {
+        final msg = (res['message'] as String?) ?? 'Expense removed.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: Colors.orange.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[CategoryDetailPage] undo error: $e');
+      await Future.wait([_fetchAlerts(), _fetchBudgetMeta()]);
+      if (mounted) {
+        final errorStr = e.toString();
+        String displayMsg = 'Undo failed. Please try again.';
+        try {
+          final match = RegExp(r'"message"\s*:\s*"([^"]+)"').firstMatch(errorStr);
+          if (match != null) displayMsg = match.group(1)!;
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(displayMsg),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _showBudgetBottomSheet() async {
     // If income data hasn't loaded yet, wait for it now so the hint is always visible
     if (_declaredIncome == 0) {
@@ -208,9 +275,10 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
       text: _budgetLimit > 0 ? _budgetLimit.toInt().toString() : '',
     );
     final sheetFormKey = GlobalKey<FormState>();
-    // When editing, the current category's budget is freed up → add it back to available
+    // When editing, the current category's budget is freed up → add it back to available.
+    // Also include unused buffer from other categories (backend can rebalance them).
     final available = _declaredIncome > 0
-        ? (_declaredIncome - _totalAllocated + _budgetLimit).clamp(0.0, double.infinity)
+        ? (_declaredIncome - _totalAllocated + _budgetLimit + _otherUnspentBuffer).clamp(0.0, double.infinity)
         : double.infinity;
 
     // Declare outside StatefulBuilder so they survive rebuilds
@@ -264,14 +332,18 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                           color: available > 0 ? _primary : Colors.orange,
                         ),
                         const SizedBox(width: 6),
-                        Text(
-                          available > 0
-                              ? 'Rs ${available.toInt()} unallocated'
-                              : 'No unallocated income remaining',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: available > 0 ? _primary : Colors.orange,
-                            fontWeight: FontWeight.w500,
+                        Expanded(
+                          child: Text(
+                            available <= 0
+                                ? 'No budget available to allocate'
+                                : _otherUnspentBuffer > 0
+                                    ? 'Up to Rs ${available.toInt()} available (incl. Rs ${_otherUnspentBuffer.toInt()} unused from other categories)'
+                                    : 'Rs ${available.toInt()} unallocated',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: available > 0 ? _primary : Colors.orange,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ],
@@ -355,6 +427,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                                   if (res['success'] == true) {
                                     final bd = res['data']?['budget'] ??
                                         res['data'];
+                                    final rebalanced = (res['data']?['rebalanced'] as List?) ?? [];
                                     setState(() {
                                       _budgetLimit = (bd?['limit'] ??
                                               newLimit)
@@ -368,12 +441,26 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                                     Navigator.pop(ctx);
                                     _fetchBudgetMeta();
                                     if (mounted) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(SnackBar(
-                                        content: Text(
-                                            '${widget.category} budget set to Rs ${_budgetLimit.toInt()}'),
-                                        backgroundColor: Colors.green,
-                                      ));
+                                      if (rebalanced.isNotEmpty) {
+                                        final cats = rebalanced
+                                            .map((r) => r['category'])
+                                            .join(', ');
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(SnackBar(
+                                          content: Text(
+                                              '${widget.category} budget set. Other budgets adjusted to fit: $cats.'),
+                                          backgroundColor: Colors.orange.shade700,
+                                          duration: const Duration(seconds: 4),
+                                          behavior: SnackBarBehavior.floating,
+                                        ));
+                                      } else {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(SnackBar(
+                                          content: Text(
+                                              '${widget.category} budget set to Rs ${_budgetLimit.toInt()}'),
+                                          backgroundColor: Colors.green,
+                                        ));
+                                      }
                                     }
                                   } else {
                                     setSaveBtn(() => isSaving = false);
@@ -585,7 +672,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
             ],
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             decoration: InputDecoration(
-              hintText: '0',
+              hintText: 'e.g. 250',
               hintStyle: TextStyle(fontSize: 16, color: Colors.grey.shade300, fontWeight: FontWeight.w600),
               prefixText: 'Rs  ',
               prefixStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey.shade700),
@@ -709,9 +796,14 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
             physics: const NeverScrollableScrollPhysics(),
             padding: EdgeInsets.zero,
             itemCount: _alerts.length,
-            itemBuilder: (_, i) => AlertCard(
-              alert: _alerts[i] as Map<String, dynamic>,
-            ),
+            itemBuilder: (_, i) {
+              final alert = _alerts[i] as Map<String, dynamic>;
+              return TransactionCard(
+                item: alert,
+                isIncome: false,
+                onUndo: i == 0 ? () => _undoAlert(alert) : null,
+              );
+            },
           ),
       ],
     );

@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../api_service.dart';
 import '../widgets/report_chart.dart';
 import '../widgets/balance_card.dart';
-import '../widgets/app_tour_overlay.dart';
 import 'categories_screen.dart';
 import 'notification_screen.dart';
 import 'reports_screen.dart';
@@ -15,6 +14,8 @@ class HomeScreen extends StatefulWidget {
   final bool showTour;
   final VoidCallback? onSeeAllCategories;
   final VoidCallback? onViewFullReports;
+  final VoidCallback? onAddCategory;
+  final VoidCallback? onEyeTapped;
 
   const HomeScreen({
     super.key,
@@ -22,6 +23,8 @@ class HomeScreen extends StatefulWidget {
     this.showTour = false,
     this.onSeeAllCategories,
     this.onViewFullReports,
+    this.onAddCategory,
+    this.onEyeTapped,
   });
 
   @override
@@ -30,6 +33,9 @@ class HomeScreen extends StatefulWidget {
 
 class HomeScreenState extends State<HomeScreen> {
   static const Color _primary = Color(0xFF2DBE7F);
+
+  // GlobalKey so MainScreen can locate the eye icon for the spotlight tour
+  final GlobalKey eyeIconKey = GlobalKey();
 
   bool _isLoading = true;
   List<dynamic> _budgets = [];
@@ -262,9 +268,60 @@ class HomeScreenState extends State<HomeScreen> {
       ),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        itemCount: filtered.length,
+        itemCount: filtered.length + 1,
         separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (ctx, i) {
+          // Last item: "+" add category button
+          if (i == filtered.length) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () {
+                  if (widget.onAddCategory != null) {
+                    widget.onAddCategory!();
+                  } else if (widget.onSeeAllCategories != null) {
+                    widget.onSeeAllCategories!();
+                  } else {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const CategoriesScreen(showAppBar: true)),
+                    );
+                  }
+                },
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.grey.shade300, width: 1.5),
+                      ),
+                      child: Icon(Icons.add_rounded, color: Colors.grey.shade500, size: 28),
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: 60,
+                      child: Text(
+                        'Add',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade600),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    const SizedBox(height: 14),
+                  ],
+                ),
+              ),
+            );
+          }
+
           final meta = filtered[i];
           final name = meta['name'] as String;
           final budget = budgetMap[name];
@@ -496,12 +553,16 @@ class HomeScreenState extends State<HomeScreen> {
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
                 ),
                 IconButton(
+                  key: eyeIconKey,
                   icon: Icon(
                     _hideAmounts ? Icons.visibility_off_outlined : Icons.visibility_outlined,
                     color: Colors.grey[700],
                     size: 22,
                   ),
-                  onPressed: () => setState(() => _hideAmounts = !_hideAmounts),
+                  onPressed: () {
+                    setState(() => _hideAmounts = !_hideAmounts);
+                    widget.onEyeTapped?.call();
+                  },
                 ),
               ],
             ),
@@ -594,10 +655,6 @@ class HomeScreenState extends State<HomeScreen> {
       ),
     );
 
-    // Wrap with the first-time tour overlay
-    return AppTourOverlay(
-      showTour: widget.showTour,
-      child: content,
-    );
+    return content;
   }
 }

@@ -6,6 +6,81 @@ class AboutUsScreen extends StatelessWidget {
 
   static const Color _primary = Color(0xFF2DBE7F);
 
+  // ── Features (no emojis — icon + title + desc) ───────────────────────────
+  static const List<Map<String, dynamic>> _features = [
+    {
+      'icon': Icons.record_voice_over_outlined,
+      'title': 'Natural Language Tracking',
+      'desc':
+          'Say "Momo 250" or "Rent 12k pathaye" in Nepali, Roman Nepali, or English — BachatBot saves it instantly. No forms needed.',
+    },
+    {
+      'icon': Icons.account_balance_wallet_outlined,
+      'title': 'Budget Management',
+      'desc':
+          'Set monthly limits per category via chat or the Categories screen. BachatBot warns you before you overspend.',
+    },
+    {
+      'icon': Icons.bar_chart_rounded,
+      'title': 'Monthly Reports',
+      'desc':
+          'Track income vs expense vs savings every month. See Low / Medium / High spending status at a glance.',
+    },
+    {
+      'icon': Icons.translate_outlined,
+      'title': 'Bilingual Chat',
+      'desc':
+          'The chat interface understands Nepali and English — even mixed in the same message. Switch freely, no settings needed.',
+    },
+    {
+      'icon': Icons.edit_note_rounded,
+      'title': 'Manual Expense Entry',
+      'desc':
+          'Prefer tapping over typing? Go to Categories → tap any category → use the Add Expense form for quick manual logging.',
+    },
+    {
+      'icon': Icons.undo_rounded,
+      'title': 'Undo Any Transaction',
+      'desc':
+          'Made a mistake? Every expense and income entry has an Undo button. Tap it to remove the record and automatically restore your budget or income — no manual correction needed.',
+    },
+  ];
+
+  // ── Coming Soon ──────────────────────────────────────────────────────────
+  static const List<String> _roadmap = [
+    'Notification Sync (eSewa / Khalti)',
+    'Shared wallets',
+    'Recurring expenses',
+    'Voice input',
+    'WhatsApp bot',
+    'AI financial advisor',
+    'Export PDF / Excel',
+  ];
+
+  // ── Team ─────────────────────────────────────────────────────────────────
+  static const List<Map<String, String>> _team = [
+    {
+      'name': 'Kashish Dhami',
+      'role': 'Backend & AI Lead',
+      'email': 'kashish_dhami_a25@sunway.edu.np',
+    },
+    {
+      'name': 'Luniva Shrestha',
+      'role': 'Database & Architecture',
+      'email': 'luniva_shrestha_a25@sunway.edu.np',
+    },
+    {
+      'name': 'Namrata Lamichhane',
+      'role': 'Flutter Frontend Lead',
+      'email': 'namrata_lamichhane_a25@sunway.edu.np',
+    },
+    {
+      'name': 'Sabitra Pachhai',
+      'role': 'Flutter Frontend & DevOps',
+      'email': 'sabitra_pachhai_a25@sunway.edu.np',
+    },
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -22,7 +97,7 @@ class AboutUsScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Hero ──────────────────────────────────────────────────────
+            // ── Hero ────────────────────────────────────────────────────────
             Center(
               child: Column(
                 children: [
@@ -34,7 +109,7 @@ class AboutUsScreen extends StatelessWidget {
                       color: _primary.withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.account_balance_wallet_rounded,
+                    child: const Icon(Icons.smart_toy_outlined,
                         color: _primary, size: 44),
                   ),
                   const SizedBox(height: 14),
@@ -57,14 +132,15 @@ class AboutUsScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  const Divider(color: _primary, thickness: 1.5, indent: 60, endIndent: 60),
+                  const Divider(
+                      color: _primary, thickness: 1.5, indent: 60, endIndent: 60),
                 ],
               ),
             ),
 
             const SizedBox(height: 20),
 
-            // ── What is BachatBot? ────────────────────────────────────────
+            // ── What is BachatBot? ──────────────────────────────────────────
             _sectionHeading('What is BachatBot?'),
             _card(
               child: const Text(
@@ -73,54 +149,52 @@ class AboutUsScreen extends StatelessWidget {
                 'boring forms, you simply chat in Nepali, Roman Nepali, or English '
                 '— and BachatBot automatically logs your expenses, tracks budgets, '
                 'and gives you smart financial insights.',
-                style: TextStyle(fontSize: 14.5, height: 1.6, color: Color(0xFF22252A)),
+                style: TextStyle(
+                    fontSize: 14.5, height: 1.6, color: Color(0xFF22252A)),
               ),
             ),
 
             const SizedBox(height: 20),
 
-            // ── Key Features ──────────────────────────────────────────────
+            // ── Key Features ────────────────────────────────────────────────
             _sectionHeading('Key Features'),
-            ..._features.map((f) => _featureTile(f['emoji']!, f['title']!, f['desc']!)),
+            ..._features.map((f) => _featureTile(
+                  f['icon'] as IconData,
+                  f['title'] as String,
+                  f['desc'] as String,
+                )),
 
             const SizedBox(height: 20),
 
-            // ── Roadmap ───────────────────────────────────────────────────
+            // ── Coming Soon ─────────────────────────────────────────────────
             _sectionHeading('Coming Soon'),
             _card(
               child: Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: _roadmap
-                    .map((item) => _chip(item))
-                    .toList(),
+                children: _roadmap.map((item) => _chip(item)).toList(),
               ),
             ),
 
             const SizedBox(height: 20),
 
-            // ── Team ──────────────────────────────────────────────────────
+            // ── Meet the Team ───────────────────────────────────────────────
             _sectionHeading('Meet the Team'),
-            GridView.count(
-              crossAxisCount: 2,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.6,
-              children: _team
-                  .map((m) => _teamCard(m['name']!, m['role']!))
-                  .toList(),
-            ),
+            ..._team.map((m) => _teamCard(
+                  m['name']!,
+                  m['role']!,
+                  m['email']!,
+                )),
 
             const SizedBox(height: 28),
 
-            // ── Footer ────────────────────────────────────────────────────
+            // ── Footer ──────────────────────────────────────────────────────
             Center(
               child: Column(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                     decoration: BoxDecoration(
                       color: _primary.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(20),
@@ -152,50 +226,6 @@ class AboutUsScreen extends StatelessWidget {
     );
   }
 
-  static const List<Map<String, String>> _features = [
-    {
-      'emoji': '🗣️',
-      'title': 'Natural Language Tracking',
-      'desc': 'Just say "Momo 250" or "Rent 12k pathaye" — BachatBot understands and saves it instantly.',
-    },
-    {
-      'emoji': '📲',
-      'title': 'Smart Notification Sync',
-      'desc': 'eSewa, Khalti, and bank SMS are auto-parsed. Just confirm with a tap — zero manual typing.',
-    },
-    {
-      'emoji': '💰',
-      'title': 'Budget Alerts',
-      'desc': 'Set monthly budgets per category. Get warned before you overspend, not after.',
-    },
-    {
-      'emoji': '📊',
-      'title': 'Monthly Reports',
-      'desc': 'See your income vs expense vs savings every month with a full category breakdown.',
-    },
-    {
-      'emoji': '🌐',
-      'title': 'Multi-language Support',
-      'desc': 'Works in Nepali (देवनागरी), Roman Nepali, and English.',
-    },
-  ];
-
-  static const List<String> _roadmap = [
-    'Shared wallets',
-    'Recurring expenses',
-    'Voice input',
-    'WhatsApp bot',
-    'AI financial advisor',
-    'Export PDF / Excel',
-  ];
-
-  static const List<Map<String, String>> _team = [
-    {'name': 'Kashish', 'role': 'Backend & AI Lead'},
-    {'name': 'Namrata', 'role': 'Flutter Frontend Lead'},
-    {'name': 'Luniva', 'role': 'Database & Architecture'},
-    {'name': 'Sabitra', 'role': 'DevOps & Testing'},
-  ];
-
   Widget _sectionHeading(String title) => Padding(
         padding: const EdgeInsets.only(bottom: 10, left: 2),
         child: Text(
@@ -226,9 +256,9 @@ class AboutUsScreen extends StatelessWidget {
         child: child,
       );
 
-  Widget _featureTile(String emoji, String title, String desc) => Container(
+  Widget _featureTile(IconData icon, String title, String desc) => Container(
         margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
@@ -243,21 +273,34 @@ class AboutUsScreen extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(emoji, style: const TextStyle(fontSize: 24)),
-            const SizedBox(width: 12),
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: _primary.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: _primary, size: 20),
+            ),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
-                      style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF22252A))),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF22252A),
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text(desc,
-                      style: const TextStyle(
-                          fontSize: 13, color: Colors.black54, height: 1.5)),
+                  Text(
+                    desc,
+                    style: const TextStyle(
+                        fontSize: 13, color: Colors.black54, height: 1.5),
+                  ),
                 ],
               ),
             ),
@@ -274,16 +317,15 @@ class AboutUsScreen extends StatelessWidget {
         child: Text(
           label,
           style: const TextStyle(
-              fontSize: 12.5,
-              color: _primary,
-              fontWeight: FontWeight.w600),
+              fontSize: 12.5, color: _primary, fontWeight: FontWeight.w600),
         ),
       );
 
-  Widget _teamCard(String name, String role) {
+  Widget _teamCard(String name, String role, String email) {
     final initials = name.isNotEmpty ? name[0].toUpperCase() : '?';
     return Container(
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
@@ -298,32 +340,36 @@ class AboutUsScreen extends StatelessWidget {
       child: Row(
         children: [
           CircleAvatar(
-            radius: 22,
+            radius: 24,
             backgroundColor: _primary.withValues(alpha: 0.12),
             child: Text(
               initials,
               style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: _primary),
+                  fontSize: 18, fontWeight: FontWeight.bold, color: _primary),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(name,
-                    style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF22252A))),
+                Text(
+                  name,
+                  style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF22252A)),
+                ),
                 const SizedBox(height: 2),
-                Text(role,
-                    style: const TextStyle(
-                        fontSize: 11.5, color: Colors.grey),
-                    overflow: TextOverflow.ellipsis),
+                Text(
+                  role,
+                  style: const TextStyle(fontSize: 12.5, color: Colors.black54),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  email,
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade500),
+                ),
               ],
             ),
           ),

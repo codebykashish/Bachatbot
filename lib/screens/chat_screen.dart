@@ -72,6 +72,9 @@ class _ChatScreenState extends State<ChatScreen> {
   // Keyed by the assistant message ID they follow.
   final Map<String, _PendingCard> _pendingCards = {};
 
+  // ── Budget prompt cards: assistantId → category name ────────────────────
+  final Map<String, String> _budgetPromptCategories = {};
+
   // ── Month event listener ─────────────────────────────────────────────────
   late final VoidCallback _monthEventListener;
 
@@ -328,6 +331,16 @@ class _ChatScreenState extends State<ChatScreen> {
           _attachPendingCard(assistantDocId: assistantId, rawList: pendingList);
         }
 
+        // 4. Attach budget prompt card when category has no budget set.
+        if (intent == 'need_budget_before_expense') {
+          final waitingCat = data?['waitingCategory'] as String?;
+          if (waitingCat != null && waitingCat.isNotEmpty) {
+            setState(() {
+              _budgetPromptCategories[assistantId] = waitingCat;
+            });
+          }
+        }
+
         if (alerts != null && alerts.isNotEmpty) {
           NotificationScreen.unreadCount.value += alerts.length;
         }
@@ -513,16 +526,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final items = <Widget>[];
 
     if (showGreeting) {
-      items.add(Column(
-        children: [
-          const SizedBox(height: 14),
-          _assistantBubble(
-            content:
-                "Hello! I'm BachatBot, your personal finance assistant. How can I help you manage your budget today?",
-            time: "10:00 AM",
-          ),
-        ],
-      ));
+      items.add(_buildWelcomeCard());
       return items;
     }
 
@@ -538,6 +542,12 @@ class _ChatScreenState extends State<ChatScreen> {
         final card = _pendingCards[docId];
         if (card != null) {
           items.add(_buildPendingCard(card));
+        }
+
+        // Budget prompt card when category has no budget set
+        final budgetCat = _budgetPromptCategories[docId];
+        if (budgetCat != null) {
+          items.add(_buildBudgetPromptCard(budgetCat));
         }
 
         // Month event "Budget hera / change gara" button
@@ -1300,27 +1310,138 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildQuickActions() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-      child: Row(
-        children: [
-          _greetingButton(emoji: "👋", label: "Hy", message: "Hy"),
-          const SizedBox(width: 10),
-          _quickActionButton(Icons.bar_chart, "Show report"),
-          const SizedBox(width: 10),
-          _greetingButton(emoji: "👋", label: "Hello", message: "Hello"),
-        ],
+  // ─────────────────────────────────────────────────────────────────────────
+  // BUDGET PROMPT CARD — shown when an expense category has no budget set
+  // ─────────────────────────────────────────────────────────────────────────
+
+  static const Map<String, IconData> _categoryIcons = {
+    'Food': Icons.restaurant_outlined,
+    'Transport': Icons.directions_bus_outlined,
+    'Rent': Icons.home_outlined,
+    'Education': Icons.school_outlined,
+    'Shopping': Icons.shopping_bag_outlined,
+    'Health': Icons.favorite_border,
+    'Entertainment': Icons.movie_outlined,
+    'Bills': Icons.receipt_outlined,
+    'Others': Icons.category_outlined,
+  };
+
+  Widget _buildBudgetPromptCard(String category) {
+    final icon = _categoryIcons[category] ?? Icons.account_balance_wallet_outlined;
+    const cardColor = Color(0xFF7E57C2);
+    final suggested = _suggestedBudgets(category);
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 42, bottom: 10, top: 4),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: cardColor.withValues(alpha: 0.25)),
+          boxShadow: [
+            BoxShadow(
+              color: cardColor.withValues(alpha: 0.07),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: cardColor.withValues(alpha: 0.07),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: cardColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(icon, color: cardColor, size: 20),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '$category ko budget set garau!',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: cardColor,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Kati set garne? Tala click gara.',
+                          style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Suggested amounts
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Suggested budgets:',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ...suggested.map((amt) => _budgetChip(
+                            'Rs $amt',
+                            'Set $category budget $amt',
+                            cardColor,
+                          )),
+                      _budgetChip('Skip', 'Skip budget for now', Colors.grey),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _greetingButton({
-    required String emoji,
-    required String label,
-    required String message,
-  }) {
+  List<int> _suggestedBudgets(String category) {
+    const suggestions = <String, List<int>>{
+      'Food': [3000, 5000, 8000],
+      'Transport': [1000, 2000, 3500],
+      'Rent': [5000, 10000, 15000],
+      'Education': [2000, 5000, 10000],
+      'Shopping': [2000, 5000, 8000],
+      'Health': [1000, 3000, 5000],
+      'Entertainment': [1000, 2000, 4000],
+      'Bills': [2000, 5000, 8000],
+      'Others': [1000, 3000, 5000],
+    };
+    return suggestions[category] ?? [2000, 5000, 10000];
+  }
+
+  Widget _budgetChip(String label, String message, Color color) {
     return GestureDetector(
       onTap: () {
         if (_isLoading) return;
@@ -1328,39 +1449,206 @@ class _ChatScreenState extends State<ChatScreen> {
         _send();
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFE6E8EE)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
         ),
-        child: Row(
-          children: [
-            Text(emoji, style: const TextStyle(fontSize: 15)),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: const TextStyle(
-                  fontSize: 12.5, color: Color(0xFF22252A)),
-            ),
-          ],
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            color: color == Colors.grey ? Colors.grey.shade700 : color,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
   }
 
-  Widget _quickActionButton(IconData icon, String text) {
+  // ─────────────────────────────────────────────────────────────────────────
+  // WELCOME CARD — shown only when no chat history exists (first-time user)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildWelcomeCard() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Bot header ──────────────────────────────────────────────────
+          Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF2DBE7F), Color(0xFF1B8B8E)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.auto_awesome, color: Colors.white, size: 24),
+              ),
+              const SizedBox(width: 14),
+              const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Hi! I\'m BachatBot 👋',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF22252A)),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Your personal finance companion',
+                    style: TextStyle(fontSize: 12.5, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // ── Intro text ──────────────────────────────────────────────────
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE6E8EE)),
+            ),
+            child: const Text(
+              'I can help you track expenses, set budgets, and understand your spending habits. Here\'s what I can do:',
+              style: TextStyle(fontSize: 13, color: Color(0xFF22252A), height: 1.45),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // ── Feature grid ────────────────────────────────────────────────
+          Row(
+            children: [
+              Expanded(child: _featureTile(Icons.receipt_long_outlined, 'Expense Tracking', 'Log spending easily', const Color(0xFF2DBE7F))),
+              const SizedBox(width: 10),
+              Expanded(child: _featureTile(Icons.account_balance_wallet_outlined, 'Budget Setup', 'Set monthly limits', const Color(0xFF1B8B8E))),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(child: _featureTile(Icons.bar_chart_rounded, 'Reports', 'Daily & monthly stats', const Color(0xFF7E57C2))),
+              const SizedBox(width: 10),
+              Expanded(child: _featureTile(Icons.lightbulb_outline, 'Smart Insights', 'Spending suggestions', const Color(0xFFFF7043))),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ── What can I help with ────────────────────────────────────────
+          const Text(
+            'What would you like to do?',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF22252A)),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _welcomeChip('💸 Track an expense', 'I want to track an expense'),
+              _welcomeChip('📊 Today\'s report', 'How much did I spend today?'),
+              _welcomeChip('🎯 Set a budget', 'Help me set a budget'),
+              _welcomeChip('💡 Spending habits', 'Tell me about my spending habits this month'),
+              _welcomeChip('📅 Monthly report', 'Show my monthly report'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _featureTile(IconData icon, String title, String subtitle, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(height: 8),
+          Text(title, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+          const SizedBox(height: 2),
+          Text(subtitle, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        ],
+      ),
+    );
+  }
+
+  Widget _welcomeChip(String label, String message) {
     return GestureDetector(
       onTap: () {
-        _controller.text =
-            text == "Show report" ? "Show my monthly report" : text;
+        if (_isLoading) return;
+        _controller.text = message;
+        _send();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _primary.withValues(alpha: 0.35)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 12.5, color: Color(0xFF22252A), fontWeight: FontWeight.w500),
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildQuickActions() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      child: Row(
+        children: [
+          _quickActionButton(Icons.today_outlined, 'Today\'s spending'),
+          const SizedBox(width: 10),
+          _quickActionButton(Icons.bar_chart, 'Monthly report'),
+          const SizedBox(width: 10),
+          _quickActionButton(Icons.lightbulb_outline, 'Spending tips'),
+          const SizedBox(width: 10),
+          _quickActionButton(Icons.account_balance_wallet_outlined, 'Budget status'),
+        ],
+      ),
+    );
+  }
+
+  Widget _quickActionButton(IconData icon, String text) {
+    const messages = {
+      'Today\'s spending': 'How much did I spend today?',
+      'Monthly report': 'Show my monthly report',
+      'Spending tips': 'Give me spending tips and suggestions',
+      'Budget status': 'What is my current budget status?',
+    };
+    return GestureDetector(
+      onTap: () {
+        if (_isLoading) return;
+        _controller.text = messages[text] ?? text;
         _send();
       },
       child: Container(

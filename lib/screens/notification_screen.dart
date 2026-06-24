@@ -3,6 +3,7 @@ import '../api_service.dart';
 import '../widgets/shared_widgets.dart';
 import '../widgets/chat_fab.dart';
 import 'category_detail_page.dart';
+import 'income_page.dart';
 
 // ── NotificationScreen ───────────────────────────────────────────────────────
 
@@ -147,15 +148,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
     final type = (alert['type'] as String?)?.toLowerCase() ?? '';
     final cat = alert['category'] as String?;
 
-    // Expense alerts and budget_rebalanced → open category detail
-    // budget_set → open category detail so user can edit
-    // income → no navigation, just marked read
-    if (cat != null && cat.isNotEmpty && type != 'income') {
+    if (type == 'income') {
+      // Income alerts → open income page
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const IncomePage()));
+    } else if (cat != null && cat.isNotEmpty) {
+      // Expense / budget alerts → open category detail
       Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (_) => CategoryDetailPage(category: cat),
-        ),
+        MaterialPageRoute(builder: (_) => CategoryDetailPage(category: cat)),
       );
     }
   }

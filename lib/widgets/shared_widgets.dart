@@ -122,13 +122,15 @@ Widget buildChoiceChip({
 }
 
 // ── AlertCard ─────────────────────────────────────────────────────────────────
-// Tappable activity card. Pass onTap to handle tap (mark read, navigate, etc.).
+// Notification-screen card. Income unread = green bg; expense = white bg.
+// Pass onUndo to show a compact undo button.
 
 class AlertCard extends StatelessWidget {
   final Map<String, dynamic> alert;
   final VoidCallback? onTap;
+  final VoidCallback? onUndo;
 
-  const AlertCard({super.key, required this.alert, this.onTap});
+  const AlertCard({super.key, required this.alert, this.onTap, this.onUndo});
 
   @override
   Widget build(BuildContext context) {
@@ -141,10 +143,13 @@ class AlertCard extends StatelessWidget {
 
     final isBudget = rawType.contains('budget');
     final isIncome = rawType == 'income';
+    final isUndoConfirm = rawType == 'undo_confirm';
 
     // ── Title
     final String title;
-    if (isBudget) {
+    if (isUndoConfirm) {
+      title = 'Undo Successful';
+    } else if (isBudget) {
       title = 'Budget Update';
     } else if (isIncome) {
       title = 'Income';
@@ -154,7 +159,12 @@ class AlertCard extends StatelessWidget {
 
     // ── Circle icon
     final Widget circleIcon;
-    if (isBudget) {
+    if (isUndoConfirm) {
+      circleIcon = CircleAvatar(
+        backgroundColor: Colors.orange.shade50,
+        child: Icon(Icons.undo_rounded, color: Colors.orange.shade700, size: 20),
+      );
+    } else if (isBudget) {
       circleIcon = CircleAvatar(
         backgroundColor: Colors.blue.shade50,
         child: const Icon(Icons.account_balance_wallet_outlined,
@@ -189,15 +199,18 @@ class AlertCard extends StatelessWidget {
     // Budget rebalanced messages are longer — give them 3 lines
     final int msgMaxLines = rawType == 'budget_rebalanced' ? 3 : 2;
 
+    // Unread → subtle green highlight (like Facebook unread); read → white
+    final bool showGreenBg = !isRead;
+
     final card = Stack(
       children: [
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           decoration: BoxDecoration(
-            color: isRead ? Colors.white : Colors.green.shade50,
+            color: showGreenBg ? Colors.green.shade50 : Colors.white,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isRead ? Colors.grey.shade200 : Colors.green.shade200,
+              color: showGreenBg ? Colors.green.shade200 : Colors.grey.shade200,
             ),
           ),
           child: Padding(
@@ -236,17 +249,49 @@ class AlertCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (amountStr.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    amountStr,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: amountColor,
-                    ),
-                  ),
-                ],
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (amountStr.isNotEmpty)
+                      Text(
+                        amountStr,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: amountColor,
+                        ),
+                      ),
+                    if (onUndo != null) ...[
+                      const SizedBox(height: 6),
+                      GestureDetector(
+                        onTap: onUndo,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade50,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.orange.shade200),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.undo_rounded, size: 11, color: Colors.orange.shade700),
+                              const SizedBox(width: 3),
+                              Text(
+                                'Undo',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.orange.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ],
             ),
           ),
@@ -272,6 +317,143 @@ class AlertCard extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: card,
+    );
+  }
+}
+
+// ── TransactionCard ───────────────────────────────────────────────────────────
+// Professional record-style card for category detail and income pages.
+// Distinct from AlertCard: no notification dot, cleaner layout, undo button.
+
+class TransactionCard extends StatelessWidget {
+  final Map<String, dynamic> item;
+  final bool isIncome;
+  final VoidCallback? onUndo;
+
+  const TransactionCard({
+    super.key,
+    required this.item,
+    this.isIncome = false,
+    this.onUndo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final amount = (item['amount'] as num?)?.toDouble() ?? 0;
+    final note = (item['note'] as String?)?.trim().isNotEmpty == true
+        ? (item['note'] as String)
+        : ((item['message'] as String?) ?? (item['description'] as String?) ?? '');
+    final createdAt = ((item['createdAt'] ?? item['date']) as Object?)?.toString();
+    final category = (item['category'] as String?) ?? '';
+
+    final String title = isIncome ? 'Income' : (category.isNotEmpty ? category : 'Expense');
+    final String amountStr = isIncome ? '+Rs ${amount.toInt()}' : '-Rs ${amount.toInt()}';
+    final Color amountColor = isIncome ? Colors.green.shade700 : Colors.red.shade600;
+    final IconData icon = isIncome ? Icons.arrow_downward_rounded : categoryIcon(category);
+    final Color iconBg = isIncome ? Colors.green.shade50 : Colors.red.shade50;
+    final Color iconColor = isIncome ? Colors.green.shade600 : Colors.red.shade400;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade100),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 20,
+            backgroundColor: iconBg,
+            child: Icon(icon, color: iconColor, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+                if (note.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    note,
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                const SizedBox(height: 3),
+                Text(
+                  formatAlertTime(createdAt),
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+                ),
+              ],
+            ),
+          ),
+          if (amount > 0 || onUndo != null) ...[
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (amount > 0)
+                Text(
+                  amountStr,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: amountColor,
+                  ),
+                ),
+              if (onUndo != null) ...[
+                const SizedBox(height: 4),
+                GestureDetector(
+                  onTap: onUndo,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.orange.shade200),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.undo_rounded, size: 11, color: Colors.orange.shade700),
+                        const SizedBox(width: 3),
+                        Text(
+                          'Undo',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.orange.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          ],            // closes outer ...[
+        ],              // closes Row children
+      ),
     );
   }
 }
