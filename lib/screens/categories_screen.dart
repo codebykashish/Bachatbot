@@ -722,11 +722,16 @@ class CategoriesScreenState extends State<CategoriesScreen>
     final isNotSet = limit == 0;
     final percent = isNotSet ? 0.0 : (spent / limit).clamp(0.0, 2.0);
     final isOver = !isNotSet && percent > 1.0;
+    // Fully used (100%+) — this is the "spending too much" state, whole
+    // card turns red so it's impossible to miss while scrolling categories.
+    final isCritical = !isNotSet && percent >= 1.0;
     final displayPercent = isNotSet ? 0.0 : (spent / limit).clamp(0.0, 1.0);
 
     final color = _catColor(category);
     final icon = _catIcon(category);
-    final barColor = isOver ? Colors.red : (percent > 0.7 ? Colors.orange : _primary);
+    final barColor = isCritical || isOver
+        ? const Color(0xFFE0223B)
+        : (percent > 0.7 ? Colors.orange : _primary);
 
     return Stack(
       children: [
@@ -745,9 +750,20 @@ class CategoriesScreenState extends State<CategoriesScreen>
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: isCritical ? const Color(0xFFE0223B).withValues(alpha: 0.07) : Colors.white,
               borderRadius: BorderRadius.circular(16),
-              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 3))],
+              border: isCritical
+                  ? Border.all(color: const Color(0xFFE0223B).withValues(alpha: 0.4), width: 1.3)
+                  : null,
+              boxShadow: [
+                BoxShadow(
+                  color: isCritical
+                      ? const Color(0xFFE0223B).withValues(alpha: 0.15)
+                      : Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -764,22 +780,54 @@ class CategoriesScreenState extends State<CategoriesScreen>
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: isOver ? Colors.red : Colors.grey.shade100,
+                          color: isCritical ? const Color(0xFFE0223B) : (isOver ? Colors.red : Colors.grey.shade100),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
                           '${(percent * 100).toInt()}%',
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isOver ? Colors.white : Colors.black54),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: isCritical || isOver ? Colors.white : Colors.black54,
+                          ),
                         ),
                       ),
                   ],
                 ),
                 const SizedBox(height: 10),
-                Text(category, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                Row(
+                  children: [
+                    Text(
+                      category,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: isCritical ? const Color(0xFFE0223B) : Colors.black87,
+                      ),
+                    ),
+                    if (isCritical) ...[
+                      const SizedBox(width: 5),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE0223B),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'OVER',
+                          style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 0.3),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
                 const SizedBox(height: 2),
                 Text(
                   isNotSet ? 'Tap to set budget' : 'Rs ${spent.toInt()} / Rs ${limit.toInt()}',
-                  style: TextStyle(fontSize: 11, color: isOver ? Colors.red : Colors.grey),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isCritical ? const Color(0xFFE0223B) : (isOver ? Colors.red : Colors.grey),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 ClipRRect(
@@ -787,7 +835,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
                   child: LinearProgressIndicator(
                     value: displayPercent,
                     minHeight: 5,
-                    backgroundColor: Colors.grey.shade200,
+                    backgroundColor: isCritical ? const Color(0xFFE0223B).withValues(alpha: 0.15) : Colors.grey.shade200,
                     color: barColor,
                   ),
                 ),

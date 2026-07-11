@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../api_service.dart';
 import '../widgets/report_chart.dart';
 import '../widgets/balance_card.dart';
@@ -33,6 +34,11 @@ class HomeScreen extends StatefulWidget {
 
 class HomeScreenState extends State<HomeScreen> {
   static const Color _primary = Color(0xFF2DBE7F);
+
+  // Persists for the lifetime of the app process — HomeScreen is kept
+  // alive in an IndexedStack, so initState only fires once per real app
+  // launch. Ensures the "Yesterday" insight card shows once per fresh open.
+  static bool _yesterdayInsightShown = false;
 
   // GlobalKey so MainScreen can locate the eye icon for the spotlight tour
   final GlobalKey eyeIconKey = GlobalKey();
@@ -88,9 +94,52 @@ class HomeScreenState extends State<HomeScreen> {
     setState(() => _isLoading = true);
     try {
       await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend(), _fetchIncome(), _fetchLatestActivity(), _fetchProfileName()]);
+      _maybeShowYesterdayInsight();
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  static const _lastInsightShownKey = 'yesterday_insight_last_shown_date';
+
+  Future<void> _maybeShowYesterdayInsight() async {
+    if (_yesterdayInsightShown || !mounted || _report == null) return;
+
+    // Persisted across app restarts — only the FIRST open of a given day
+    // shows the card, not every time the app is reopened that same day.
+    final today = DateTime.now();
+    final todayKey = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+
+    final prefs = await SharedPreferences.getInstance();
+    final lastShown = prefs.getString(_lastInsightShownKey);
+    if (lastShown == todayKey) return;
+
+    _yesterdayInsightShown = true;
+
+    final yesterdayExpense = (_report?['yesterdayTotalExpense'] ?? 0).toDouble();
+    final yesterdayIncome = (_report?['yesterdayTotalIncome'] ?? 0).toDouble();
+    final summaryText = (_report?['yesterdaySummaryText'] ?? '').toString();
+    final paceWarning = _report?['paceWarningText'] as String?;
+
+    // Nothing worth interrupting the user for.
+    if (summaryText.isEmpty && paceWarning == null) return;
+
+    await prefs.setString(_lastInsightShownKey, todayKey);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (ctx) => _YesterdayInsightCard(
+          summaryText: summaryText,
+          yesterdayExpense: yesterdayExpense,
+          yesterdayIncome: yesterdayIncome,
+          paceWarning: paceWarning,
+        ),
+      );
+    });
   }
 
   Future<void> _refreshData() async {
@@ -670,5 +719,122 @@ class HomeScreenState extends State<HomeScreen> {
     );
 
     return content;
+  }
+}
+
+// ── Yesterday Insight Card ───────────────────────────────────────────────────
+// Shown once per fresh app open — quick-scan summary of yesterday's activity,
+// plus a scary pace warning if spending is outrunning the days left.
+class _YesterdayInsightCard extends StatelessWidget {
+  final String summaryText;
+  final double yesterdayExpense;
+  final double yesterdayIncome;
+  final String? paceWarning;
+
+  const _YesterdayInsightCard({
+    required this.summaryText,
+    required this.yesterdayExpense,
+    required this.yesterdayIncome,
+    required this.paceWarning,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final netSaved = yesterdayIncome - yesterdayExpense;
+
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 20, offset: const Offset(0, 6)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2DBE7F).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.wb_twilight_rounded, color: Color(0xFF2DBE7F), size: 20),
+                ),
+                const SizedBox(width: 10),
+                const Text('Yesterday', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => Navigator.of(context).pop(),
+                  child: const Icon(Icons.close, size: 20, color: Colors.grey),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              summaryText.isNotEmpty ? summaryText : 'No activity yesterday.',
+              style: const TextStyle(fontSize: 14, height: 1.4, color: Colors.black87),
+            ),
+            if (netSaved > 0) ...[
+              const SizedBox(height: 6),
+              Text(
+                'You saved Rs ${netSaved.toInt()} yesterday.',
+                style: const TextStyle(fontSize: 13, color: Color(0xFF2DBE7F), fontWeight: FontWeight.w600),
+              ),
+            ],
+            if (paceWarning != null) ...[
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE0223B).withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE0223B).withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, color: Color(0xFFE0223B), size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        paceWarning!,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFFE0223B),
+                          fontWeight: FontWeight.w700,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2DBE7F),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                child: const Text('Got it', style: TextStyle(fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
