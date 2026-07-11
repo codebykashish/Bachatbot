@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../api_service.dart';
 import '../widgets/shared_widgets.dart';
 import '../widgets/chat_fab.dart';
+import '../widgets/rebalance_confirm_dialog.dart';
 
 class CategoryDetailPage extends StatefulWidget {
   final String category;
@@ -190,6 +191,22 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
         } else {
           setState(() => _budgetSpent += amount);
         }
+
+        // Overspend requiring budget from other categories — ask before
+        // anything is actually moved.
+        final pendingRebalance = budgetUpdate?['pendingRebalance'];
+        if (pendingRebalance != null) {
+          if (!mounted) return;
+          final confirmed = await showRebalanceConfirmDialog(
+            context,
+            Map<String, dynamic>.from(pendingRebalance),
+          );
+          if (!mounted) return;
+          if (confirmed) {
+            setState(() => _budgetLimit += (pendingRebalance['totalCovered'] as num? ?? 0).toDouble());
+          }
+        }
+
         _amountController.clear();
         _noteController.clear();
         await _fetchAlerts();

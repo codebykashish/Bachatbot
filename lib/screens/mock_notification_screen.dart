@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api_service.dart';
+import '../widgets/rebalance_confirm_dialog.dart';
 
 class MockNotificationScreen extends StatefulWidget {
   const MockNotificationScreen({super.key});
@@ -161,6 +162,18 @@ class _MockNotificationScreenState extends State<MockNotificationScreen> {
       );
       if (!mounted) return;
       if (res['success'] == true) {
+        // Overspend requiring budget from other categories — ask before
+        // anything is actually moved.
+        final pendingRebalance = res['data']?['budgetUpdate']?['pendingRebalance'];
+        if (pendingRebalance != null) {
+          if (!mounted) return;
+          await showRebalanceConfirmDialog(
+            context,
+            Map<String, dynamic>.from(pendingRebalance),
+          );
+          if (!mounted) return;
+        }
+
         final confirmedCat = _selectedCategory!; // capture before nulling
         setState(() {
           _needsConfirmation = false;

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 class BalanceCard extends StatelessWidget {
-  final double savings;          // declared income - total expense (net savings)
+  final double unusedBudget;     // allocated to categories but not yet spent
+  final double pureSavings;      // income never allocated to any category budget
+  final bool isOverBudget;       // total spent across categories > total allocated
   final double spendingThisMonth;
   final double incomeThisMonth;
   final bool hideAmounts;
@@ -10,32 +12,15 @@ class BalanceCard extends StatelessWidget {
 
   const BalanceCard({
     super.key,
-    required this.savings,
+    required this.unusedBudget,
+    required this.pureSavings,
+    required this.isOverBudget,
     required this.spendingThisMonth,
     required this.incomeThisMonth,
     this.hideAmounts = false,
     this.onExpenseTap,
     this.onIncomeTap,
   });
-
-  // Backwards-compatible factory so callers using currentBalance still compile
-  const BalanceCard.legacy({
-    Key? key,
-    required double currentBalance,
-    required double spendingThisMonth,
-    required double incomeThisMonth,
-    bool hideAmounts = false,
-    VoidCallback? onExpenseTap,
-    VoidCallback? onIncomeTap,
-  }) : this(
-          key: key,
-          savings: currentBalance,
-          spendingThisMonth: spendingThisMonth,
-          incomeThisMonth: incomeThisMonth,
-          hideAmounts: hideAmounts,
-          onExpenseTap: onExpenseTap,
-          onIncomeTap: onIncomeTap,
-        );
 
   String _fmt(double amount) {
     if (hideAmounts) return '****';
@@ -50,8 +35,7 @@ class BalanceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isOverBudget = savings < 0;
-    final isZero = savings == 0 && incomeThisMonth > 0;
+    final isZero = unusedBudget == 0 && incomeThisMonth > 0;
 
     return Column(
       children: [
@@ -85,7 +69,7 @@ class BalanceCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        isOverBudget ? 'Over Budget' : 'Savings',
+                        isOverBudget ? 'Over Budget' : 'Unused Budget',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.9),
                           fontWeight: FontWeight.w500,
@@ -127,29 +111,17 @@ class BalanceCard extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  isOverBudget
-                                      ? '-${_fmt(savings.abs())}'
-                                      : _fmt(savings),
+                                  _fmt(unusedBudget),
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 32,
                                   ),
                                 ),
-                                if (!isOverBudget && incomeThisMonth > 0) ...[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${((savings / incomeThisMonth) * 100).clamp(0, 100).toStringAsFixed(0)}% of income saved',
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                ],
                                 if (isOverBudget) ...[
                                   const SizedBox(height: 4),
                                   const Text(
-                                    'Expenses exceed your income this month',
+                                    'Spending has gone over your allocated budgets',
                                     style: TextStyle(color: Colors.white70, fontSize: 11),
                                   ),
                                 ],
@@ -167,18 +139,33 @@ class BalanceCard extends StatelessWidget {
                 painter: _WavePainter(),
               ),
             ),
-            Positioned(
-              bottom: 25,
-              right: 30,
-              child: Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.25),
-                  shape: BoxShape.circle,
+            // Pure savings — income never allocated to any category budget.
+            if (!hideAmounts)
+              Positioned(
+                bottom: 12,
+                right: 16,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      'Savings',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.75),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Text(
+                      _fmt(pureSavings),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
           ],
         ),
 

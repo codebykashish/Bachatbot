@@ -20,6 +20,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
   bool _isLoading = true;
   List<dynamic> _budgets = [];
   double _declaredIncome = 0;
+  final Set<String> _deletingCategories = {};
 
   late final AnimationController _shakeCtrl;
   late final Animation<double> _shakeAnim;
@@ -132,6 +133,14 @@ class CategoriesScreenState extends State<CategoriesScreen>
 
   double get _totalLimit => _budgets.fold(0.0, (s, b) => s + (b['limit'] ?? 0).toDouble());
   double get _totalSpent => _budgets.fold(0.0, (s, b) => s + (b['spent'] ?? 0).toDouble());
+  // Unused budget already allocated to other categories (limit - spent, per
+  // category, floored at 0). The backend can auto-rebalance this into a new
+  // or increased category budget, so it counts as available too.
+  double get _totalBuffer => _budgets.fold(0.0, (s, b) {
+        final limit = (b['limit'] ?? 0).toDouble();
+        final spent = (b['spent'] ?? 0).toDouble();
+        return s + (limit - spent).clamp(0.0, double.infinity);
+      });
   // Total savings = income − what was actually spent (not just unspent budget)
   double get _netSavings => _declaredIncome > 0
       ? (_declaredIncome - _totalSpent).clamp(0.0, double.infinity)
@@ -236,8 +245,12 @@ class CategoriesScreenState extends State<CategoriesScreen>
     final catName   = catMeta['name']  as String;
     final catColor  = catMeta['color'] as Color;
     final catIcon   = catMeta['icon']  as IconData;
+    // Available = unallocated income + unused buffer sitting in other
+    // categories (limit - spent). The backend auto-rebalances from that
+    // buffer when needed, so it must count as available here too —
+    // otherwise the dialog wrongly blocks additions the backend would allow.
     final available = _declaredIncome > 0
-        ? (_declaredIncome - _totalLimit).clamp(0.0, double.infinity)
+        ? (_declaredIncome - _totalLimit).clamp(0.0, double.infinity) + _totalBuffer
         : double.infinity;
 
     // Use a proper StatefulWidget for the dialog so Flutter manages
@@ -271,6 +284,11 @@ class CategoriesScreenState extends State<CategoriesScreen>
   Future<void> _deleteCategory(Map<String, dynamic> item) async {
     final category = item['category'] as String;
     final spent = (item['spent'] ?? 0).toDouble();
+
+    // Guard against a second tap firing while the first delete is still
+    // in-flight — that raced request hits a 404 (already deleted) and
+    // showed an error even though the removal itself had succeeded.
+    if (_deletingCategories.contains(category)) return;
 
     if (spent > 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -307,6 +325,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
 
     if (confirmed != true || !mounted) return;
 
+    _deletingCategories.add(category);
     try {
       final now = DateTime.now();
       final monthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
@@ -320,6 +339,8 @@ class CategoriesScreenState extends State<CategoriesScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), backgroundColor: Colors.red),
       );
+    } finally {
+      _deletingCategories.remove(category);
     }
   }
 
@@ -863,6 +884,63 @@ class _BudgetDialogContentState extends State<_BudgetDialogContent> {
     if (mounted) Navigator.of(context).pop();
   }
 
+  Future<bool> _confirmRebalance(List<dynamic> plan) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Adjust other budgets?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Not enough unallocated income. To fit this budget, unused '
+              'amounts will be taken from:',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            ...plan.map((p) {
+              final cat = p['category'] as String;
+              final taken = (p['amountTaken'] as num).toInt();
+              final oldLimitRaw = p['oldLimit'] as num?;
+              final newLimitRaw = p['newLimit'] as num?;
+
+              // "Savings" is unallocated income, not a category budget —
+              // it has no old/new limit to show, just the amount used.
+              final text = oldLimitRaw == null || newLimitRaw == null
+                  ? '• $cat: Rs $taken taken'
+                  : '• $cat: Rs ${oldLimitRaw.toInt()} → Rs ${newLimitRaw.toInt()}  (Rs $taken taken)';
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  text,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              );
+            }),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
   Future<void> _handleAdd() async {
     final v = double.tryParse(_controller.text);
     if (v == null || v <= 0) return;
@@ -872,6 +950,27 @@ class _BudgetDialogContentState extends State<_BudgetDialogContent> {
     }
     setState(() => _isSaving = true);
     try {
+      // Preview first — no writes happen for a dry run. If it would take
+      // budget from other categories, ask the user to confirm exactly
+      // which categories and how much before committing anything.
+      final preview = await ApiService.post('/budgets', {
+        'category': widget.catName,
+        'limit': v,
+        'dryRun': true,
+      });
+
+      final previewData = preview['data'] as Map<String, dynamic>?;
+      final requiresRebalance = previewData?['requiresRebalance'] == true;
+
+      if (requiresRebalance) {
+        final plan = previewData?['rebalancePlan'] as List<dynamic>? ?? [];
+        final confirmed = await _confirmRebalance(plan);
+        if (!confirmed) {
+          if (mounted) setState(() => _isSaving = false);
+          return;
+        }
+      }
+
       await ApiService.post('/budgets', {'category': widget.catName, 'limit': v});
       widget.onSaved();
       _focusNode.unfocus();
@@ -918,7 +1017,7 @@ class _BudgetDialogContentState extends State<_BudgetDialogContent> {
                   Text(
                     widget.available > 0
                         ? 'Rs ${widget.available.toInt()} available to allocate'
-                        : 'No unallocated income remaining',
+                        : 'No budget available — add income or free up another category',
                     style: TextStyle(
                       fontSize: 12,
                       color: widget.available > 0 ? _primary : Colors.orange,

@@ -145,10 +145,23 @@ class AlertCard extends StatelessWidget {
     final isIncome = rawType == 'income';
     final isUndoConfirm = rawType == 'undo_confirm';
 
+    // ── Urgent alert detection: a budget threshold crossed (severity
+    // medium/high) or a budget transfer/rebalance. These get a distinct
+    // red/orange treatment so they read as an "alert", not a routine entry.
+    final severity = (alert['severity'] as String?) ?? 'low';
+    final isRebalance = rawType == 'budget_rebalanced';
+    final isThresholdAlert = rawType == 'expense' && (severity == 'medium' || severity == 'high');
+    final isUrgentAlert = isRebalance || isThresholdAlert;
+    final Color urgentColor = isRebalance ? const Color(0xFFE67E22) : const Color(0xFFE0223B);
+
     // ── Title
     final String title;
     if (isUndoConfirm) {
       title = 'Undo Successful';
+    } else if (isRebalance) {
+      title = 'Budget Adjusted';
+    } else if (isThresholdAlert) {
+      title = 'Budget Alert';
     } else if (isBudget) {
       title = 'Budget Update';
     } else if (isIncome) {
@@ -163,6 +176,15 @@ class AlertCard extends StatelessWidget {
       circleIcon = CircleAvatar(
         backgroundColor: Colors.orange.shade50,
         child: Icon(Icons.undo_rounded, color: Colors.orange.shade700, size: 20),
+      );
+    } else if (isUrgentAlert) {
+      circleIcon = CircleAvatar(
+        backgroundColor: urgentColor.withValues(alpha: 0.12),
+        child: Icon(
+          isRebalance ? Icons.swap_horiz_rounded : Icons.warning_amber_rounded,
+          color: urgentColor,
+          size: 20,
+        ),
       );
     } else if (isBudget) {
       circleIcon = CircleAvatar(
@@ -199,19 +221,28 @@ class AlertCard extends StatelessWidget {
     // Budget rebalanced messages are longer — give them 3 lines
     final int msgMaxLines = rawType == 'budget_rebalanced' ? 3 : 2;
 
-    // Unread → subtle green highlight (like Facebook unread); read → white
-    final bool showGreenBg = !isRead;
+    // Unread → subtle green highlight (like Facebook unread); read → white.
+    // Urgent alerts keep a tinted background + colored left border even
+    // after being read, so they never blend in with routine notifications.
+    final bool showGreenBg = !isRead && !isUrgentAlert;
 
     final card = Stack(
       children: [
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           decoration: BoxDecoration(
-            color: showGreenBg ? Colors.green.shade50 : Colors.white,
+            color: isUrgentAlert
+                ? urgentColor.withValues(alpha: 0.06)
+                : (showGreenBg ? Colors.green.shade50 : Colors.white),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: showGreenBg ? Colors.green.shade200 : Colors.grey.shade200,
+              color: isUrgentAlert
+                  ? urgentColor.withValues(alpha: 0.35)
+                  : (showGreenBg ? Colors.green.shade200 : Colors.grey.shade200),
             ),
+            boxShadow: isUrgentAlert
+                ? [BoxShadow(color: urgentColor.withValues(alpha: 0.12), blurRadius: 8, offset: const Offset(0, 2))]
+                : null,
           ),
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -224,13 +255,36 @@ class AlertCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey.shade800,
-                        ),
+                      Row(
+                        children: [
+                          Text(
+                            title,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: isUrgentAlert ? urgentColor : Colors.grey.shade800,
+                            ),
+                          ),
+                          if (isUrgentAlert) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: urgentColor,
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: const Text(
+                                'ALERT',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       if (note.isNotEmpty) ...[
                         const SizedBox(height: 2),

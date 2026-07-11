@@ -195,8 +195,20 @@ class HomeScreenState extends State<HomeScreen> {
     return (_report?['incomeCardValue'] ?? _report?['totalIncome'] ?? _report?['income'] ?? 0).toDouble();
   }
 
-  // Savings = income - total expense
-  double get _savings => _incomeForCard - _totalExpense;
+  double get _totalBudgetLimit =>
+      _budgets.fold(0.0, (s, b) => s + (b['limit'] ?? 0).toDouble());
+  double get _totalBudgetSpent =>
+      _budgets.fold(0.0, (s, b) => s + (b['spent'] ?? 0).toDouble());
+
+  // Unused Budget = allocated to categories but not yet spent.
+  double get _unusedBudget =>
+      (_totalBudgetLimit - _totalBudgetSpent).clamp(0.0, double.infinity);
+
+  // Pure Savings = income never allocated to any category budget at all.
+  double get _pureSavings =>
+      (_incomeForCard - _totalBudgetLimit).clamp(0.0, double.infinity);
+
+  bool get _isOverAllocatedBudget => _totalBudgetSpent > _totalBudgetLimit;
 
   double get _todayTotalExpense => (_report?['todayTotalExpense'] ?? 0).toDouble();
   String get _todayTopCategory => (_report?['todayTopCategory'] ?? '').toString();
@@ -221,7 +233,9 @@ class HomeScreenState extends State<HomeScreen> {
 
   Widget _buildSummaryCards() {
     return BalanceCard(
-      savings: _savings,
+      unusedBudget: _unusedBudget,
+      pureSavings: _pureSavings,
+      isOverBudget: _isOverAllocatedBudget,
       spendingThisMonth: _totalExpense,
       incomeThisMonth: _incomeForCard,
       hideAmounts: _hideAmounts,

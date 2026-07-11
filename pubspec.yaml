@@ -17,6 +17,8 @@ dependencies:
   fl_chart: ^0.69.0
   cloud_firestore: ^4.17.5
   notification_listener_service: ^0.3.5
+  another_telephony: ^0.4.1
+  flutter_local_notifications: ^17.2.3
   shared_preferences: ^2.2.2
   google_fonts: ^6.1.0
   image_picker: ^1.0.7

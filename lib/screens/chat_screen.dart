@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../api_service.dart';
 import '../models/pending_transaction.dart';
 import '../services/month_event_service.dart';
+import '../widgets/rebalance_confirm_dialog.dart';
 import 'notification_screen.dart';
 
 /// Callback signature for chat intent-based refresh.
@@ -343,6 +344,16 @@ class _ChatScreenState extends State<ChatScreen> {
 
         if (alerts != null && alerts.isNotEmpty) {
           NotificationScreen.unreadCount.value += alerts.length;
+        }
+
+        // Overspend requiring budget from other categories — ask before
+        // anything is actually moved.
+        final pendingRebalance = data?['budgetUpdate']?['pendingRebalance'];
+        if (pendingRebalance != null && mounted) {
+          await showRebalanceConfirmDialog(
+            context,
+            Map<String, dynamic>.from(pendingRebalance),
+          );
         }
 
         _triggerRefreshForIntent(intent);

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../services/notification_sync_service.dart';
+import '../services/sms_sync_service.dart';
 import '../services/month_event_service.dart';
+import '../services/alert_popup_service.dart';
 import 'home_screen.dart';
 import 'categories_screen.dart';
 import 'chatbot_page.dart';
@@ -98,7 +101,11 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     _pulseAnim = CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut);
 
     NotificationSyncService().init();
+    SmsSyncService().init();
     MonthEventService().init();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) AlertPopupService().init(uid);
 
     _monthBannerListener = () {
       final event = MonthEventService.eventNotifier.value;
