@@ -168,12 +168,11 @@ def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_ke
                         db, uid, category, new_spent, blimit, matching[0].id, month_key
                     )
                     if rb:
-                        budget_update["limit"] = rb["newLimit"]
-                        budget_update["remaining"] = max(0.0, rb["newLimit"] - new_spent)
-                        budget_update["percentUsed"] = round(
-                            (new_spent / rb["newLimit"]) * 100, 2
-                        ) if rb["newLimit"] > 0 else 0.0
-                        print(f"[CHAT] [REBALANCE] covered Rs {rb['totalCovered']:.0f} of Rs {rb['overspend']:.0f}")
+                        # Nothing is applied yet — awaiting user confirmation
+                        # via /confirm-rebalance. budget_update keeps showing
+                        # the true, still-over-limit numbers until then.
+                        budget_update["pendingRebalance"] = rb
+                        print(f"[CHAT] [REBALANCE] pending confirmation id={rb['rebalanceId']} of Rs {rb['overspend']:.0f}")
                 except Exception as _rb_err:
                     print(f"[CHAT] [REBALANCE] error (non-fatal): {_rb_err}")
         else:

@@ -5,6 +5,7 @@ from utils import get_current_month_key
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment
 from typing import Optional, List
 from pydantic import BaseModel
+from services.budget_service import apply_pending_rebalance, reject_pending_rebalance
 
 router = APIRouter()
 
@@ -164,6 +165,20 @@ async def confirm_transaction(
                 f"[CONFIRM] Budget updated: {category} spent={new_spent} "
                 f"({percent_used}%)"
             )
+
+            # Rebalance if overspent — same pattern as manual/chat expenses:
+            # nothing is applied until the user confirms via /confirm-rebalance.
+            if new_spent > blimit:
+                try:
+                    from services.budget_service import rebalance_on_overspend
+                    rb = rebalance_on_overspend(
+                        db, uid, category, new_spent, blimit, matching[0].id, month_key
+                    )
+                    if rb:
+                        budget_update["pendingRebalance"] = rb
+                        print(f"[CONFIRM] [REBALANCE] pending confirmation id={rb['rebalanceId']}")
+                except Exception as rb_err:
+                    print(f"[CONFIRM] [REBALANCE] error (non-fatal): {rb_err}")
 
             # ── 5. Optional alert ────────────────────────────────────────
             try:
@@ -468,6 +483,74 @@ async def bulk_confirm_transactions(
             "totalCancelled": total_cancelled,
             "totalErrors":    total_errors,
         },
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /confirm-rebalance/{rebalanceId}
+# Confirms taking budget from other categories (or savings) to cover an
+# overspend. Only now are the actual budget-limit writes applied.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/confirm-rebalance/{rebalance_id}")
+async def confirm_rebalance(
+    rebalance_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    uid = current_user["uid"]
+    db = get_firestore()
+
+    result = apply_pending_rebalance(db, uid, rebalance_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "REBALANCE_NOT_FOUND",
+                    "message": "Pending rebalance not found or already resolved.",
+                },
+            },
+        )
+
+    return {
+        "success": True,
+        "message": "Budget adjusted.",
+        "data": result,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /reject-rebalance/{rebalanceId}
+# Declines taking budget from other categories. No budget-limit changes are
+# made anywhere — the overspent category simply stays over its limit.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/reject-rebalance/{rebalance_id}")
+async def reject_rebalance(
+    rebalance_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    uid = current_user["uid"]
+    db = get_firestore()
+
+    result = reject_pending_rebalance(db, uid, rebalance_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "REBALANCE_NOT_FOUND",
+                    "message": "Pending rebalance not found or already resolved.",
+                },
+            },
+        )
+
+    return {
+        "success": True,
+        "message": "No budget was moved.",
+        "data": result,
     }
 
 

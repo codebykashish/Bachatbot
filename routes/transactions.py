@@ -89,12 +89,11 @@ async def add_manual_expense(
                         db, uid, body.category, new_spent, blimit, matching[0].id, month_key
                     )
                     if rb:
-                        budget_update["limit"] = rb["newLimit"]
-                        budget_update["remaining"] = max(0.0, rb["newLimit"] - new_spent)
-                        budget_update["percentUsed"] = round(
-                            (new_spent / rb["newLimit"]) * 100, 2
-                        ) if rb["newLimit"] > 0 else 0.0
-                        logger.info(f"[MANUAL] [REBALANCE] {body.category} covered Rs {rb['totalCovered']:.0f}")
+                        # Nothing is applied yet — awaiting user confirmation
+                        # via /confirm-rebalance. budget_update keeps showing
+                        # the true, still-over-limit numbers until then.
+                        budget_update["pendingRebalance"] = rb
+                        logger.info(f"[MANUAL] [REBALANCE] {body.category} pending confirmation id={rb['rebalanceId']}")
                 except Exception as rb_err:
                     logger.warning(f"[MANUAL] [REBALANCE] error (non-fatal): {rb_err}")
     except Exception as e:

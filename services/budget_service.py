@@ -43,29 +43,13 @@ logger = logging.getLogger("bachatbot.budget_service")
 
 # ── Budget circulation / overspend rebalancing ────────────────────────────────
 
-def rebalance_on_overspend(db, uid, overspent_category, new_spent, old_limit, budget_doc_id, month_key):
+def _compute_rebalance_transfers(db, uid, overspent_category, overspend, month_key):
     """
-    Called immediately after budget.spent is incremented and new_spent > old_limit.
-
-    Algorithm:
-      1. Calculate savings = declared_income - sum(all budget limits for this month).
-         Use savings first to extend the overspent category's limit.
-      2. If savings are not enough (or zero), take the remainder from other categories
-         that still have unspent budget, starting from the one with the most remaining.
-      3. Increase the overspent category's limit by however much was covered.
-      4. Decrease donor categories' limits accordingly.
-      5. Create a "budget_rebalanced" alert so the user is notified.
-
-    Nothing else is changed — transactions, spent values, onboarding, other flows
-    are all untouched.
-
-    Returns a dict with details about the rebalance, or None if no rebalancing
-    was needed or possible.
+    Pure computation — no writes. Figures out where the overspend amount
+    would come from (savings first, then other categories' unused buffer,
+    most-remaining-first). Returns a list of transfer dicts, or [] if
+    nothing is available to pull from.
     """
-    overspend = new_spent - old_limit
-    if overspend <= 0:
-        return None
-
     # ── Declared income ──────────────────────────────────────────────────────
     try:
         income_map = (
@@ -122,26 +106,10 @@ def rebalance_on_overspend(db, uid, overspent_category, new_spent, old_limit, bu
             })
             remaining_gap -= use
 
-    if not transfers:
-        return None  # nothing to pull from
+    return transfers, remaining_gap
 
-    total_covered = sum(t["amount"] for t in transfers)
-    covered_fully = remaining_gap <= 0
-    new_limit = old_limit + total_covered
 
-    # ── Apply changes to budgets ─────────────────────────────────────────────
-    db.collection("users").document(uid).collection("budgets").document(budget_doc_id).update({
-        "limit": new_limit,
-        "updatedAt": SERVER_TIMESTAMP,
-    })
-    for t in transfers:
-        if t["_donor_id"]:
-            db.collection("users").document(uid).collection("budgets").document(t["_donor_id"]).update({
-                "limit": t["_donor_old_limit"] - t["amount"],
-                "updatedAt": SERVER_TIMESTAMP,
-            })
-
-    # ── Build alert message ──────────────────────────────────────────────────
+def _build_rebalance_message(overspent_category, overspend, transfers, covered_fully, remaining_gap):
     parts = []
     for t in transfers:
         label = "savings" if t["from"] == "savings" else t["from"]
@@ -149,20 +117,121 @@ def rebalance_on_overspend(db, uid, overspent_category, new_spent, old_limit, bu
     sources_desc = " + ".join(parts)
 
     if covered_fully:
-        msg = (
+        return (
             f"⚠️ {overspent_category} budget exceeded by Rs {int(overspend)}! "
             f"Auto-adjusted: {sources_desc} transferred to cover it."
         )
-    else:
-        msg = (
-            f"⚠️ {overspent_category} budget exceeded by Rs {int(overspend)}! "
-            f"{sources_desc} transferred — Rs {int(remaining_gap)} still uncovered."
-        )
+    return (
+        f"⚠️ {overspent_category} budget exceeded by Rs {int(overspend)}! "
+        f"{sources_desc} transferred — Rs {int(remaining_gap)} still uncovered."
+    )
 
-    # ── Create alert ─────────────────────────────────────────────────────────
+
+def rebalance_on_overspend(db, uid, overspent_category, new_spent, old_limit, budget_doc_id, month_key):
+    """
+    Called immediately after budget.spent is incremented and new_spent > old_limit.
+
+    Does NOT write anything. Computes which categories (or savings) would
+    cover the overspend and stores it as a pending_rebalance doc awaiting
+    user confirmation — the actual budget-limit changes only happen once
+    /confirm-rebalance/{id} is called.
+
+    Returns a dict describing the pending rebalance, or None if there is
+    nothing available to pull from (nothing to confirm).
+    """
+    overspend = new_spent - old_limit
+    if overspend <= 0:
+        return None
+
+    transfers, remaining_gap = _compute_rebalance_transfers(
+        db, uid, overspent_category, overspend, month_key
+    )
+    if not transfers:
+        return None  # nothing to pull from
+
+    total_covered = sum(t["amount"] for t in transfers)
+    covered_fully = remaining_gap <= 0
+
+    # ── Store as a pending rebalance — no budget writes yet ──────────────────
+    pending_ref = db.collection("users").document(uid).collection("pending_rebalances").document()
+    pending_ref.set({
+        "status": "pending",
+        "overspentCategory": overspent_category,
+        "budgetDocId": budget_doc_id,
+        "oldLimit": old_limit,
+        "overspend": overspend,
+        "totalCovered": total_covered,
+        "coveredFully": covered_fully,
+        "remainingGap": remaining_gap,
+        "monthKey": month_key,
+        "transfers": [
+            {
+                "from": t["from"],
+                "amount": t["amount"],
+                "donorId": t["_donor_id"],
+                "donorOldLimit": t["_donor_old_limit"],
+            }
+            for t in transfers
+        ],
+        "createdAt": SERVER_TIMESTAMP,
+    })
+
+    logger.info(
+        f"[REBALANCE] uid={uid} {overspent_category} overspent Rs {overspend:.0f} — "
+        f"pending confirmation id={pending_ref.id}"
+    )
+
+    return {
+        "pending": True,
+        "rebalanceId": pending_ref.id,
+        "category": overspent_category,
+        "overspend": overspend,
+        "totalCovered": total_covered,
+        "coveredFully": covered_fully,
+        "transfers": [{"from": t["from"], "amount": t["amount"]} for t in transfers],
+    }
+
+
+def apply_pending_rebalance(db, uid, rebalance_id):
+    """
+    Confirms a pending rebalance: applies the previously computed budget
+    changes (increase the overspent category, decrease donor categories)
+    and creates the "budget_rebalanced" alert. Returns the result dict,
+    or None if the rebalance was not found or already resolved.
+    """
+    pending_ref = db.collection("users").document(uid).collection("pending_rebalances").document(rebalance_id)
+    doc = pending_ref.get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict()
+    if data.get("status") != "pending":
+        return None
+
+    overspent_category = data["overspentCategory"]
+    old_limit = data["oldLimit"]
+    overspend = data["overspend"]
+    total_covered = data["totalCovered"]
+    covered_fully = data["coveredFully"]
+    remaining_gap = data["remainingGap"]
+    month_key = data["monthKey"]
+    transfers = data["transfers"]
+    new_limit = old_limit + total_covered
+
+    db.collection("users").document(uid).collection("budgets").document(data["budgetDocId"]).update({
+        "limit": new_limit,
+        "updatedAt": SERVER_TIMESTAMP,
+    })
+    for t in transfers:
+        if t["donorId"]:
+            db.collection("users").document(uid).collection("budgets").document(t["donorId"]).update({
+                "limit": t["donorOldLimit"] - t["amount"],
+                "updatedAt": SERVER_TIMESTAMP,
+            })
+
+    msg = _build_rebalance_message(overspent_category, overspend, transfers, covered_fully, remaining_gap)
+
     try:
-        aref = db.collection("users").document(uid).collection("alerts").document()
-        aref.set({
+        db.collection("users").document(uid).collection("alerts").document().set({
             "type": "budget_rebalanced",
             "message": msg,
             "category": overspent_category,
@@ -172,12 +241,11 @@ def rebalance_on_overspend(db, uid, overspent_category, new_spent, old_limit, bu
             "monthKey": month_key,
             "createdAt": SERVER_TIMESTAMP,
         })
-        logger.info(
-            f"[REBALANCE] uid={uid} {overspent_category} overspent Rs {overspend:.0f} "
-            f"covered Rs {total_covered:.0f} fully={covered_fully}"
-        )
     except Exception as e:
         logger.warning(f"[REBALANCE] alert creation failed: {e}")
+
+    pending_ref.update({"status": "confirmed", "updatedAt": SERVER_TIMESTAMP})
+    logger.info(f"[REBALANCE] uid={uid} confirmed id={rebalance_id} covered Rs {total_covered:.0f}")
 
     return {
         "overspend": overspend,
@@ -187,6 +255,50 @@ def rebalance_on_overspend(db, uid, overspent_category, new_spent, old_limit, bu
         "transfers": [{"from": t["from"], "amount": t["amount"]} for t in transfers],
         "message": msg,
     }
+
+
+def reject_pending_rebalance(db, uid, rebalance_id):
+    """
+    Rejects a pending rebalance: no budget-limit changes are made anywhere.
+    The overspent category simply stays over its limit. Creates an
+    informational alert so the decision is still visible in Activity.
+    Returns the alert info, or None if not found / already resolved.
+    """
+    pending_ref = db.collection("users").document(uid).collection("pending_rebalances").document(rebalance_id)
+    doc = pending_ref.get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict()
+    if data.get("status") != "pending":
+        return None
+
+    overspent_category = data["overspentCategory"]
+    overspend = data["overspend"]
+    month_key = data["monthKey"]
+
+    msg = (
+        f"{overspent_category} is Rs {int(overspend)} over budget. "
+        f"No budget was moved from other categories."
+    )
+
+    try:
+        db.collection("users").document(uid).collection("alerts").document().set({
+            "type": "budget_overspent",
+            "message": msg,
+            "category": overspent_category,
+            "severity": "medium",
+            "isRead": False,
+            "isDeleted": False,
+            "monthKey": month_key,
+            "createdAt": SERVER_TIMESTAMP,
+        })
+    except Exception as e:
+        logger.warning(f"[REBALANCE] reject alert creation failed: {e}")
+
+    pending_ref.update({"status": "rejected", "updatedAt": SERVER_TIMESTAMP})
+    logger.info(f"[REBALANCE] uid={uid} rejected id={rebalance_id}")
+
+    return {"category": overspent_category, "overspend": overspend, "message": msg}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

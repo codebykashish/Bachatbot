@@ -24,6 +24,10 @@ class BudgetRequest(BaseModel):
         80,
         description="Alert threshold percentage (0-100).",
     )
+    dryRun: Optional[bool] = Field(
+        False,
+        description="If true, only compute and return the rebalance plan — no writes are made.",
+    )
 
 
 # ─── POST /budgets ────────────────────────────────────────────────────────────
@@ -143,22 +147,65 @@ async def create_or_update_budget(
                         },
                     )
 
-                # Auto-rebalance: reduce other categories proportionally from their unused buffer
+                # Compute the rebalance plan first — no writes yet, so a
+                # dry run can preview exactly which categories would be
+                # reduced and by how much, before the user confirms.
+                plan = []
                 for ob in other_buffers:
                     reduction = round((ob["buffer"] / total_buffer) * shortfall, 2)
                     new_limit = max(ob["spent"], ob["limit"] - reduction)
-                    ob["ref"].update({"limit": new_limit, "updatedAt": SERVER_TIMESTAMP})
-                    rebalanced.append({
+                    plan.append({
+                        "ref": ob["ref"],
                         "category": ob["category"],
                         "oldLimit": ob["limit"],
                         "newLimit": new_limit,
+                        "amountTaken": round(ob["limit"] - new_limit, 2),
+                    })
+
+                if body.dryRun:
+                    # Show the savings portion too — it's already netted out
+                    # of `shortfall` above (savings is used first), but the
+                    # preview must say so explicitly or it looks like nothing
+                    # came from savings at all.
+                    unallocated = max(0.0, income_total - (current_total - old_limit))
+                    unallocated_used = round(min(unallocated, body.limit), 2)
+
+                    preview_plan = []
+                    if unallocated_used > 0:
+                        preview_plan.append({
+                            "category": "Savings",
+                            "oldLimit": None,
+                            "newLimit": None,
+                            "amountTaken": unallocated_used,
+                        })
+                    preview_plan += [
+                        {k: v for k, v in p.items() if k != "ref"}
+                        for p in plan
+                    ]
+
+                    return {
+                        "success": True,
+                        "data": {
+                            "requiresRebalance": True,
+                            "shortfall": round(shortfall, 2),
+                            "rebalancePlan": preview_plan,
+                        },
+                    }
+
+                # Auto-rebalance: reduce other categories proportionally from their unused buffer
+                for p in plan:
+                    p["ref"].update({"limit": p["newLimit"], "updatedAt": SERVER_TIMESTAMP})
+                    rebalanced.append({
+                        "category": p["category"],
+                        "oldLimit": p["oldLimit"],
+                        "newLimit": p["newLimit"],
                     })
                     # Create alert so user can see what changed in Activity feed
                     try:
                         db.collection("users").document(uid).collection("alerts").document().set({
                             "type": "budget_rebalanced",
-                            "message": f"{ob['category']} budget reduced from Rs {int(ob['limit'])} to Rs {int(new_limit)} to fit {body.category} budget.",
-                            "category": ob["category"],
+                            "message": f"{p['category']} budget reduced from Rs {int(p['oldLimit'])} to Rs {int(p['newLimit'])} to fit {body.category} budget.",
+                            "category": p["category"],
                             "severity": "low",
                             "isRead": False,
                             "isDeleted": False,
@@ -173,6 +220,11 @@ async def create_or_update_budget(
         raise
     except Exception as e:
         logger.warning(f"[BUDGET] income/rebalance check failed (non-fatal): {e}")
+
+    if body.dryRun:
+        # No shortfall was hit above (or income wasn't declared) — nothing
+        # to confirm, the frontend can submit the real request directly.
+        return {"success": True, "data": {"requiresRebalance": False}}
 
     # Check for an existing budget for this category + month
     existing_query = (
