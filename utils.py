@@ -173,6 +173,22 @@ def is_today(timestamp) -> bool:
         return False
 
 
+def is_yesterday(timestamp) -> bool:
+    """Check if a Firestore timestamp falls on yesterday (UTC)."""
+    if timestamp is None:
+        return False
+    try:
+        from datetime import timedelta
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
+        if hasattr(timestamp, "date"):
+            ts_date = timestamp.date() if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc).date()
+        else:
+            return False
+        return ts_date == yesterday
+    except Exception:
+        return False
+
+
 def is_in_current_week(timestamp) -> bool:
     """Check if a Firestore timestamp falls within the current ISO week (UTC)."""
     if timestamp is None:

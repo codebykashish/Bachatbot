@@ -3,7 +3,8 @@ from firebase_config import get_firestore
 from auth import get_current_user
 from utils import (
     get_current_month_key, get_days_remaining_in_month,
-    serialize_doc, is_today,
+    get_days_passed_in_month, get_total_days_in_month,
+    serialize_doc, is_today, is_yesterday,
 )
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 from datetime import datetime, timezone
@@ -57,6 +58,9 @@ async def get_monthly_report(
     # Daily snapshot accumulators
     today_expense = 0.0
     today_category_totals = {}
+    yesterday_expense = 0.0
+    yesterday_income = 0.0
+    yesterday_category_totals = {}
 
     for doc in tx_docs:
         data = doc.to_dict()
@@ -88,9 +92,15 @@ async def get_monthly_report(
                 today_expense += amount
                 if category:
                     today_category_totals[category] = today_category_totals.get(category, 0.0) + amount
+            elif is_yesterday(created_at):
+                yesterday_expense += amount
+                if category:
+                    yesterday_category_totals[category] = yesterday_category_totals.get(category, 0.0) + amount
 
         elif tx_type == "income":
             total_income += amount
+            if is_yesterday(created_at):
+                yesterday_income += amount
 
     net_savings = total_income - total_expense
 
@@ -105,6 +115,17 @@ async def get_monthly_report(
         today_summary_text = f"Aaja Rs {int(today_expense)} kharcha bhayo."
     else:
         today_summary_text = "Aaja kei kharcha bhayena."
+
+    yesterday_top_category = None
+    if yesterday_category_totals:
+        yesterday_top_category = max(yesterday_category_totals, key=yesterday_category_totals.get)
+
+    if yesterday_top_category and yesterday_expense > 0:
+        yesterday_summary_text = f"You spent Rs {int(yesterday_expense)} on {yesterday_top_category} yesterday."
+    elif yesterday_expense > 0:
+        yesterday_summary_text = f"You spent Rs {int(yesterday_expense)} yesterday."
+    else:
+        yesterday_summary_text = "No spending yesterday."
 
     # ── Fetch budgets for this month → budget utilization + insights ─────
     budget_docs_list = list(
@@ -195,6 +216,19 @@ async def get_monthly_report(
     days_remaining = get_days_remaining_in_month()
     survival_budget_per_day = round(total_remaining / days_remaining) if days_remaining > 0 else 0
 
+    # ── Pace warning: spending faster than the month is passing ──────────
+    pace_warning_text = None
+    if total_budget_limit > 0:
+        pct_used = (total_budget_spent / total_budget_limit) * 100
+        days_passed = get_days_passed_in_month()
+        total_days = get_total_days_in_month()
+        pct_month_elapsed = (days_passed / total_days) * 100 if total_days > 0 else 0
+        if pct_used - pct_month_elapsed > 15:
+            pace_warning_text = (
+                f"Rs {int(total_budget_spent)} of Rs {int(total_budget_limit)} spent. "
+                f"Only Rs {int(total_remaining)} left for the next {days_remaining} days."
+            )
+
     # ── Alert count for this month ───────────────────────────────────────
     alert_docs = list(
         db.collection("users").document(uid).collection("alerts")
@@ -225,6 +259,11 @@ async def get_monthly_report(
         "todayTotalExpense": today_expense,
         "todayTopCategory": today_top_category,
         "todaySummaryText": today_summary_text,
+        "yesterdayTotalExpense": yesterday_expense,
+        "yesterdayTotalIncome": yesterday_income,
+        "yesterdayTopCategory": yesterday_top_category,
+        "yesterdaySummaryText": yesterday_summary_text,
+        "paceWarningText": pace_warning_text,
         "generatedAt": SERVER_TIMESTAMP,
     }
 
