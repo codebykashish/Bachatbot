@@ -9,6 +9,7 @@ from utils import (
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 from datetime import datetime, timezone
 from typing import Optional
+import calendar
 
 router = APIRouter()
 
@@ -17,6 +18,7 @@ router = APIRouter()
 async def get_monthly_report(
     monthKey: Optional[str] = Query(None, description="YYYY-MM. Defaults to current month."),
     view: Optional[str] = Query("month", description="'month' (default) or 'week' (last 7 days)."),
+    weekOfMonth: Optional[int] = Query(None, ge=1, le=4, description="1-4 — filters the report to just that week bucket within monthKey."),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -27,6 +29,8 @@ async def get_monthly_report(
     Query params:
     - monthKey: YYYY-MM (default current month)
     - view: "month" | "week" — if "week", only include last 7 days of transactions
+    - weekOfMonth: 1-4 — restricts the report to that week's day range within
+      monthKey (days 1-7 / 8-14 / 15-21 / 22-end). Independent of `view`.
     """
     uid = current_user["uid"]
     db = get_firestore()
@@ -34,7 +38,7 @@ async def get_monthly_report(
     month_key = monthKey or get_current_month_key()
     use_week_filter = (view or "").strip().lower() == "week"
 
-    print(f"[REPORT] uid={uid} monthKey={month_key} view={'week' if use_week_filter else 'month'}")
+    print(f"[REPORT] uid={uid} monthKey={month_key} view={'week' if use_week_filter else 'month'} weekOfMonth={weekOfMonth}")
 
     # ── Week filter boundaries ───────────────────────────────────────────
     week_start = None
@@ -43,12 +47,24 @@ async def get_monthly_report(
         now = datetime.now(timezone.utc)
         week_start = now - timedelta(days=6)  # last 7 days including today
 
-    # ── Fetch all confirmed, non-deleted transactions for this month ─────
+    # ── Week-of-month day range (independent of the last-7-days filter) ──
+    week_of_month_range = None
+    if weekOfMonth:
+        wy, wm = int(month_key[:4]), int(month_key[5:])
+        wtotal_days = calendar.monthrange(wy, wm)[1]
+        wbucket_ranges = [(1, 7), (8, 14), (15, 21), (22, wtotal_days)]
+        week_of_month_range = wbucket_ranges[weekOfMonth - 1]
+
+    # ── Fetch confirmed, non-deleted transactions ─────────────────────────
+    # Week view spans the last 7 days, which can cross a month boundary —
+    # querying by monthKey would silently drop older-month days in that
+    # window, so week view queries across all months and relies on the
+    # week_start cutoff below instead.
+    base_query = db.collection("users").document(uid).collection("transactions").where("status", "==", "confirmed")
     tx_docs = (
-        db.collection("users").document(uid).collection("transactions")
-        .where("monthKey", "==", month_key)
-        .where("status", "==", "confirmed")
-        .stream()
+        base_query.stream()
+        if use_week_filter
+        else base_query.where("monthKey", "==", month_key).stream()
     )
 
     total_expense = 0.0
@@ -61,6 +77,12 @@ async def get_monthly_report(
     yesterday_expense = 0.0
     yesterday_income = 0.0
     yesterday_category_totals = {}
+
+    # Weekly breakdown within the selected month — 4 buckets (days 1-7,
+    # 8-14, 15-21, 22-end), only meaningful in month view since week view
+    # transactions aren't confined to a single calendar month.
+    week_bucket_expense = [0.0, 0.0, 0.0, 0.0]
+    week_bucket_income = [0.0, 0.0, 0.0, 0.0]
 
     for doc in tx_docs:
         data = doc.to_dict()
@@ -81,6 +103,27 @@ async def get_monthly_report(
                         continue
             except Exception:
                 pass  # include if we can't determine the date
+
+        # If a specific week-of-month was requested, skip days outside it
+        if week_of_month_range and created_at is not None:
+            try:
+                day = created_at.day
+                if not (week_of_month_range[0] <= day <= week_of_month_range[1]):
+                    continue
+            except Exception:
+                pass
+
+        # Weekly breakdown bucket (month view only)
+        if not use_week_filter and created_at is not None:
+            try:
+                day = created_at.day
+                bucket_idx = min(3, (day - 1) // 7)
+                if tx_type == "expense":
+                    week_bucket_expense[bucket_idx] += amount
+                elif tx_type == "income":
+                    week_bucket_income[bucket_idx] += amount
+            except Exception:
+                pass
 
         if tx_type == "expense":
             total_expense += amount
@@ -212,6 +255,22 @@ async def get_monthly_report(
         "categories": category_insights,
     }
 
+    # ── Weekly breakdown labels (month view only) ─────────────────────────
+    weekly_breakdown = []
+    if not use_week_filter:
+        year, month_num = int(month_key[:4]), int(month_key[5:])
+        total_days_in_month = calendar.monthrange(year, month_num)[1]
+        bucket_ranges = [(1, 7), (8, 14), (15, 21), (22, total_days_in_month)]
+        month_abbrev = calendar.month_abbr[month_num]
+        for i, (start_day, end_day) in enumerate(bucket_ranges):
+            weekly_breakdown.append({
+                "week": i + 1,
+                "label": f"Week {i + 1}",
+                "dateRange": f"{month_abbrev} {start_day}-{end_day}",
+                "totalExpense": round(week_bucket_expense[i], 2),
+                "totalIncome": round(week_bucket_income[i], 2),
+            })
+
     # ── Days remaining + survival budget ─────────────────────────────────
     days_remaining = get_days_remaining_in_month()
     survival_budget_per_day = round(total_remaining / days_remaining) if days_remaining > 0 else 0
@@ -252,6 +311,7 @@ async def get_monthly_report(
         "categoryBreakdown": category_breakdown,
         "budgetUtilization": budget_utilization,
         "insights": insights,
+        "weeklyBreakdown": weekly_breakdown,
         "daysRemaining": days_remaining,
         "survivalBudgetPerDay": survival_budget_per_day,
         "alertCount": alert_count,
