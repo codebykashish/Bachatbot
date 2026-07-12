@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 class BalanceCard extends StatelessWidget {
   final double unusedBudget;     // allocated to categories but not yet spent
@@ -24,13 +25,7 @@ class BalanceCard extends StatelessWidget {
 
   String _fmt(double amount) {
     if (hideAmounts) return '****';
-    if (amount.abs() >= 100000) {
-      return 'Rs ${(amount / 100000).toStringAsFixed(1)}L';
-    }
-    if (amount.abs() >= 1000) {
-      return 'Rs ${(amount / 1000).toStringAsFixed(1)}k';
-    }
-    return 'Rs ${amount.toStringAsFixed(0)}';
+    return 'Rs ${NumberFormat('#,##0').format(amount.round())}';
   }
 
   @override
@@ -188,7 +183,7 @@ class BalanceCard extends StatelessWidget {
             // Expense card (RIGHT) — tappable → Activity
             Expanded(
               child: _MiniCard(
-                label: 'Expense',
+                label: "Week's Expense",
                 amount: _fmt(spendingThisMonth),
                 icon: Icons.trending_down_rounded,
                 iconColor: const Color(0xFFD85E5E),

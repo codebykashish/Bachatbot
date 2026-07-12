@@ -3,6 +3,7 @@ import '../api_service.dart';
 import '../widgets/report_chart.dart';
 import '../widgets/shared_widgets.dart';
 import 'notification_screen.dart';
+import 'weekly_report_screen.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -25,6 +26,7 @@ class ReportsScreenState extends State<ReportsScreen>
   Map<String, double> _categoryBreakdown = {};
   Map<String, dynamic> _categoryInsights = {};
   String _overallStatus = 'ok';
+  List<dynamic> _weeklyBreakdown = [];
 
   // Months for navigation
   late DateTime _currentMonth;
@@ -84,6 +86,15 @@ class ReportsScreenState extends State<ReportsScreen>
     _loadReport();
   }
 
+  void _setView(String view) {
+    if (_selectedView == view) return;
+    setState(() {
+      _selectedView = view;
+      _isLoading = true;
+    });
+    _loadReport();
+  }
+
   void _nextMonth() {
     final now = DateTime.now();
     if (_currentMonth.year == now.year && _currentMonth.month == now.month) {
@@ -124,6 +135,7 @@ class ReportsScreenState extends State<ReportsScreen>
           _categoryBreakdown = _mapToDouble(report?['categoryBreakdown'] ?? {});
           _overallStatus = report?['insights']?['overallStatus'] ?? 'ok';
           _categoryInsights = report?['insights']?['categories'] ?? {};
+          _weeklyBreakdown = report?['weeklyBreakdown'] as List? ?? [];
           _isLoading = false;
         });
       } else {
@@ -436,6 +448,103 @@ class ReportsScreenState extends State<ReportsScreen>
     );
   }
 
+  Widget _buildWeeklyBreakdown() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Weekly Breakdown',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+        ),
+        const SizedBox(height: 12),
+        ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _weeklyBreakdown.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final week = _weeklyBreakdown[index] as Map<String, dynamic>;
+            final label = week['label'] as String? ?? 'Week ${index + 1}';
+            final dateRange = week['dateRange'] as String? ?? '';
+            final expense = (week['totalExpense'] ?? 0).toDouble().toInt();
+
+            // Highlight whichever week bucket contains today, when viewing
+            // the current month — makes "where am I right now" obvious.
+            final now = DateTime.now();
+            final isCurrentMonth = _currentMonth.year == now.year && _currentMonth.month == now.month;
+            final isCurrentWeek = isCurrentMonth && (index == ((now.day - 1) ~/ 7).clamp(0, 3));
+
+            return InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => WeeklyReportScreen(
+                    monthKey: _selectedMonthKey,
+                    monthLabel: _formatMonthLabel(_currentMonth),
+                    initialWeek: index + 1,
+                  ),
+                ),
+              ),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: isCurrentWeek ? _primary.withValues(alpha: 0.06) : Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: isCurrentWeek ? _primary.withValues(alpha: 0.4) : Colors.grey.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: isCurrentWeek ? _primary : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${index + 1}',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: isCurrentWeek ? Colors.white : Colors.grey.shade600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            label,
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87),
+                          ),
+                          if (dateRange.isNotEmpty)
+                            Text(
+                              dateRange,
+                              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Text(
+                      'Rs $expense',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFFD85E5E)),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.chevron_right, size: 16, color: Colors.grey.shade400),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -453,37 +562,68 @@ class ReportsScreenState extends State<ReportsScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Month navigation ──────────────────────────────────
+                    // ── Month / Week toggle ───────────────────────────────
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        IconButton(
-                          icon: const Icon(Icons.chevron_left),
-                          onPressed: _previousMonth,
-                          color: _primary,
-                        ),
-                        Text(
-                          _formatMonthLabel(_currentMonth),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
+                        Expanded(
+                          child: _ViewToggleChip(
+                            label: 'This Month',
+                            selected: _selectedView == 'month',
+                            onTap: () => _setView('month'),
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.chevron_right),
-                          onPressed: _currentMonth.year ==
-                                      DateTime.now().year &&
-                                  _currentMonth.month == DateTime.now().month
-                              ? null
-                              : _nextMonth,
-                          color: _currentMonth.year == DateTime.now().year &&
-                                  _currentMonth.month == DateTime.now().month
-                              ? Colors.grey.shade300
-                              : _primary,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _ViewToggleChip(
+                            label: 'Last 7 Days',
+                            selected: _selectedView == 'week',
+                            onTap: () => _setView('week'),
+                          ),
                         ),
                       ],
                     ),
+
+                    const SizedBox(height: 16),
+
+                    // ── Month navigation (month view only — week view is
+                    // always "the last 7 days from today", not a
+                    // navigable calendar month) ───────────────────────────
+                    if (_selectedView == 'week')
+                      const Text(
+                        'Last 7 Days',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+                      )
+                    else
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.chevron_left),
+                            onPressed: _previousMonth,
+                            color: _primary,
+                          ),
+                          Text(
+                            _formatMonthLabel(_currentMonth),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.chevron_right),
+                            onPressed: _currentMonth.year ==
+                                        DateTime.now().year &&
+                                    _currentMonth.month == DateTime.now().month
+                                ? null
+                                : _nextMonth,
+                            color: _currentMonth.year == DateTime.now().year &&
+                                    _currentMonth.month == DateTime.now().month
+                                ? Colors.grey.shade300
+                                : _primary,
+                          ),
+                        ],
+                      ),
 
                     const SizedBox(height: 24),
 
@@ -505,10 +645,54 @@ class ReportsScreenState extends State<ReportsScreen>
                     // ── Category Insights ─────────────────────────────────
                     _buildCategoryInsights(),
 
+                    // ── Weekly Breakdown (month view only) ────────────────
+                    if (_selectedView == 'month' && _weeklyBreakdown.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      _buildWeeklyBreakdown(),
+                    ],
+
                     const SizedBox(height: 20),
                   ],
                 ),
               ),
+      ),
+    );
+  }
+}
+
+class _ViewToggleChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ViewToggleChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  static const Color _primary = Color(0xFF2DBE7F);
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? _primary : Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? _primary : Colors.grey.shade300),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.white : Colors.grey.shade700,
+          ),
+        ),
       ),
     );
   }

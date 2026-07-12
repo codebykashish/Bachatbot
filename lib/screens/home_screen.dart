@@ -178,7 +178,11 @@ class HomeScreenState extends State<HomeScreen> {
 
   Future<void> _fetchReport() async {
     try {
-      final res = await ApiService.get('/monthly-report?monthKey=$_selectedMonth');
+      // Home screen shows the recent-week view — quicker to scan than the
+      // full month. Budgets (Unused Budget / Savings card) are unaffected;
+      // they come from /budgets separately and stay monthly, as budgets are
+      // inherently a monthly allocation.
+      final res = await ApiService.get('/monthly-report?monthKey=$_selectedMonth&view=week');
       if (!mounted) return;
       if (res['success'] == true) {
         setState(() {
@@ -612,7 +616,7 @@ class HomeScreenState extends State<HomeScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
-                  'Financial Summary',
+                  "This Week's Summary",
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
                 ),
                 IconButton(
@@ -666,11 +670,11 @@ class HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 28),
 
-            // ── Monthly Report Chart ─────────────────────────────────────
+            // ── Weekly Report Chart ──────────────────────────────────────
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Monthly Report', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text('Weekly Report', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 TextButton(
                   onPressed: () {
                     if (widget.onViewFullReports != null) {
