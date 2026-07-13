@@ -813,6 +813,27 @@ async def chat(
         notif_ref.set(notif_data)
         print(f"[CHAT][NOTIF] Notification doc created: id={notif_ref.id}")
 
+        # Also write an alert doc so this surfaces through the existing
+        # real-time pipeline: AlertPopupService picks it up instantly (banner
+        # + system notification, same as budget alerts), and it shows in the
+        # Activity feed too — same detection, three surfaces, one write.
+        try:
+            db.collection("users").document(uid).collection("alerts").document().set({
+                "type": "pending_transaction",
+                "message": f"Rs {int(amount)} {tx_type} detected from {source_app}. Tap to categorize.",
+                "category": None,
+                "severity": "medium",
+                "isRead": False,
+                "isDeleted": False,
+                "monthKey": month_key,
+                "relatedTransactionId": tx_ref.id,
+                "amount": float(amount),
+                "sourceApp": source_app,
+                "createdAt": SERVER_TIMESTAMP,
+            })
+        except Exception as _pa_err:
+            print(f"[CHAT][NOTIF] pending_transaction alert creation failed (non-fatal): {_pa_err}")
+
         notification_out = {
             "id":                notif_ref.id,
             "rawText":           user_message,

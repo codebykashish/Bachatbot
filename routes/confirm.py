@@ -10,6 +10,32 @@ from services.budget_service import apply_pending_rebalance, reject_pending_reba
 router = APIRouter()
 
 
+def _cleanup_stale_pending_alert(db, uid: str, transaction_id: str, message: str):
+    """
+    Marks the "pending_transaction" alert for this transaction as resolved
+    and hides it. Used when the alert is stale — the transaction was
+    already confirmed/cancelled through some other path — so tapping the
+    old alert card cleans itself up instead of throwing an error forever.
+    """
+    try:
+        query = (
+            db.collection("users").document(uid).collection("alerts")
+            .where("relatedTransactionId", "==", transaction_id)
+            .where("type", "==", "pending_transaction")
+            .limit(1)
+            .stream()
+        )
+        for doc in query:
+            doc.reference.update({
+                "message": message,
+                "isRead": True,
+                "isDeleted": True,
+            })
+            break
+    except Exception as e:
+        print(f"[CLEANUP] stale pending_transaction alert update failed (non-fatal): {e}")
+
+
 # ─── Request Schemas ─────────────────────────────────────────────────────────
 
 class ConfirmTransactionBody(BaseModel):
@@ -74,16 +100,27 @@ async def confirm_transaction(
     tx = tx_doc.to_dict()
 
     if tx.get("status") != "pending":
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "NOT_PENDING",
-                    "message": f"Transaction status is '{tx.get('status')}', not 'pending'.",
-                },
-            },
+        # Already resolved through some other path (e.g. a stale alert
+        # card tapped after the underlying transaction was already
+        # confirmed/cancelled elsewhere) — clean up the stale alert instead
+        # of erroring, so the card disappears instead of staying stuck.
+        existing_status = tx.get("status")
+        _cleanup_stale_pending_alert(
+            db, uid, transaction_id,
+            f"This transaction was already {existing_status}.",
         )
+        return {
+            "success": True,
+            "message": f"Already {existing_status} — nothing to do.",
+            "data": {
+                "transaction": {
+                    "id": transaction_id,
+                    "status": existing_status,
+                },
+                "budgetUpdate": None,
+                "alreadyResolved": True,
+            },
+        }
 
     # Use effective values (overridden or original)
     amount   = float(body.amount)   if body.amount   is not None else float(tx.get("amount", 0))
@@ -215,6 +252,41 @@ async def confirm_transaction(
             print(f"[CONFIRM] No budget for '{category}' in {month_key}")
 
     # income → no budget update (intentional)
+
+    # ── 5b. Update the original "pending_transaction" alert in place ─────
+    # Without this it stays stuck showing "Transaction Detected" forever —
+    # tappable again, and a second confirm attempt fails silently since the
+    # transaction is no longer pending. Turning it into a normal-looking
+    # confirmed entry means the Activity feed reflects the real state.
+    try:
+        pending_alert_query = (
+            db.collection("users").document(uid).collection("alerts")
+            .where("relatedTransactionId", "==", transaction_id)
+            .where("type", "==", "pending_transaction")
+            .limit(1)
+            .stream()
+        )
+        for pa_doc in pending_alert_query:
+            cat_label = category or ("Income" if tx_type == "income" else "Expense")
+            pa_doc.reference.update({
+                "type": tx_type,
+                "category": category,
+                "message": f"Rs {int(amount)} {cat_label} {tx_type} confirmed.",
+                "isRead": True,
+            })
+            break
+    except Exception as e:
+        print(f"[CONFIRM] pending_transaction alert update failed (non-fatal): {e}")
+
+    # ── 5c. Clear stale pendingAction so chat doesn't keep restoring this
+    # transaction as still-pending after it's already been confirmed ─────
+    try:
+        pa_ref = db.collection("users").document(uid).collection("pendingAction").document("current")
+        pa_doc = pa_ref.get()
+        if pa_doc.exists and transaction_id in (pa_doc.to_dict().get("pendingTxIds") or []):
+            pa_ref.delete()
+    except Exception as e:
+        print(f"[CONFIRM] pendingAction clear failed (non-fatal): {e}")
 
     # ── 6. Create assistant message so Chat UI shows the result ──────────
     try:
@@ -590,16 +662,26 @@ async def reject_transaction(
     tx = tx_doc.to_dict()
 
     if tx.get("status") != "pending":
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "NOT_PENDING",
-                    "message": f"Transaction status is '{tx.get('status')}', not 'pending'.",
-                },
-            },
+        # Already resolved elsewhere — clean up the stale alert instead of
+        # erroring, same reasoning as confirm_transaction above.
+        existing_status = tx.get("status")
+        _cleanup_stale_pending_alert(
+            db, uid, transaction_id,
+            f"This transaction was already {existing_status}.",
         )
+        return {
+            "success": True,
+            "message": f"Already {existing_status} — nothing to do.",
+            "data": {
+                "transaction": {
+                    "id": transaction_id,
+                    "status": existing_status,
+                },
+                "budgetUpdate": None,
+                "alerts": [],
+                "alreadyResolved": True,
+            },
+        }
 
     # ── 2. Cancel transaction ────────────────────────────────────────────
     tx_ref.update({
@@ -623,10 +705,40 @@ async def reject_transaction(
 
     # ── 4. No budget changes on cancellation ──────────────────────────────
 
-    # ── 5. Create assistant message so Chat UI shows the cancellation ─────
     amount   = float(tx.get("amount", 0))
     category = tx.get("category", "")
     source_app = tx.get("description", "").split(":")[0] if ":" in tx.get("description", "") else "Notification"
+
+    # ── 4b. Update the original "pending_transaction" alert in place —
+    # same reason as confirm: otherwise it stays stuck and tappable forever.
+    try:
+        pending_alert_query = (
+            db.collection("users").document(uid).collection("alerts")
+            .where("relatedTransactionId", "==", transaction_id)
+            .where("type", "==", "pending_transaction")
+            .limit(1)
+            .stream()
+        )
+        for pa_doc in pending_alert_query:
+            pa_doc.reference.update({
+                "message": f"Rs {int(amount)} transaction from {source_app} discarded.",
+                "isRead": True,
+                "isDeleted": True,
+            })
+            break
+    except Exception as e:
+        print(f"[REJECT] pending_transaction alert update failed (non-fatal): {e}")
+
+    # ── 4c. Clear stale pendingAction ─────────────────────────────────────
+    try:
+        pa_ref = db.collection("users").document(uid).collection("pendingAction").document("current")
+        pa_doc2 = pa_ref.get()
+        if pa_doc2.exists and transaction_id in (pa_doc2.to_dict().get("pendingTxIds") or []):
+            pa_ref.delete()
+    except Exception as e:
+        print(f"[REJECT] pendingAction clear failed (non-fatal): {e}")
+
+    # ── 5. Create assistant message so Chat UI shows the cancellation ─────
     try:
         messages_ref = db.collection("users").document(uid).collection("messages")
         reject_reply = f"OK, {source_app} Rs {int(amount)} {category} transaction ignore gareko chu."
