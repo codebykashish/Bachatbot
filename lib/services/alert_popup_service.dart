@@ -43,6 +43,7 @@ class AlertPopupService {
   static const _mergeWindow = Duration(milliseconds: 700);
   static const _red = Color(0xFFE0223B);
   static const _orange = Color(0xFFE67E22);
+  static const _blue = Color(0xFF2B6CB0);
 
   Future<void> init(String uid) async {
     if (_initialized) return;
@@ -90,6 +91,13 @@ class AlertPopupService {
     final message = data['message'] as String? ?? '';
     if (message.isEmpty) return;
 
+    // Standalone alert — not paired with anything else, so skip the
+    // merge-buffer entirely and emit immediately.
+    if (type == 'pending_transaction') {
+      _emitPendingTransaction(data);
+      return;
+    }
+
     final isUrgent = severity == 'medium' ||
         severity == 'high' ||
         type == 'budget_rebalanced';
@@ -132,6 +140,17 @@ class AlertPopupService {
 
   String? _extractPercent(String message) {
     return RegExp(r'(\d+)%').firstMatch(message)?.group(1);
+  }
+
+  void _emitPendingTransaction(Map<String, dynamic> data) {
+    final message = data['message'] as String? ?? 'A transaction was detected. Tap to categorize.';
+
+    _emit(
+      title: '🔔 Transaction Detected',
+      message: message,
+      color: _blue,
+      icon: Icons.receipt_long_rounded,
+    );
   }
 
   void _emitExpenseOnly(String category, Map<String, dynamic> expense) {

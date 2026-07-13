@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../api_service.dart';
 import '../widgets/shared_widgets.dart';
 import '../widgets/chat_fab.dart';
+import '../widgets/categorize_transaction_dialog.dart';
 import 'category_detail_page.dart';
 import 'income_page.dart';
 
@@ -147,6 +148,20 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
     final type = (alert['type'] as String?)?.toLowerCase() ?? '';
     final cat = alert['category'] as String?;
+
+    if (type == 'pending_transaction') {
+      final transactionId = alert['relatedTransactionId'] as String?;
+      if (transactionId != null) {
+        await showCategorizeTransactionDialog(
+          context,
+          transactionId: transactionId,
+          amount: (alert['amount'] as num?)?.toDouble() ?? 0,
+          sourceApp: alert['sourceApp'] as String? ?? 'Unknown',
+        );
+        if (mounted) await _fetchAlerts();
+      }
+      return;
+    }
 
     if (type == 'income') {
       // Income alerts → open income page

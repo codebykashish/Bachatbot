@@ -151,13 +151,19 @@ class AlertCard extends StatelessWidget {
     final severity = (alert['severity'] as String?) ?? 'low';
     final isRebalance = rawType == 'budget_rebalanced';
     final isThresholdAlert = rawType == 'expense' && (severity == 'medium' || severity == 'high');
-    final isUrgentAlert = isRebalance || isThresholdAlert;
-    final Color urgentColor = isRebalance ? const Color(0xFFE67E22) : const Color(0xFFE0223B);
+    final isPendingTx = rawType == 'pending_transaction';
+    final isUrgentAlert = isRebalance || isThresholdAlert || isPendingTx;
+    final Color urgentColor = isPendingTx
+        ? const Color(0xFF2B6CB0)
+        : (isRebalance ? const Color(0xFFE67E22) : const Color(0xFFE0223B));
+    final String urgentBadgeText = isPendingTx ? 'NEW' : 'ALERT';
 
     // ── Title
     final String title;
     if (isUndoConfirm) {
       title = 'Undo Successful';
+    } else if (isPendingTx) {
+      title = 'Transaction Detected';
     } else if (isRebalance) {
       title = 'Budget Adjusted';
     } else if (isThresholdAlert) {
@@ -181,7 +187,9 @@ class AlertCard extends StatelessWidget {
       circleIcon = CircleAvatar(
         backgroundColor: urgentColor.withValues(alpha: 0.12),
         child: Icon(
-          isRebalance ? Icons.swap_horiz_rounded : Icons.warning_amber_rounded,
+          isPendingTx
+              ? Icons.receipt_long_rounded
+              : (isRebalance ? Icons.swap_horiz_rounded : Icons.warning_amber_rounded),
           color: urgentColor,
           size: 20,
         ),
@@ -210,6 +218,10 @@ class AlertCard extends StatelessWidget {
     final Color amountColor;
     if (amount == 0) {
       amountStr = ''; amountColor = Colors.grey;
+    } else if (isPendingTx) {
+      // Not yet categorized — type (income/expense) isn't settled, so no
+      // +/- sign is shown until the user confirms.
+      amountStr = 'Rs ${amount.toInt()}'; amountColor = urgentColor;
     } else if (isIncome) {
       amountStr = '+Rs ${amount.toInt()}'; amountColor = Colors.green.shade700;
     } else if (isBudget) {
@@ -273,9 +285,9 @@ class AlertCard extends StatelessWidget {
                                 color: urgentColor,
                                 borderRadius: BorderRadius.circular(5),
                               ),
-                              child: const Text(
-                                'ALERT',
-                                style: TextStyle(
+                              child: Text(
+                                urgentBadgeText,
+                                style: const TextStyle(
                                   fontSize: 9,
                                   fontWeight: FontWeight.w800,
                                   color: Colors.white,

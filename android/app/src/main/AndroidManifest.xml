@@ -38,9 +38,30 @@
             android:name="flutterEmbedding"
             android:value="2" />
         
-        <!-- NOTE: The notification_listener_service plugin auto-merges
-             its own service declaration via manifest merge.
-             Do NOT manually declare it here with a wrong class name. -->
+        <!-- NOTE: notification_listener_service's own AndroidManifest.xml
+             is empty — it does NOT auto-merge this service declaration
+             (an earlier assumption here was wrong). Without this, the app
+             never appears in Android's Notification Access settings list. -->
+        <service
+            android:name="notification.listener.service.NotificationListener"
+            android:label="Bachatbot"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- Required for another_telephony's listenInBackground: true —
+             Android delivers SMS_RECEIVED to this receiver even when the
+             app process isn't running, which spins up the background
+             isolate that calls smsBackgroundHandler. -->
+        <receiver android:name="com.shounakmulay.telephony.sms.IncomingSmsReceiver"
+            android:permission="android.permission.BROADCAST_SMS" android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

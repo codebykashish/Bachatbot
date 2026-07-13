@@ -5,6 +5,7 @@ import '../services/notification_sync_service.dart';
 import '../services/sms_sync_service.dart';
 import '../services/month_event_service.dart';
 import '../services/alert_popup_service.dart';
+import '../api_service.dart';
 import 'home_screen.dart';
 import 'categories_screen.dart';
 import 'chatbot_page.dart';
@@ -107,6 +108,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) AlertPopupService().init(uid);
 
+    _checkPendingTransactionsAndNavigate();
+
     _monthBannerListener = () {
       final event = MonthEventService.eventNotifier.value;
       if (event != null && mounted) {
@@ -120,6 +123,31 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
     if (widget.showTour) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _checkAndStartTour());
+    }
+  }
+
+  // Runs once per app open — if any SMS/notification-detected transaction
+  // is still awaiting categorization, take the user straight to the
+  // Activity screen so they know to check it, instead of leaving it
+  // buried until they happen to tap the bell icon themselves.
+  Future<void> _checkPendingTransactionsAndNavigate() async {
+    try {
+      final res = await ApiService.get('/alerts?isRead=false&limit=50');
+      if (!mounted || res['success'] != true) return;
+
+      final alerts = res['data']?['alerts'] as List? ?? [];
+      final hasPending = alerts.any((a) => a['type'] == 'pending_transaction');
+      if (!hasPending) return;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const NotificationScreen()),
+        );
+      });
+    } catch (e) {
+      debugPrint('[MainScreen] pending transaction check failed: $e');
     }
   }
 

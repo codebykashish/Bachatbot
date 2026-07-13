@@ -230,20 +230,30 @@ class _ChatScreenState extends State<ChatScreen> {
           (pendingAction['pendingTxIds'] as List?)?.cast<String>() ?? [];
       if (pendingTxIds.isEmpty) return;
 
+      // actions[] is saved alongside pendingTxIds[] in the same order —
+      // each holds the real amount/category/type for the matching id.
+      final actions = (pendingAction['actions'] as List?) ?? [];
+      final source = (pendingAction['source'] as String?) ?? 'chat';
+
       final lastAssistantId = msgs.isNotEmpty
           ? (msgs.last['id'] as String? ?? 'restored_pending')
           : 'restored_pending';
 
       if (_pendingCards.containsKey(lastAssistantId)) return;
 
-      final items = pendingTxIds
-          .map((id) => PendingTransaction(
-                id: id,
-                amount: 0,
-                label: 'Pending transaction',
-                source: (pendingAction['source'] as String?) ?? 'chat',
-              ))
-          .toList();
+      final items = <PendingTransaction>[];
+      for (var i = 0; i < pendingTxIds.length; i++) {
+        final action = i < actions.length ? actions[i] as Map<String, dynamic>? : null;
+        final amount = (action?['amount'] as num?)?.toDouble() ?? 0;
+        final category = action?['category'] as String?;
+        items.add(PendingTransaction(
+          id: pendingTxIds[i],
+          amount: amount,
+          label: category ?? 'Pending transaction',
+          source: source,
+          selectedCategory: category,
+        ));
+      }
 
       if (items.isEmpty) return;
 
