@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import '../api_service.dart';
 import '../widgets/report_chart.dart';
 import '../widgets/shared_widgets.dart';
+import '../models/goal.dart';
 import 'notification_screen.dart';
 import 'weekly_report_screen.dart';
+import 'goals_screen.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -27,6 +29,7 @@ class ReportsScreenState extends State<ReportsScreen>
   Map<String, dynamic> _categoryInsights = {};
   String _overallStatus = 'ok';
   List<dynamic> _weeklyBreakdown = [];
+  List<Goal> _goals = [];
 
   // Months for navigation
   late DateTime _currentMonth;
@@ -114,9 +117,11 @@ class ReportsScreenState extends State<ReportsScreen>
       final futures = await Future.wait([
         ApiService.get('/monthly-report?monthKey=$_selectedMonthKey&view=$_selectedView'),
         ApiService.get('/income'),
+        ApiService.get('/goals'),
       ]);
       final res = futures[0];
       final incomeRes = futures[1];
+      final goalsRes = futures[2];
 
       if (!mounted) return;
 
@@ -129,6 +134,13 @@ class ReportsScreenState extends State<ReportsScreen>
           declared = (incomeRes['data']?['total'] ?? 0).toDouble();
         }
 
+        List<Goal> goals = [];
+        if (goalsRes['success'] == true) {
+          goals = (goalsRes['data']?['goals'] as List? ?? [])
+              .map((g) => Goal.fromJson(g as Map<String, dynamic>))
+              .toList();
+        }
+
         setState(() {
           _totalExpense = (report?['totalExpense'] ?? 0).toDouble();
           _declaredIncome = declared;
@@ -136,6 +148,7 @@ class ReportsScreenState extends State<ReportsScreen>
           _overallStatus = report?['insights']?['overallStatus'] ?? 'ok';
           _categoryInsights = report?['insights']?['categories'] ?? {};
           _weeklyBreakdown = report?['weeklyBreakdown'] as List? ?? [];
+          _goals = goals;
           _isLoading = false;
         });
       } else {
@@ -545,6 +558,62 @@ class ReportsScreenState extends State<ReportsScreen>
     );
   }
 
+  Widget _buildGoalsSummary() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 12, offset: const Offset(0, 4))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Savings Goals', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+              TextButton(
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GoalsScreen())),
+                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0)),
+                child: const Text('View all', style: TextStyle(color: _primary, fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...(_goals.take(3).map((g) {
+            final progress = (g.percentComplete / 100).clamp(0.0, 1.0);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(g.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+                      ),
+                      Text(
+                        'Rs ${g.savedSoFar.toInt()} / Rs ${g.targetAmount.toInt()}',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(value: progress, minHeight: 6, backgroundColor: Colors.grey.shade200, color: _primary),
+                  ),
+                ],
+              ),
+            );
+          })),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -629,6 +698,12 @@ class ReportsScreenState extends State<ReportsScreen>
 
                     // ── Overall Status Card ───────────────────────────────
                     _buildOverallStatusCard(),
+
+                    // ── Savings Goals summary ─────────────────────────────
+                    if (_goals.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      _buildGoalsSummary(),
+                    ],
 
                     const SizedBox(height: 20),
 

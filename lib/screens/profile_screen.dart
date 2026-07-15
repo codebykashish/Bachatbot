@@ -6,6 +6,7 @@ import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import '../api_service.dart';
 import 'edit_profile_screen.dart';
+import 'goals_screen.dart';
 import 'notification_screen.dart';
 import 'income_page.dart';
 import 'login_screen.dart';
@@ -384,6 +385,21 @@ class ProfileScreenState extends State<ProfileScreen> {
                       );
                       if (saved == true) loadProfile();
                     },
+                  ),
+                ]),
+
+                const SizedBox(height: 12),
+
+                // Goals
+                _sectionCard(children: [
+                  _tile(
+                    icon: Icons.savings_outlined,
+                    title: 'Goals',
+                    subtitle: 'Save toward something specific',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const GoalsScreen()),
+                    ),
                   ),
                 ]),
 

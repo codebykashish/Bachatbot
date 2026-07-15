@@ -12,6 +12,7 @@ import 'chatbot_page.dart';
 import 'notification_screen.dart';
 import 'profile_screen.dart';
 import 'reports_screen.dart';
+import 'goals_screen.dart';
 
 class MainScreen extends StatefulWidget {
   final String firstName;
@@ -291,6 +292,21 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             iconTheme: const IconThemeData(color: Colors.black87),
             actions: [
               IconButton(
+                icon: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: _primary.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.savings_outlined, color: _primary, size: 20),
+                ),
+                tooltip: 'Goals',
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const GoalsScreen()),
+                ),
+              ),
+              IconButton(
                 icon: ValueListenableBuilder<int>(
                   valueListenable: NotificationScreen.unreadCount,
                   builder: (context, count, child) => Badge(
@@ -340,9 +356,11 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                 ),
             ],
           ),
+          floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
           floatingActionButton: FloatingActionButton(
             key: _fabKey,
             backgroundColor: _primary,
+            elevation: 4,
             tooltip: 'Chat with BachatBot',
             onPressed: () {
               if (_tourActive && _tourStep == 3) _tourAdvance();
@@ -350,33 +368,23 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             },
             child: const Icon(Icons.smart_toy_outlined, color: Colors.white),
           ),
-          bottomNavigationBar: BottomNavigationBar(
+          bottomNavigationBar: BottomAppBar(
             key: _bottomNavKey,
-            currentIndex: _currentIndex,
-            selectedItemColor: _primary,
-            unselectedItemColor: Colors.grey,
-            backgroundColor: Colors.white,
+            shape: const CircularNotchedRectangle(),
+            notchMargin: 10,
+            color: Colors.white,
             elevation: 8,
-            type: BottomNavigationBarType.fixed,
-            onTap: (i) {
-              setState(() => _currentIndex = i);
-              // Tour advancement for nav items
-              if (_tourActive) {
-                if (_tourStep == 2 && i == 1) Future.delayed(const Duration(milliseconds: 150), _tourAdvance);
-                if (_tourStep == 4 && i == 2) Future.delayed(const Duration(milliseconds: 150), _tourAdvance);
-                if (_tourStep == 5 && i == 3) Future.delayed(const Duration(milliseconds: 150), _tourAdvance);
-              }
-              if (i == 0) { _homeKey.currentState?.refresh(); }
-              else if (i == 1) { _categoriesKey.currentState?.refresh(); }
-              else if (i == 2) { _reportsKey.currentState?.refresh(); }
-              else if (i == 3) { _profileKey.currentState?.refresh(); }
-            },
-            items: const [
-              BottomNavigationBarItem(icon: Icon(Icons.home_outlined),          activeIcon: Icon(Icons.home),           label: 'Home'),
-              BottomNavigationBarItem(icon: Icon(Icons.grid_view_outlined),      activeIcon: Icon(Icons.grid_view),      label: 'Categories'),
-              BottomNavigationBarItem(icon: Icon(Icons.insert_chart_outlined),   activeIcon: Icon(Icons.insert_chart),   label: 'Reports'),
-              BottomNavigationBarItem(icon: Icon(Icons.person_outline),          activeIcon: Icon(Icons.person),         label: 'Profile'),
-            ],
+            padding: EdgeInsets.zero,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _navBarItem(icon: Icons.home_outlined, activeIcon: Icons.home, label: 'Home', index: 0),
+                _navBarItem(icon: Icons.grid_view_outlined, activeIcon: Icons.grid_view, label: 'Categories', index: 1),
+                const SizedBox(width: 48), // room for the docked FAB's notch
+                _navBarItem(icon: Icons.insert_chart_outlined, activeIcon: Icons.insert_chart, label: 'Reports', index: 2),
+                _navBarItem(icon: Icons.person_outline, activeIcon: Icons.person, label: 'Profile', index: 3),
+              ],
+            ),
           ),
         ),
 
@@ -387,6 +395,45 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             child: _buildTourOverlay(context),
           ),
       ],
+    );
+  }
+
+  void _onNavTap(int i) {
+    setState(() => _currentIndex = i);
+    // Tour advancement for nav items
+    if (_tourActive) {
+      if (_tourStep == 2 && i == 1) Future.delayed(const Duration(milliseconds: 150), _tourAdvance);
+      if (_tourStep == 4 && i == 2) Future.delayed(const Duration(milliseconds: 150), _tourAdvance);
+      if (_tourStep == 5 && i == 3) Future.delayed(const Duration(milliseconds: 150), _tourAdvance);
+    }
+    if (i == 0) { _homeKey.currentState?.refresh(); }
+    else if (i == 1) { _categoriesKey.currentState?.refresh(); }
+    else if (i == 2) { _reportsKey.currentState?.refresh(); }
+    else if (i == 3) { _profileKey.currentState?.refresh(); }
+  }
+
+  Widget _navBarItem({
+    required IconData icon,
+    required IconData activeIcon,
+    required String label,
+    required int index,
+  }) {
+    final selected = _currentIndex == index;
+    final color = selected ? _primary : Colors.grey;
+    return InkWell(
+      onTap: () => _onNavTap(index),
+      customBorder: const RoundedRectangleBorder(),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(selected ? activeIcon : icon, color: color, size: 24),
+            const SizedBox(height: 2),
+            Text(label, style: TextStyle(color: color, fontSize: 11)),
+          ],
+        ),
+      ),
     );
   }
 

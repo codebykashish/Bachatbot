@@ -49,11 +49,40 @@ Future<bool> showRebalanceConfirmDialog(
             final from = t['from'] as String? ?? '';
             final amount = ((t['amount'] as num?) ?? 0).toInt();
             final label = from == 'savings' ? 'Savings' : from;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                '• $label: Rs $amount',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            final affectsGoals = (t['affectsGoals'] as List?)?.cast<String>() ?? [];
+            final isAlarming = from == 'savings' && affectsGoals.isNotEmpty;
+
+            if (!isAlarming) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  '• $label: Rs $amount',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              );
+            }
+
+            final goalsList = affectsGoals.join(', ');
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Rs $amount would come from your Savings — money currently counted toward: $goalsList',
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.red.shade800),
+                    ),
+                  ),
+                ],
               ),
             );
           }),

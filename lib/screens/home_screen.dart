@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api_service.dart';
 import '../widgets/report_chart.dart';
 import '../widgets/balance_card.dart';
+import '../services/financial_status_service.dart';
 import 'categories_screen.dart';
 import 'notification_screen.dart';
 import 'reports_screen.dart';
@@ -170,10 +171,30 @@ class HomeScreenState extends State<HomeScreen> {
               .where((b) => b['category']?.toString().toLowerCase() != 'salary')
               .toList();
         });
+        // Drives the app-wide ambient background — uses true month-scoped
+        // totals (not the home screen's week-scoped report), so it reflects
+        // actual overall overspend, not just a quiet week within a bad month.
+        _updateFinancialStatus();
       }
     } catch (e) {
       debugPrint('[HomeScreen] /budgets error: $e');
     }
+  }
+
+  void _updateFinancialStatus() {
+    final limit = _totalBudgetLimit;
+    final spent = _totalBudgetSpent;
+    String overallStatus;
+    if (limit <= 0) {
+      overallStatus = 'ok';
+    } else if (spent > limit) {
+      overallStatus = 'overspent';
+    } else if (spent >= limit * 0.8) {
+      overallStatus = 'high';
+    } else {
+      overallStatus = 'ok';
+    }
+    FinancialStatusService().updateFromOverallStatus(overallStatus);
   }
 
   Future<void> _fetchReport() async {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../api_service.dart';
+import 'add_edit_goal_screen.dart';
 import 'category_budget_onboarding_screen.dart';
 import 'main_screen.dart';
 
@@ -81,12 +82,28 @@ class _IncomeOnboardingScreenState extends State<IncomeOnboardingScreen> {
   }
 
   void _navigateToCategories(double inHand, double inBank, double online) {
+    final totalIncome = inHand + inBank + online;
+    // Optional savings-goal step slots in here — skippable either way,
+    // then continues to category budgeting exactly as before.
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
+        builder: (_) => AddEditGoalScreen(
+          showSkip: true,
+          onSkip: (ctx) => _goToCategoryBudgets(ctx, totalIncome),
+          onDone: (ctx) => _goToCategoryBudgets(ctx, totalIncome),
+        ),
+      ),
+    );
+  }
+
+  void _goToCategoryBudgets(BuildContext ctx, double totalIncome) {
+    Navigator.pushReplacement(
+      ctx,
+      MaterialPageRoute(
         builder: (_) => CategoryBudgetOnboardingScreen(
           firstName: widget.firstName,
-          totalIncome: inHand + inBank + online,
+          totalIncome: totalIncome,
         ),
       ),
     );

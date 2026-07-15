@@ -953,6 +953,34 @@ class _BudgetDialogContentState extends State<_BudgetDialogContent> {
               final taken = (p['amountTaken'] as num).toInt();
               final oldLimitRaw = p['oldLimit'] as num?;
               final newLimitRaw = p['newLimit'] as num?;
+              final affectsGoals = (p['affectsGoals'] as List?)?.cast<String>() ?? [];
+              final isAlarming = cat == 'Savings' && affectsGoals.isNotEmpty;
+
+              if (isAlarming) {
+                final goalsList = affectsGoals.join(', ');
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Rs $taken would come from your Savings — money currently counted toward: $goalsList',
+                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.red.shade800),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
 
               // "Savings" is unallocated income, not a category budget —
               // it has no old/new limit to show, just the amount used.

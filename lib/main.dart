@@ -9,6 +9,7 @@ import 'screens/email_signup_page.dart';
 import 'screens/main_screen.dart';
 import 'screens/splash_screen.dart';
 import 'api_service.dart';
+import 'widgets/ambient_status_overlay.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -44,6 +45,14 @@ class MyApp extends StatelessWidget {
       routes: {
         '/login': (context) => const LoginScreen(),
         '/signup': (context) => const EmailSignupPage(),
+      },
+      builder: (context, child) {
+        return Stack(
+          children: [
+            if (child != null) child,
+            const Positioned.fill(child: AmbientStatusOverlay()),
+          ],
+        );
       },
     );
   }
