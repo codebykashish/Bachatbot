@@ -172,11 +172,18 @@ async def create_or_update_budget(
 
                     preview_plan = []
                     if unallocated_used > 0:
+                        affects_goals = []
+                        try:
+                            from services.goal_service import get_active_goal_names
+                            affects_goals = get_active_goal_names(db, uid)
+                        except Exception:
+                            pass
                         preview_plan.append({
                             "category": "Savings",
                             "oldLimit": None,
                             "newLimit": None,
                             "amountTaken": unallocated_used,
+                            "affectsGoals": affects_goals,
                         })
                     preview_plan += [
                         {k: v for k, v in p.items() if k != "ref"}

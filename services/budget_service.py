@@ -78,13 +78,8 @@ def _compute_rebalance_transfers(db, uid, overspent_category, overspend, month_k
     remaining_gap = overspend
     transfers = []  # list of {"from": str, "amount": float, "_donor_id": str|None, "_donor_old_limit": float}
 
-    # Step 1: use savings
-    if savings > 0 and remaining_gap > 0:
-        use = min(savings, remaining_gap)
-        transfers.append({"from": "savings", "amount": use, "_donor_id": None, "_donor_old_limit": 0})
-        remaining_gap -= use
-
-    # Step 2: take from other categories, most remaining budget first
+    # Step 1: take from other categories first, most remaining budget first.
+    # Savings/goal money is protected — only touched as a last resort below.
     if remaining_gap > 0:
         donors = [b for b in all_budgets if b.get("category") != overspent_category]
         donors.sort(
@@ -105,6 +100,27 @@ def _compute_rebalance_transfers(db, uid, overspent_category, overspend, month_k
                 "_donor_old_limit": float(donor.get("limit") or 0),
             })
             remaining_gap -= use
+
+    # Step 2: only if categories combined weren't enough, use savings.
+    # If there are active savings goals, this pool is the same unallocated
+    # income they draw from — flag it so the confirmation dialog can warn
+    # the user this would eat into goal money, not just generic "savings".
+    if savings > 0 and remaining_gap > 0:
+        use = min(savings, remaining_gap)
+        affects_goals = []
+        try:
+            from services.goal_service import get_active_goal_names
+            affects_goals = get_active_goal_names(db, uid)
+        except Exception:
+            pass
+        transfers.append({
+            "from": "savings",
+            "amount": use,
+            "_donor_id": None,
+            "_donor_old_limit": 0,
+            "affectsGoals": affects_goals,
+        })
+        remaining_gap -= use
 
     return transfers, remaining_gap
 
@@ -170,6 +186,7 @@ def rebalance_on_overspend(db, uid, overspent_category, new_spent, old_limit, bu
                 "amount": t["amount"],
                 "donorId": t["_donor_id"],
                 "donorOldLimit": t["_donor_old_limit"],
+                "affectsGoals": t.get("affectsGoals", []),
             }
             for t in transfers
         ],
@@ -188,7 +205,10 @@ def rebalance_on_overspend(db, uid, overspent_category, new_spent, old_limit, bu
         "overspend": overspend,
         "totalCovered": total_covered,
         "coveredFully": covered_fully,
-        "transfers": [{"from": t["from"], "amount": t["amount"]} for t in transfers],
+        "transfers": [
+            {"from": t["from"], "amount": t["amount"], "affectsGoals": t.get("affectsGoals", [])}
+            for t in transfers
+        ],
     }
 
 
