@@ -4,7 +4,7 @@ from typing import Optional
 from firebase_config import get_firestore
 from auth import get_current_user
 from utils import serialize_doc, get_current_month_key
-from services.goal_service import compute_goal_progress
+from services.goal_service import compute_goal_progress, get_available_pool
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 import logging
 
@@ -18,12 +18,14 @@ class GoalRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=60)
     targetAmount: float = Field(..., gt=0)
     timeframeMonths: int = Field(..., gt=0, le=60)
+    priority: int = Field(1, ge=1, le=99)
 
 
 class GoalUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=60)
     targetAmount: Optional[float] = Field(None, gt=0)
     timeframeMonths: Optional[int] = Field(None, gt=0, le=60)
+    priority: Optional[int] = Field(None, ge=1, le=99)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -36,6 +38,7 @@ def _with_computed_fields(goal: dict, saved: float) -> dict:
     """
     target = float(goal.get("targetAmount", 0) or 0)
     months = int(goal.get("timeframeMonths", 1) or 1)
+    goal["priority"] = int(goal.get("priority") or 1)
     goal["savedSoFar"] = saved
     goal["percentComplete"] = round(min(100, (saved / target) * 100), 1) if target > 0 else 0
     goal["remaining"] = max(0.0, target - saved)
@@ -62,6 +65,7 @@ async def create_goal(
         "name": body.name,
         "targetAmount": body.targetAmount,
         "timeframeMonths": body.timeframeMonths,
+        "priority": body.priority,
         "status": "active",
         "isDeleted": False,
         "createdAt": SERVER_TIMESTAMP,
@@ -114,7 +118,8 @@ async def get_goals(
             saved = float(data.get("targetAmount", 0) or 0)
         goals.append(_with_computed_fields(serialize_doc(data), saved))
 
-    return {"success": True, "data": {"goals": goals}}
+    available_to_save = get_available_pool(db, uid, month_key)
+    return {"success": True, "data": {"goals": goals, "availableToSave": available_to_save}}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -145,6 +150,8 @@ async def update_goal(
         update_payload["targetAmount"] = body.targetAmount
     if body.timeframeMonths is not None:
         update_payload["timeframeMonths"] = body.timeframeMonths
+    if body.priority is not None:
+        update_payload["priority"] = body.priority
 
     goal_ref.update(update_payload)
     logger.info(f"[GOALS] uid={uid} updated goal id={goal_id}")

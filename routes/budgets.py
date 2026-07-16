@@ -100,13 +100,13 @@ async def create_or_update_budget(
                     old_limit = float(bd.get("limit", 0))
                     break
 
-            # What would total allocation be after this change?
+            # How much NEW money does this category need, and how much
+            # unallocated income exists to (potentially) cover it?
             current_total = sum(float(b.to_dict().get("limit", 0)) for b in all_budget_docs)
-            new_total_allocated = current_total - old_limit + body.limit
+            delta = body.limit - old_limit
+            unallocated = max(0.0, income_total - (current_total - old_limit))
 
-            if new_total_allocated > income_total:
-                shortfall = new_total_allocated - income_total
-
+            if delta > unallocated:
                 # Build list of other categories with unused budget buffer
                 other_buffers = []
                 for b in all_budget_docs:
@@ -129,8 +129,7 @@ async def create_or_update_budget(
 
                 total_buffer = sum(ob["buffer"] for ob in other_buffers)
 
-                if total_buffer < shortfall:
-                    unallocated = max(0.0, income_total - (current_total - old_limit))
+                if total_buffer + unallocated < delta:
                     raise HTTPException(
                         status_code=400,
                         detail={
@@ -139,7 +138,7 @@ async def create_or_update_budget(
                                 "code": "BUDGET_EXCEEDS_INCOME",
                                 "message": (
                                     f"Cannot set budget to Rs {int(body.limit)}. "
-                                    f"Rs {int(unallocated)} is unallocated from income and "
+                                    f"Rs {int(unallocated)} is available to save and "
                                     f"Rs {int(total_buffer)} can be freed from other categories — "
                                     f"only Rs {int(unallocated + total_buffer)} total available."
                                 ),
@@ -147,31 +146,29 @@ async def create_or_update_budget(
                         },
                     )
 
-                # Compute the rebalance plan first — no writes yet, so a
-                # dry run can preview exactly which categories would be
-                # reduced and by how much, before the user confirms.
+                # Categories first, most-remaining-buffer-first — savings is
+                # only touched for whatever categories combined can't cover.
+                # Compute the plan first — no writes yet, so a dry run can
+                # preview it before the user confirms.
+                needed_from_categories = min(delta, total_buffer)
                 plan = []
-                for ob in other_buffers:
-                    reduction = round((ob["buffer"] / total_buffer) * shortfall, 2)
-                    new_limit = max(ob["spent"], ob["limit"] - reduction)
-                    plan.append({
-                        "ref": ob["ref"],
-                        "category": ob["category"],
-                        "oldLimit": ob["limit"],
-                        "newLimit": new_limit,
-                        "amountTaken": round(ob["limit"] - new_limit, 2),
-                    })
+                if needed_from_categories > 0:
+                    for ob in other_buffers:
+                        reduction = round((ob["buffer"] / total_buffer) * needed_from_categories, 2)
+                        new_limit = max(ob["spent"], ob["limit"] - reduction)
+                        plan.append({
+                            "ref": ob["ref"],
+                            "category": ob["category"],
+                            "oldLimit": ob["limit"],
+                            "newLimit": new_limit,
+                            "amountTaken": round(ob["limit"] - new_limit, 2),
+                        })
+
+                needed_from_savings = round(max(0.0, delta - needed_from_categories), 2)
 
                 if body.dryRun:
-                    # Show the savings portion too — it's already netted out
-                    # of `shortfall` above (savings is used first), but the
-                    # preview must say so explicitly or it looks like nothing
-                    # came from savings at all.
-                    unallocated = max(0.0, income_total - (current_total - old_limit))
-                    unallocated_used = round(min(unallocated, body.limit), 2)
-
                     preview_plan = []
-                    if unallocated_used > 0:
+                    if needed_from_savings > 0:
                         affects_goals = []
                         try:
                             from services.goal_service import get_active_goal_names
@@ -182,7 +179,7 @@ async def create_or_update_budget(
                             "category": "Savings",
                             "oldLimit": None,
                             "newLimit": None,
-                            "amountTaken": unallocated_used,
+                            "amountTaken": needed_from_savings,
                             "affectsGoals": affects_goals,
                         })
                     preview_plan += [
@@ -194,7 +191,7 @@ async def create_or_update_budget(
                         "success": True,
                         "data": {
                             "requiresRebalance": True,
-                            "shortfall": round(shortfall, 2),
+                            "shortfall": round(delta, 2),
                             "rebalancePlan": preview_plan,
                         },
                     }

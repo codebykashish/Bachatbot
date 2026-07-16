@@ -7,7 +7,7 @@ from utils import (
     serialize_doc, is_today, is_yesterday,
 )
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 import calendar
 
@@ -17,8 +17,7 @@ router = APIRouter()
 @router.get("/monthly-report")
 async def get_monthly_report(
     monthKey: Optional[str] = Query(None, description="YYYY-MM. Defaults to current month."),
-    view: Optional[str] = Query("month", description="'month' (default) or 'week' (last 7 days)."),
-    weekOfMonth: Optional[int] = Query(None, ge=1, le=4, description="1-4 — filters the report to just that week bucket within monthKey."),
+    view: Optional[str] = Query("month", description="'today' | 'week' (last 7 days) | 'month' (default)."),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -28,32 +27,23 @@ async def get_monthly_report(
 
     Query params:
     - monthKey: YYYY-MM (default current month)
-    - view: "month" | "week" — if "week", only include last 7 days of transactions
-    - weekOfMonth: 1-4 — restricts the report to that week's day range within
-      monthKey (days 1-7 / 8-14 / 15-21 / 22-end). Independent of `view`.
+    - view: "today" | "week" | "month" — scopes totals/categoryBreakdown/dailyBreakdown
     """
     uid = current_user["uid"]
     db = get_firestore()
 
     month_key = monthKey or get_current_month_key()
-    use_week_filter = (view or "").strip().lower() == "week"
+    view_normalized = (view or "").strip().lower()
+    use_week_filter = view_normalized == "week"
+    use_today_filter = view_normalized == "today"
 
-    print(f"[REPORT] uid={uid} monthKey={month_key} view={'week' if use_week_filter else 'month'} weekOfMonth={weekOfMonth}")
+    print(f"[REPORT] uid={uid} monthKey={month_key} view={view_normalized}")
 
     # ── Week filter boundaries ───────────────────────────────────────────
     week_start = None
     if use_week_filter:
-        from datetime import timedelta
         now = datetime.now(timezone.utc)
         week_start = now - timedelta(days=6)  # last 7 days including today
-
-    # ── Week-of-month day range (independent of the last-7-days filter) ──
-    week_of_month_range = None
-    if weekOfMonth:
-        wy, wm = int(month_key[:4]), int(month_key[5:])
-        wtotal_days = calendar.monthrange(wy, wm)[1]
-        wbucket_ranges = [(1, 7), (8, 14), (15, 21), (22, wtotal_days)]
-        week_of_month_range = wbucket_ranges[weekOfMonth - 1]
 
     # ── Fetch confirmed, non-deleted transactions ─────────────────────────
     # Week view spans the last 7 days, which can cross a month boundary —
@@ -78,11 +68,11 @@ async def get_monthly_report(
     yesterday_income = 0.0
     yesterday_category_totals = {}
 
-    # Weekly breakdown within the selected month — 4 buckets (days 1-7,
-    # 8-14, 15-21, 22-end), only meaningful in month view since week view
-    # transactions aren't confined to a single calendar month.
-    week_bucket_expense = [0.0, 0.0, 0.0, 0.0]
-    week_bucket_income = [0.0, 0.0, 0.0, 0.0]
+    # Per-day totals + per-day-per-category breakdown — powers the Reports
+    # screen's bar chart for week/month view. Keyed by ISO date string so
+    # the frontend can slice by category client-side with no extra fetch.
+    daily_totals = {}
+    daily_by_category = {}
 
     for doc in tx_docs:
         data = doc.to_dict()
@@ -104,31 +94,25 @@ async def get_monthly_report(
             except Exception:
                 pass  # include if we can't determine the date
 
-        # If a specific week-of-month was requested, skip days outside it
-        if week_of_month_range and created_at is not None:
-            try:
-                day = created_at.day
-                if not (week_of_month_range[0] <= day <= week_of_month_range[1]):
-                    continue
-            except Exception:
-                pass
-
-        # Weekly breakdown bucket (month view only)
-        if not use_week_filter and created_at is not None:
-            try:
-                day = created_at.day
-                bucket_idx = min(3, (day - 1) // 7)
-                if tx_type == "expense":
-                    week_bucket_expense[bucket_idx] += amount
-                elif tx_type == "income":
-                    week_bucket_income[bucket_idx] += amount
-            except Exception:
-                pass
+        # If today view, skip anything not from today
+        if use_today_filter and not is_today(created_at):
+            continue
 
         if tx_type == "expense":
             total_expense += amount
             if category:
                 category_breakdown[category] = category_breakdown.get(category, 0.0) + amount
+
+            if created_at is not None:
+                try:
+                    date_str = created_at.date().isoformat() if hasattr(created_at, "date") else None
+                except Exception:
+                    date_str = None
+                if date_str:
+                    daily_totals[date_str] = daily_totals.get(date_str, 0.0) + amount
+                    if category:
+                        cat_map = daily_by_category.setdefault(date_str, {})
+                        cat_map[category] = cat_map.get(category, 0.0) + amount
 
             # Check if this transaction is from today
             if is_today(created_at):
@@ -255,20 +239,34 @@ async def get_monthly_report(
         "categories": category_insights,
     }
 
-    # ── Weekly breakdown labels (month view only) ─────────────────────────
-    weekly_breakdown = []
-    if not use_week_filter:
+    # ── Daily breakdown for the bar chart — one entry per day, with a
+    # per-category split, so the frontend can switch category filters
+    # instantly with no extra fetch. Not needed for "today" view (that
+    # tab shows categoryBreakdown directly as category-bars instead).
+    daily_breakdown = []
+    if use_week_filter:
+        now = datetime.now(timezone.utc)
+        for i in range(6, -1, -1):
+            d = (now - timedelta(days=i)).date()
+            date_str = d.isoformat()
+            daily_breakdown.append({
+                "date": date_str,
+                "label": d.strftime("%a"),  # Sun, Mon, ...
+                "dayNum": d.day,
+                "total": round(daily_totals.get(date_str, 0.0), 2),
+                "categories": {k: round(v, 2) for k, v in daily_by_category.get(date_str, {}).items()},
+            })
+    elif not use_today_filter:
         year, month_num = int(month_key[:4]), int(month_key[5:])
         total_days_in_month = calendar.monthrange(year, month_num)[1]
-        bucket_ranges = [(1, 7), (8, 14), (15, 21), (22, total_days_in_month)]
-        month_abbrev = calendar.month_abbr[month_num]
-        for i, (start_day, end_day) in enumerate(bucket_ranges):
-            weekly_breakdown.append({
-                "week": i + 1,
-                "label": f"Week {i + 1}",
-                "dateRange": f"{month_abbrev} {start_day}-{end_day}",
-                "totalExpense": round(week_bucket_expense[i], 2),
-                "totalIncome": round(week_bucket_income[i], 2),
+        for day in range(1, total_days_in_month + 1):
+            date_str = f"{month_key}-{day:02d}"
+            daily_breakdown.append({
+                "date": date_str,
+                "label": str(day),
+                "dayNum": day,
+                "total": round(daily_totals.get(date_str, 0.0), 2),
+                "categories": {k: round(v, 2) for k, v in daily_by_category.get(date_str, {}).items()},
             })
 
     # ── Days remaining + survival budget ─────────────────────────────────
@@ -311,7 +309,7 @@ async def get_monthly_report(
         "categoryBreakdown": category_breakdown,
         "budgetUtilization": budget_utilization,
         "insights": insights,
-        "weeklyBreakdown": weekly_breakdown,
+        "dailyBreakdown": daily_breakdown,
         "daysRemaining": days_remaining,
         "survivalBudgetPerDay": survival_budget_per_day,
         "alertCount": alert_count,

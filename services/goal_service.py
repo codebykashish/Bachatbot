@@ -61,6 +61,13 @@ def compute_goal_progress(db, uid: str, month_key: str) -> dict:
     Returns {goal_id: saved_amount} — how much of the available pool each
     active goal currently gets credited with, live. Never exceeds a goal's
     own targetAmount, and the sum never exceeds the available pool.
+
+    Goals are grouped into priority tiers (lower number = higher priority,
+    default 1). Higher tiers are fully funded before a lower tier sees
+    anything ("earphones first, then lots of food"). Goals sharing the same
+    tier split that tier's share proportionally to their own target, so two
+    goals at the same priority grow side by side — this is also what makes
+    the old flat behavior (everyone at the default tier) unchanged.
     """
     goals = get_active_goals(db, uid)
     if not goals:
@@ -70,18 +77,33 @@ def compute_goal_progress(db, uid: str, month_key: str) -> dict:
     if available <= 0:
         return {g["_id"]: 0.0 for g in goals}
 
-    targets = {g["_id"]: float(g.get("targetAmount") or 0) for g in goals}
-    total_target = sum(targets.values())
-    if total_target <= 0:
-        return {gid: 0.0 for gid in targets}
+    tiers: dict[int, list[dict]] = {}
+    for g in goals:
+        tier = int(g.get("priority") or 1)
+        tiers.setdefault(tier, []).append(g)
 
-    if available >= total_target:
-        # Enough for every goal to be fully "saved."
-        return targets
+    result: dict[str, float] = {}
+    remaining = available
+    for tier in sorted(tiers.keys()):
+        tier_goals = tiers[tier]
+        targets = {g["_id"]: float(g.get("targetAmount") or 0) for g in tier_goals}
+        total_target = sum(targets.values())
 
-    # Not enough — split proportionally to each goal's own target.
-    ratio = available / total_target
-    return {gid: round(amount * ratio, 2) for gid, amount in targets.items()}
+        if total_target <= 0 or remaining <= 0:
+            for gid in targets:
+                result[gid] = 0.0
+            continue
+
+        if remaining >= total_target:
+            result.update(targets)
+            remaining -= total_target
+        else:
+            ratio = remaining / total_target
+            for gid, amount in targets.items():
+                result[gid] = round(amount * ratio, 2)
+            remaining = 0.0
+
+    return result
 
 
 def get_active_goal_names(db, uid: str) -> list[str]:
