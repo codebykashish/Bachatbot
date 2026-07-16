@@ -111,7 +111,7 @@ class HelpScreen extends StatelessWidget {
           'Tap any category on the Categories screen → tap the green Edit button.\n\n'
           'The sheet shows:\n'
           '• Current spending for this month\n'
-          '• Unallocated income (how much you haven\'t budgeted yet)\n\n'
+          '• Available to save (how much you haven\'t budgeted yet)\n\n'
           'You cannot set a budget lower than what you\'ve already spent this month.',
     },
     {
@@ -127,7 +127,7 @@ class HelpScreen extends StatelessWidget {
     {
       'section': 'Categories & Budgets',
       'icon': 'pie_chart_outline',
-      'title': 'Unallocated income explained',
+      'title': 'Available to save explained',
       'content':
           'When you open the budget edit sheet, it shows "Available Rs X". '
           'This is your declared income minus all other category budgets you\'ve already set.\n\n'

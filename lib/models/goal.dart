@@ -8,6 +8,7 @@ class Goal {
   final double monthlyTarget;
   final double percentComplete;
   final String status; // active | completed
+  final int priority; // 1 = highest — funded before higher-numbered tiers
 
   Goal({
     required this.id,
@@ -19,6 +20,7 @@ class Goal {
     required this.monthlyTarget,
     required this.percentComplete,
     required this.status,
+    this.priority = 1,
   });
 
   factory Goal.fromJson(Map<String, dynamic> json) {
@@ -32,6 +34,7 @@ class Goal {
       monthlyTarget: (json['monthlyTarget'] as num?)?.toDouble() ?? 0,
       percentComplete: (json['percentComplete'] as num?)?.toDouble() ?? 0,
       status: json['status'] as String? ?? 'active',
+      priority: (json['priority'] as num?)?.toInt() ?? 1,
     );
   }
 }

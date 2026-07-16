@@ -236,6 +236,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   void _onChatRefreshNeeded({bool refreshHome = false, bool refreshCategories = false}) {
     if (refreshHome) _homeKey.currentState?.refresh();
     if (refreshCategories) _categoriesKey.currentState?.refresh();
+    _reportsKey.currentState?.refresh();
   }
 
   Future<void> _openChat() async {
@@ -249,6 +250,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       _homeKey.currentState?.refresh();
       _categoriesKey.currentState?.refresh();
       _profileKey.currentState?.refresh();
+      _reportsKey.currentState?.refresh();
     }
   }
 

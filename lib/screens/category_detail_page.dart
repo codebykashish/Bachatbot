@@ -355,7 +355,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                                 ? 'No budget available to allocate'
                                 : _otherUnspentBuffer > 0
                                     ? 'Up to Rs ${available.toInt()} available (incl. Rs ${_otherUnspentBuffer.toInt()} unused from other categories)'
-                                    : 'Rs ${available.toInt()} unallocated',
+                                    : 'Rs ${available.toInt()} available to save',
                             style: TextStyle(
                               fontSize: 12,
                               color: available > 0 ? _primary : Colors.orange,

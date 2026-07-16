@@ -525,7 +525,7 @@ class _IncomePageState extends State<IncomePage> {
                 Text(
                   isFullyAllocated
                       ? 'All income allocated to budgets'
-                      : 'Rs ${unalloc.toInt()} unallocated',
+                      : 'Rs ${unalloc.toInt()} available to save',
                   style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
                 ),
               ],

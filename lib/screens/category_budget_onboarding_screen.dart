@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../api_service.dart';
 import 'main_screen.dart';
+import 'add_edit_goal_screen.dart';
 
 class CategoryBudgetOnboardingScreen extends StatefulWidget {
   final String firstName;
@@ -33,7 +34,7 @@ class _CategoryBudgetOnboardingScreenState
     {'name': 'Other',         'icon': Icons.category,          'color': Color(0xFFFFCA28)},
   ];
 
-  // Step 0 = category selection, Step 1 = budget setting
+  // Step 0 = category selection, Step 1 = budget setting, Step 2 = savings intro
   int _step = 0;
   bool _isSaving = false;
 
@@ -76,10 +77,23 @@ class _CategoryBudgetOnboardingScreenState
 
   void _proceedToBudgets() {
     if (_selected.isEmpty) {
-      _finishOnboarding();
+      setState(() => _step = 2);
       return;
     }
     setState(() => _step = 1);
+  }
+
+  void _proceedToSavingsIntro() {
+    setState(() => _step = 2);
+  }
+
+  Future<void> _createGoalThenFinish() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddEditGoalScreen()),
+    );
+    if (!mounted) return;
+    _finishOnboarding();
   }
 
   Future<void> _finishOnboarding() async {
@@ -156,15 +170,15 @@ class _CategoryBudgetOnboardingScreenState
               padding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
               child: Row(
                 children: [
-                  if (_step == 1)
+                  if (_step > 0)
                     IconButton(
                       icon: const Icon(Icons.arrow_back_ios_new, size: 18),
-                      onPressed: () => setState(() => _step = 0),
+                      onPressed: () => setState(() => _step = _step == 2 && _selected.isEmpty ? 0 : _step - 1),
                       padding: EdgeInsets.zero,
                     ),
-                  // Progress indicator (step 2 of 2 in budget flow, step 3 of full onboarding)
+                  // Progress indicator (3 steps: categories, budgets, savings intro)
                   Row(
-                    children: List.generate(2, (i) => AnimatedContainer(
+                    children: List.generate(3, (i) => AnimatedContainer(
                       duration: const Duration(milliseconds: 250),
                       width: i == _step ? 22 : 8,
                       height: 8,
@@ -185,7 +199,11 @@ class _CategoryBudgetOnboardingScreenState
             ),
 
             Expanded(
-              child: _step == 0 ? _buildCategorySelector() : _buildBudgetSetter(),
+              child: _step == 0
+                  ? _buildCategorySelector()
+                  : _step == 1
+                      ? _buildBudgetSetter()
+                      : _buildSavingsIntro(),
             ),
           ],
         ),
@@ -397,22 +415,114 @@ class _CategoryBudgetOnboardingScreenState
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: _isSaving ? null : _finishOnboarding,
+                  onPressed: _isSaving || isOverAllocated ? null : _proceedToSavingsIntro,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _primary,
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
-                  child: _isSaving
-                      ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-                      : const Text('Done, Open App  🎉', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  child: const Text('Continue  →', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
           ),
         ),
       ],
+    );
+  }
+
+  // ─── Step 2: Savings intro — no "how much to save" question, just the
+  // math and an optional goal. Never forced. ────────────────────────────────
+
+  Widget _buildSavingsIntro() {
+    final availableToSave = _selected.isEmpty ? widget.totalIncome : _remaining;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'You\'re all set to save',
+            style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.black87, height: 1.3),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Anything you don\'t assign to a budget saves itself.',
+            style: TextStyle(fontSize: 13, color: Colors.grey),
+          ),
+          const SizedBox(height: 28),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [_primary, _primary.withValues(alpha: 0.75)]),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: const [
+                    Icon(Icons.savings_outlined, color: Colors.white, size: 18),
+                    SizedBox(width: 6),
+                    Text('Available to save every month', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Rs ${availableToSave.toInt()}',
+                  style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Would you like to give it a purpose?',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Optional — you can always add one later. If you skip, your savings just grow as general savings.',
+            style: TextStyle(fontSize: 12.5, color: Colors.grey),
+          ),
+          const Spacer(),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _isSaving ? null : _finishOnboarding,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.grey.shade700,
+                    side: BorderSide(color: Colors.grey.shade300),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: const Text('Skip for now', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _isSaving ? null : _createGoalThenFinish,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _primary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: _isSaving
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                      : const Text('Create Goal', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 

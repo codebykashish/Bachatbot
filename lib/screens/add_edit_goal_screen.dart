@@ -33,6 +33,7 @@ class _AddEditGoalScreenState extends State<AddEditGoalScreen> {
   final _nameController = TextEditingController();
   final _amountController = TextEditingController();
   int _timeframeMonths = 3;
+  int _priority = 1;
 
   bool _isSaving = false;
 
@@ -52,6 +53,7 @@ class _AddEditGoalScreenState extends State<AddEditGoalScreen> {
       _nameController.text = g.name;
       _amountController.text = g.targetAmount.toInt().toString();
       _timeframeMonths = g.timeframeMonths;
+      _priority = g.priority;
     }
   }
 
@@ -82,12 +84,14 @@ class _AddEditGoalScreenState extends State<AddEditGoalScreen> {
           'name': name,
           'targetAmount': amount,
           'timeframeMonths': _timeframeMonths,
+          'priority': _priority,
         });
       } else {
         await ApiService.post('/goals', {
           'name': name,
           'targetAmount': amount,
           'timeframeMonths': _timeframeMonths,
+          'priority': _priority,
         });
       }
 
@@ -186,6 +190,50 @@ class _AddEditGoalScreenState extends State<AddEditGoalScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 20),
+
+            _label('WHICH GOAL DO YOU WANT FUNDED FIRST?'),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _priority == 1
+                          ? 'Top priority — funded before lower-priority goals'
+                          : 'Priority $_priority — funded after higher-priority goals',
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: _priority <= 1 ? null : () => setState(() => _priority--),
+                    icon: const Icon(Icons.remove_circle_outline),
+                    color: _primary,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  SizedBox(
+                    width: 20,
+                    child: Text('$_priority', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                  IconButton(
+                    onPressed: _priority >= 10 ? null : () => setState(() => _priority++),
+                    icon: const Icon(Icons.add_circle_outline),
+                    color: _primary,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Same number as another goal = they grow side by side. Lower number = funded first.',
+              style: TextStyle(fontSize: 11.5, color: Colors.grey.shade500),
             ),
             const SizedBox(height: 12),
 

@@ -943,7 +943,7 @@ class _BudgetDialogContentState extends State<_BudgetDialogContent> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Not enough unallocated income. To fit this budget, unused '
+              'Not enough available to save. To fit this budget, unused '
               'amounts will be taken from:',
               style: TextStyle(fontSize: 13),
             ),

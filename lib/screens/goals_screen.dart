@@ -16,6 +16,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
 
   bool _isLoading = true;
   List<Goal> _goals = [];
+  double _availableToSave = 0;
 
   @override
   void initState() {
@@ -32,7 +33,10 @@ class _GoalsScreenState extends State<GoalsScreen> {
         final list = (res['data']?['goals'] as List? ?? [])
             .map((g) => Goal.fromJson(g as Map<String, dynamic>))
             .toList();
-        setState(() => _goals = list);
+        setState(() {
+          _goals = list;
+          _availableToSave = (res['data']?['availableToSave'] ?? 0).toDouble();
+        });
       }
     } catch (e) {
       debugPrint('[GoalsScreen] fetch error: $e');
@@ -55,6 +59,22 @@ class _GoalsScreenState extends State<GoalsScreen> {
       MaterialPageRoute(builder: (_) => AddEditGoalScreen(existingGoal: goal)),
     );
     if (saved == true) _fetchGoals();
+  }
+
+  List<Goal> get _sortedGoals => [..._goals]..sort((a, b) => a.priority.compareTo(b.priority));
+
+  Future<void> _changePriority(Goal goal, int delta) async {
+    final newPriority = (goal.priority + delta).clamp(1, 10);
+    if (newPriority == goal.priority) return;
+    try {
+      await ApiService.patch('/goals/${goal.id}', {'priority': newPriority});
+      _fetchGoals();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not change priority: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   Future<void> _deleteGoal(Goal goal) async {
@@ -88,16 +108,21 @@ class _GoalsScreenState extends State<GoalsScreen> {
   }
 
   void _showGoalDetail(Goal goal) {
+    int localPriority = goal.priority;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(24),
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Container(
+        padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + MediaQuery.of(ctx).viewInsets.bottom),
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        child: Column(
+        child: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(goal.name, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
@@ -110,6 +135,58 @@ class _GoalsScreenState extends State<GoalsScreen> {
                 _legendItem('Saved', 'Rs ${goal.savedSoFar.toInt()}', const Color(0xFF2DBE7F)),
                 _legendItem('Remaining', 'Rs ${goal.remaining.toInt()}', const Color(0xFFE0E4E8)),
               ],
+            ),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF6F7F9),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      localPriority == 1
+                          ? 'Top priority — funded first'
+                          : 'Priority $localPriority — funded after lower numbers',
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: localPriority <= 1
+                        ? null
+                        : () async {
+                            setSheetState(() => localPriority--);
+                            await _changePriority(goal, -1);
+                          },
+                    icon: const Icon(Icons.remove_circle_outline),
+                    color: _primary,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  SizedBox(
+                    width: 20,
+                    child: Text('$localPriority', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                  IconButton(
+                    onPressed: localPriority >= 10
+                        ? null
+                        : () async {
+                            setSheetState(() => localPriority++);
+                            await _changePriority(goal, 1);
+                          },
+                    icon: const Icon(Icons.add_circle_outline),
+                    color: _primary,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Same number as another goal = grow side by side. Lower number = funded first.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
             ),
             const SizedBox(height: 8),
             Text('Target: Rs ${goal.targetAmount.toInt()}', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
@@ -124,7 +201,9 @@ class _GoalsScreenState extends State<GoalsScreen> {
               style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontStyle: FontStyle.italic),
             ),
           ],
+          ),
         ),
+      ),
       ),
     );
   }
@@ -166,32 +245,91 @@ class _GoalsScreenState extends State<GoalsScreen> {
         onRefresh: _fetchGoals,
         child: _isLoading
             ? const Center(child: CircularProgressIndicator(color: _primary))
-            : _goals.isEmpty
-                ? ListView(
-                    children: [
-                      SizedBox(
-                        height: MediaQuery.of(context).size.height * 0.6,
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.savings_outlined, size: 64, color: Colors.grey.shade300),
-                            const SizedBox(height: 12),
-                            Text('No goals yet', style: TextStyle(fontSize: 16, color: Colors.grey.shade500)),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Tap + to save toward something.',
-                              style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
-                            ),
-                          ],
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+                children: [
+                  _currentSavingsCard(),
+                  if (_goals.length > 1) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Icon(Icons.info_outline, size: 13, color: Colors.grey.shade400),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            'Same priority number = goals grow side by side. Lower number is funded first.',
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                          ),
                         ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  if (_goals.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 32),
+                      child: Column(
+                        children: [
+                          Icon(Icons.flag_outlined, size: 48, color: Colors.grey.shade300),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No goal set yet',
+                            style: TextStyle(fontSize: 15, color: Colors.grey.shade500, fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Your savings are growing on their own. Tap + to give\nsome of it a purpose, like a laptop or a trip.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 12.5, color: Colors.grey.shade400),
+                          ),
+                        ],
                       ),
-                    ],
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-                    itemCount: _goals.length,
-                    itemBuilder: (context, i) => _goalCard(_goals[i]),
-                  ),
+                    )
+                  else
+                    ..._sortedGoals.map(_goalCard),
+                ],
+              ),
+      ),
+    );
+  }
+
+  // The Savings Pool always exists, independent of whether the user has
+  // named a goal for it — goals are just an optional label on part of it.
+  Widget _currentSavingsCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [_primary, _primary.withValues(alpha: 0.75)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [BoxShadow(color: _primary.withValues(alpha: 0.25), blurRadius: 12, offset: const Offset(0, 4))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.savings_outlined, color: Colors.white, size: 18),
+              const SizedBox(width: 6),
+              const Text('Current Savings', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Rs ${_availableToSave.toInt()}',
+            style: const TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _goals.isEmpty
+                ? 'General savings — no goal attached yet'
+                : 'Shared across ${_goals.length} goal${_goals.length == 1 ? '' : 's'} below',
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12),
+          ),
+        ],
       ),
     );
   }
@@ -266,7 +404,33 @@ class _GoalsScreenState extends State<GoalsScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: _primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Priority ${goal.priority}',
+                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: _primary),
+                ),
+              ),
+              if (!isCompleted && goal.savedSoFar == 0 && _goals.any((g) => g.priority < goal.priority)) ...[
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Waiting on a higher-priority goal',
+                    style: TextStyle(fontSize: 10.5, color: Colors.grey.shade400, fontStyle: FontStyle.italic),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 10),
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
