@@ -1,22 +1,6 @@
 {
   "indexes": [
     {
-      "collectionGroup": "messages",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "role", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "messages",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "createdAt", "order": "DESCENDING" },
-        { "fieldPath": "__name__", "order": "DESCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "transactions",
       "queryScope": "COLLECTION",
       "fields": [

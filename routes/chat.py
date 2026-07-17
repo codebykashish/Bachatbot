@@ -17,6 +17,7 @@ from services.report_service import (
     get_top_spending_category,
     get_spend_alerts
 )
+from services.financial_engine import recompute as engine_recompute, RecomputeReason
 import logging
 
 logger = logging.getLogger("bachatbot.chat")
@@ -231,6 +232,11 @@ def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_ke
             reply_part = f"Rs {int(amount)} {cat_display} ({desc}) ma kharcha gareko"
         else:
             reply_part = f"Rs {int(amount)} {cat_display} ma kharcha gareko"
+
+    try:
+        engine_recompute(db, uid, month_key, reason=RecomputeReason.TRANSACTION_CREATED)
+    except Exception as _re:
+        print(f"[CHAT] Engine recompute failed (non-fatal): {_re}")
 
     return transaction_out, budget_update, alert_out, reply_part
 
@@ -466,9 +472,10 @@ async def chat(
                         tx_type  = tx.get("type", "expense")
                         tx_mk    = tx.get("monthKey", month_key)
 
-                        if tx.get("source") == "notification" and not category:
-                            # ENFORCE CATEGORY: If it's a notification and we don't have a category yet,
-                            # we cannot confirm it. Ask the user for the category.
+                        if tx.get("source") == "notification" and tx_type == "expense" and not category:
+                            # ENFORCE CATEGORY: If it's an expense notification and we don't have
+                            # a category yet, we cannot confirm it. Ask the user for the category.
+                            # Income never has a spending category — never enforced here for it.
                             cat_options = "/".join(c for c in EXPENSE_CATEGORIES if c != "Other")
                             reply = f"Kun category ma halne? ({cat_options}/Other)"
                             
@@ -598,7 +605,12 @@ async def chat(
                     reply_parts.append(rp)
                 
             pending_ref.delete()
-            
+
+            try:
+                engine_recompute(db, uid, month_key, reason=RecomputeReason.TRANSACTION_CONFIRMED)
+            except Exception as _re:
+                print(f"[CHAT][CONFIRM] Engine recompute failed (non-fatal): {_re}")
+
             # Save assistant message
             assistant_msg_ref = messages_ref.document()
             primary_intent = "confirm_expense"
@@ -660,6 +672,13 @@ async def chat(
                     except Exception as ce:
                         print(f"[CHAT][SKIP-BUDGET] Error confirming tx {tx_id}: {ce}")
                 pending_ref.delete()
+
+                if confirmed_tx:
+                    try:
+                        engine_recompute(db, uid, exp_month_key, reason=RecomputeReason.TRANSACTION_CONFIRMED)
+                    except Exception as _re:
+                        print(f"[CHAT][SKIP-BUDGET] Engine recompute failed (non-fatal): {_re}")
+
                 reply = (
                     f"Thik cha, {waiting_cat} ko budget ahile set gareina. "
                     f"Expense ta save bhayeko cha ✅\n"
@@ -728,10 +747,15 @@ async def chat(
         category  = parsed.get("category")   # can be None now
         tx_type   = parsed.get("type", "expense")
 
-        # Determine if category is uncertain
+        # Determine if category is uncertain — income never has a spending
+        # category, so it can never be "uncertain" about one; asking
+        # "which category?" for an income notification is a bug, not a
+        # cautious fallback.
         category_uncertain = (
-            category is None
-            or category in ("Other", "Unknown", "other", "unknown")
+            tx_type == "expense" and (
+                category is None
+                or category in ("Other", "Unknown", "other", "unknown")
+            )
         )
 
         print(
@@ -1515,6 +1539,8 @@ async def chat(
                 t_amt = td.get("amount", 0)
                 t_cat = td.get("category", "Unknown")
 
+                t_mk = td.get("monthKey", month_key)
+
                 target.reference.update({
                     "isDeleted": True,
                     "deletedAt": SERVER_TIMESTAMP,
@@ -1524,7 +1550,6 @@ async def chat(
 
                 # Decrement budget
                 if t_cat:
-                    t_mk = td.get("monthKey", month_key)
                     bud_docs = list(
                         db.collection("users").document(uid).collection("budgets")
                         .where("category", "==", t_cat)
@@ -1539,6 +1564,11 @@ async def chat(
                         })
                         print(f"[CHAT] [UNDO] Budget decremented: {t_cat}")
 
+                try:
+                    engine_recompute(db, uid, t_mk, reason=RecomputeReason.TRANSACTION_DELETED)
+                except Exception as _re:
+                    print(f"[CHAT] [UNDO] Engine recompute failed (non-fatal): {_re}")
+
                 reply_parts.append(f"Rs {int(t_amt)} {t_cat} expense undo gareko chu")
                 last_transaction = {
                     "id": target.id, "amount": t_amt, "category": t_cat,
@@ -1548,7 +1578,16 @@ async def chat(
                 reply_parts.append("Kei expense fela parena undo garna lai")
                 print("[CHAT] [UNDO] No matching expense")
 
-        # ── CORRECTION (undo last + relog in correct category) ──────────────
+        # ── CORRECTION (modify the existing transaction in place) ───────────
+        # Redesigned from soft-delete-and-relog to an in-place update, per
+        # spec Section "Transactions route migration": a correction edits
+        # the one transaction, it never creates a second one — otherwise
+        # the transaction's id changes, breaking audit continuity and any
+        # reference to "this transaction" (alerts, chat messages). This
+        # also fixes a real bug in the old code: an amount-only correction
+        # ("no, it was 350", no category mentioned) used to soft-delete the
+        # original expense and never relog it at all, since relogging was
+        # gated on new_cat being present — the money just silently vanished.
         elif intent == "correction":
             undo_cat = action.get("undoCategory")
             new_cat_raw = action.get("newCategory") or action.get("category")
@@ -1566,62 +1605,55 @@ async def chat(
             candidates = list(q.stream())
 
             # Find the most recent expense in undoCategory (or newest if none specified)
-            undone_doc = None
+            target_doc = None
             for doc in candidates:
                 d = doc.to_dict()
                 if undo_cat and d.get("category", "").lower() != undo_cat.lower():
                     continue
-                undone_doc = doc
+                target_doc = doc
                 break
 
-            if undone_doc:
-                ud = undone_doc.to_dict()
-                u_amt = float(ud.get("amount", correction_amount or 0))
-                u_cat = ud.get("category", undo_cat or "")
-                u_mk = ud.get("monthKey", month_key)
+            if target_doc:
+                td = target_doc.to_dict()
+                old_amt = float(td.get("amount", 0))
+                old_cat = td.get("category", undo_cat or "")
+                tx_mk = td.get("monthKey", month_key)
 
-                # Soft-delete old transaction
-                undone_doc.reference.update({
-                    "isDeleted": True,
-                    "deletedAt": SERVER_TIMESTAMP,
-                    "updatedAt": SERVER_TIMESTAMP,
-                })
-                print(f"[CHAT][CORRECTION] Undid tx={undone_doc.id} Rs {u_amt} {u_cat}")
+                new_amount = correction_amount if correction_amount > 0 else old_amt
+                final_cat = new_cat or old_cat
 
-                # Decrement old budget
-                if u_cat:
-                    old_bud = list(
-                        db.collection("users").document(uid).collection("budgets")
-                        .where("category", "==", u_cat)
-                        .where("monthKey", "==", u_mk)
-                        .limit(1).stream()
-                    )
-                    if old_bud:
-                        old_bud[0].reference.update({"spent": Increment(-u_amt), "updatedAt": SERVER_TIMESTAMP})
-
-                # Log new expense in correct category (if we have a target)
-                relog_amt = correction_amount if correction_amount > 0 else u_amt
+                update_payload = {"updatedAt": SERVER_TIMESTAMP}
+                if correction_amount > 0:
+                    update_payload["amount"] = new_amount
                 if new_cat:
-                    new_action = {
-                        "intent": "expense_log",
-                        "amount": relog_amt,
-                        "category": new_cat,
-                        "type": "expense",
-                        "description": new_note or u_cat,
-                    }
-                    txn, bud, alt, rp = _handle_expense_or_income(db, uid, new_action, source, u_mk)
-                    last_transaction = txn
-                    if bud:
-                        last_budget_update = bud
-                    if alt:
-                        alerts_created.append(alt)
-                    note_label = f" ({new_note})" if new_note else ""
+                    update_payload["category"] = new_cat
+                if new_note:
+                    update_payload["description"] = new_note
+                target_doc.reference.update(update_payload)
+                print(
+                    f"[CHAT][CORRECTION] Updated tx={target_doc.id} in place: "
+                    f"amount {old_amt}->{new_amount}, category {old_cat}->{final_cat}"
+                )
+
+                try:
+                    engine_recompute(db, uid, tx_mk, reason=RecomputeReason.TRANSACTION_EDITED)
+                except Exception as _re:
+                    print(f"[CHAT][CORRECTION] Engine recompute failed (non-fatal): {_re}")
+
+                last_transaction = {
+                    "id": target_doc.id, "amount": new_amount, "category": final_cat,
+                    "type": "expense", "status": "confirmed",
+                }
+
+                note_label = f" ({new_note})" if new_note else ""
+                if new_cat and new_cat != old_cat:
                     reply_parts.append(
-                        f"Rs {int(u_amt)} {u_cat} hatako chu ra Rs {int(relog_amt)} {new_cat}{note_label} ma kharcha gareko chu ✅"
+                        f"Thik cha, Rs {int(old_amt)} {old_cat} lai Rs {int(new_amount)} {final_cat}{note_label} ma correct gareko chu ✅"
                     )
-                    print(f"[CHAT][CORRECTION] Relogged Rs {relog_amt} → {new_cat}")
                 else:
-                    reply_parts.append(f"Rs {int(u_amt)} {u_cat} undo gareko chu ✅")
+                    reply_parts.append(
+                        f"Thik cha, Rs {int(old_amt)} lai Rs {int(new_amount)} {final_cat}{note_label} ma correct gareko chu ✅"
+                    )
             else:
                 reply_parts.append("Correction garna recent expense bhetiyena.")
                 print("[CHAT][CORRECTION] No matching expense found")

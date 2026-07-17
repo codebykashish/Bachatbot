@@ -5,6 +5,7 @@ from auth import get_current_user
 from utils import serialize_doc, get_current_month_key
 from typing import Optional
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment
+from services.financial_engine import recompute as engine_recompute, RecomputeReason
 import logging
 
 router = APIRouter()
@@ -121,6 +122,11 @@ async def add_manual_expense(
         logger.info(f"[MANUAL] alert created: {msg}")
     except Exception as e:
         logger.warning(f"[MANUAL] alert creation failed: {e}")
+
+    try:
+        engine_recompute(db, uid, month_key, reason=RecomputeReason.TRANSACTION_CREATED)
+    except Exception as _re:
+        logger.warning(f"[MANUAL] Engine recompute failed (non-fatal): {_re}")
 
     return {
         "success": True,
@@ -265,7 +271,12 @@ async def create_transaction(
     }
     
     tx_ref.set(tx_data)
-    
+
+    try:
+        engine_recompute(db, uid, month_key, reason=RecomputeReason.TRANSACTION_CREATED)
+    except Exception as _re:
+        logger.warning(f"[TRANSACTIONS] Engine recompute failed (non-fatal): {_re}")
+
     return {
         "success": True,
         "message": "Transaction created",
@@ -321,13 +332,16 @@ async def delete_transaction(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Soft delete a transaction (set isDeleted=True)
+    Soft delete a transaction (set isDeleted=True). Stage 4B: only a
+    confirmed, not-already-deleted transaction is a financial change — the
+    Engine only ever counted it while status=="confirmed" and
+    isDeleted==False, so that's the same boundary this recompute gate uses.
     """
     uid = current_user["uid"]
     db = get_firestore()
-    
+
     tx_ref = db.collection("users").document(uid).collection("transactions").document(transaction_id)
-    
+
     doc = tx_ref.get()
     if not doc.exists:
         raise HTTPException(
@@ -340,13 +354,31 @@ async def delete_transaction(
                 }
             }
         )
-    
+
+    tx = doc.to_dict()
+
+    if tx.get("isDeleted"):
+        # Idempotent: already deleted, nothing financial changes, no
+        # recompute — deleting twice must never double-subtract.
+        return {
+            "success": True,
+            "message": "Transaction already deleted",
+            "data": {"id": transaction_id, "isDeleted": True, "alreadyDeleted": True},
+        }
+
     tx_ref.update({
         "isDeleted": True,
         "deletedAt": SERVER_TIMESTAMP,
         "updatedAt": SERVER_TIMESTAMP
     })
-    
+
+    if tx.get("status") == "confirmed":
+        month_key = tx.get("monthKey") or get_current_month_key()
+        try:
+            engine_recompute(db, uid, month_key, reason=RecomputeReason.TRANSACTION_DELETED)
+        except Exception as _re:
+            logger.warning(f"[TRANSACTIONS] Engine recompute failed (non-fatal): {_re}")
+
     return {
         "success": True,
         "message": "Transaction deleted",
@@ -364,13 +396,18 @@ async def update_transaction(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Update a transaction (amount, category, description, etc.)
+    Update a transaction (amount, category, description, etc.). Stage 4A:
+    identical shape to Chat Correction (Stage 3C) — modify the existing
+    transaction, then recompute. Recomputes whenever the target is
+    confirmed and not deleted, regardless of which fields actually
+    changed (even a description-only edit) — one consistent rule, no
+    exceptions for "this edit probably didn't touch money."
     """
     uid = current_user["uid"]
     db = get_firestore()
-    
+
     tx_ref = db.collection("users").document(uid).collection("transactions").document(transaction_id)
-    
+
     doc = tx_ref.get()
     if not doc.exists:
         raise HTTPException(
@@ -383,10 +420,12 @@ async def update_transaction(
                 }
             }
         )
-    
+
+    tx = doc.to_dict()
+
     update_data = {}
     update_data["updatedAt"] = SERVER_TIMESTAMP
-    
+
     # Only update provided fields
     if "amount" in body:
         update_data["amount"] = float(body["amount"])
@@ -396,9 +435,16 @@ async def update_transaction(
         update_data["description"] = body["description"]
     if "type" in body:
         update_data["type"] = body["type"]
-    
+
     tx_ref.update(update_data)
-    
+
+    if tx.get("status") == "confirmed" and not tx.get("isDeleted"):
+        month_key = tx.get("monthKey") or get_current_month_key()
+        try:
+            engine_recompute(db, uid, month_key, reason=RecomputeReason.TRANSACTION_EDITED)
+        except Exception as _re:
+            logger.warning(f"[TRANSACTIONS] Engine recompute failed (non-fatal): {_re}")
+
     return {
         "success": True,
         "message": "Transaction updated",

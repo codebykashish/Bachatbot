@@ -6,11 +6,11 @@ against the CURRENT scattered logic's own source of truth (not the UI),
 for one real user/month. See FINANCIAL_ENGINE_SPEC.md "Phase 1 — Test
 scenarios" and the Phase 1 exit criteria.
 
-This script does not write anything to real budgets/transactions/goals —
-it only reads, calls recompute() (which writes financialSummary, a new
-collection nothing else reads yet), and for the mutation test temporarily
-bumps then reverts one category's `spent` field on a REAL budget doc, so
-run it against a test account, not a live user's real data, unless you're
+This script does not write anything to real budgets/goals — it only reads,
+calls recompute() (which writes financialSummary, a new collection nothing
+else reads yet), and for the mutation test temporarily creates then
+soft-deletes one small REAL transaction (source="audit_script"), so run it
+against a test account, not a live user's real data, unless you're
 comfortable with that.
 
 Usage:
@@ -22,8 +22,9 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 from firebase_config import initialize_firebase, get_firestore
-from utils import get_current_month_key
+from utils import get_current_month_key, sum_category_expense
 from services.financial_engine import recompute, _waterfall
 from services.goal_service import get_available_pool, compute_goal_progress
 
@@ -42,6 +43,15 @@ def close(a, b, tol=0.01):
 
 
 # ─── Section A: current system's own source of truth (no Engine calls) ────
+#
+# "Current system's own source of truth" for `spent` is no longer
+# `budgets.spent` — per the Ground Truth Migration (spec Section 8), that
+# field is deprecated and can legitimately drift once any unmigrated
+# operation (today: edit/delete) fails to reverse it. The correct
+# independent cross-check is the same ground truth the Engine itself now
+# uses — sum_category_expense — computed here via a second, independent
+# code path (not by calling the Engine), so this still catches bugs in the
+# Engine's own summing logic rather than comparing against a stale counter.
 
 def load_current_system(db, uid, month_key):
     user_doc = db.collection("users").document(uid).get().to_dict() or {}
@@ -64,7 +74,7 @@ def load_current_system(db, uid, month_key):
         bd = b.to_dict()
         cat = bd.get("category", "")
         limit = float(bd.get("limit") or 0)
-        spent = float(bd.get("spent") or 0)
+        spent = sum_category_expense(db, uid, cat, month_key)
         categories[cat] = {
             "limit": limit,
             "spent": spent,
@@ -140,7 +150,7 @@ def audit_determinism(db, uid, month_key):
 
     def strip_volatile(s):
         s = dict(s)
-        s["metadata"] = {k: v for k, v in s["metadata"].items() if k not in ("recomputedAt", "reason")}
+        s["metadata"] = {k: v for k, v in s["metadata"].items() if k not in ("recomputedAt", "reason", "recomputeId", "durationMs")}
         s.pop("lastUpdated", None)
         return s
 
@@ -149,6 +159,12 @@ def audit_determinism(db, uid, month_key):
 
 
 def audit_mutation_reversibility(db, uid, month_key):
+    """
+    Ground Truth Principle (spec Section 8): spent is summed from confirmed
+    transactions, not read from budgets.spent — so the mutation this test
+    performs must be a transaction (create + soft-delete), not a budget
+    field bump, or it wouldn't exercise the Engine's actual input at all.
+    """
     print("\n[Mutation + reversal — Summary A == Summary C]")
     budget_docs = list(
         db.collection("users").document(uid).collection("budgets")
@@ -159,24 +175,33 @@ def audit_mutation_reversibility(db, uid, month_key):
         print("  (no budgets this month — skipping, nothing to mutate)")
         return
 
-    target = budget_docs[0]
-    target_ref = target.reference
-    original_spent = float((target.to_dict() or {}).get("spent") or 0)
+    target_category = (budget_docs[0].to_dict() or {}).get("category", "")
     bump = 37.0  # arbitrary, reversible amount
 
     summary_a = recompute(db, uid, month_key, reason="audit_mutation_before")
 
-    target_ref.update({"spent": original_spent + bump})
+    tx_ref = db.collection("users").document(uid).collection("transactions").document()
+    tx_ref.set({
+        "amount": bump,
+        "category": target_category,
+        "type": "expense",
+        "status": "confirmed",
+        "source": "audit_script",
+        "monthKey": month_key,
+        "isDeleted": False,
+        "createdAt": SERVER_TIMESTAMP,
+        "updatedAt": SERVER_TIMESTAMP,
+    })
     summary_b = recompute(db, uid, month_key, reason="audit_mutation_after_add")
     check("Summary B differs from A (mutation was picked up)",
           summary_a["totalSpent"] != summary_b["totalSpent"])
 
-    target_ref.update({"spent": original_spent})
+    tx_ref.update({"isDeleted": True, "updatedAt": SERVER_TIMESTAMP})
     summary_c = recompute(db, uid, month_key, reason="audit_mutation_after_revert")
 
     def strip_volatile(s):
         s = dict(s)
-        s["metadata"] = {k: v for k, v in s["metadata"].items() if k not in ("recomputedAt", "reason")}
+        s["metadata"] = {k: v for k, v in s["metadata"].items() if k not in ("recomputedAt", "reason", "recomputeId", "durationMs")}
         s.pop("lastUpdated", None)
         return s
 

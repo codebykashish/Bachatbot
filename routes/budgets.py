@@ -5,6 +5,7 @@ from firebase_config import get_firestore
 from auth import get_current_user
 from utils import get_current_month_key, sum_category_expense
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
+from services.financial_engine import recompute as engine_recompute, RecomputeReason
 import logging
 
 router = APIRouter()
@@ -271,6 +272,11 @@ async def create_or_update_budget(
         except Exception as _ae:
             print(f"[BUDGET] alert creation failed (non-fatal): {_ae}")
 
+        try:
+            engine_recompute(db, uid, month_key, reason=RecomputeReason.BUDGET_UPDATED)
+        except Exception as _re:
+            logger.warning(f"[BUDGET] Engine recompute failed (non-fatal, old logic still authoritative): {_re}")
+
         return {
             "success": True,
             "message": f"Budget for '{body.category}' updated.",
@@ -321,6 +327,11 @@ async def create_or_update_budget(
         })
     except Exception as _ae:
         print(f"[BUDGET] alert creation failed (non-fatal): {_ae}")
+
+    try:
+        engine_recompute(db, uid, month_key, reason=RecomputeReason.BUDGET_CREATED)
+    except Exception as _re:
+        logger.warning(f"[BUDGET] Engine recompute failed (non-fatal, old logic still authoritative): {_re}")
 
     return {
         "success": True,
@@ -480,4 +491,10 @@ async def delete_budget(
 
     docs[0].reference.delete()
     print(f"[BUDGET] Deleted budget uid={uid} category={category} monthKey={month_key}")
+
+    try:
+        engine_recompute(db, uid, month_key, reason=RecomputeReason.BUDGET_DELETED)
+    except Exception as _re:
+        logger.warning(f"[BUDGET] Engine recompute failed (non-fatal, old logic still authoritative): {_re}")
+
     return {"success": True, "message": f"Budget for '{category}' removed."}

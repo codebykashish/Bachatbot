@@ -3,6 +3,7 @@ from firebase_config import get_firestore
 from auth import get_current_user
 from utils import get_current_month_key
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
+from services.financial_engine import recompute as engine_recompute, RecomputeReason
 import logging
 
 router = APIRouter()
@@ -70,9 +71,14 @@ async def update_income(
     })
     logger.info(f"[INCOME] uid={uid} inHand={in_hand} inBank={in_bank} online={online_banking} total={total}")
 
+    month_key = get_current_month_key()
+    try:
+        engine_recompute(db, uid, month_key, reason=RecomputeReason.INCOME_UPDATED)
+    except Exception as _re:
+        logger.warning(f"[INCOME] Engine recompute failed (non-fatal, old logic still authoritative): {_re}")
+
     # Create alert notifications for each changed source
     try:
-        month_key = get_current_month_key()
         alerts_ref = db.collection("users").document(uid).collection("alerts")
 
         # Build one alert per changed source, with undo metadata

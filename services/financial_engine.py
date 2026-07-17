@@ -16,10 +16,12 @@ helper and must never be imported/called directly by other code:
 """
 
 import logging
+import time
+import uuid
 
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 
-from utils import get_current_month_key
+from utils import get_current_month_key, sum_category_expense
 from services.goal_service import get_active_goals, compute_goal_progress
 
 logger = logging.getLogger(__name__)
@@ -28,10 +30,44 @@ ENGINE_VERSION = 1
 SUMMARY_SCHEMA_VERSION = 1
 
 
+class RecomputeReason:
+    """
+    Standard reason codes for recompute() calls — spec Section "Standard
+    reason codes." Routes must use one of these, never a hand-typed string,
+    so logs/decisionLogs stay analyzable across the whole app.
+    """
+    MANUAL = "MANUAL"
+    SUMMARY_MISSING = "SUMMARY_MISSING"
+    INCOME_UPDATED = "INCOME_UPDATED"
+    BUDGET_CREATED = "BUDGET_CREATED"
+    BUDGET_UPDATED = "BUDGET_UPDATED"
+    BUDGET_DELETED = "BUDGET_DELETED"
+    GOAL_CREATED = "GOAL_CREATED"
+    GOAL_UPDATED = "GOAL_UPDATED"
+    GOAL_DELETED = "GOAL_DELETED"
+    TRANSACTION_CREATED = "TRANSACTION_CREATED"
+    TRANSACTION_CONFIRMED = "TRANSACTION_CONFIRMED"
+    TRANSACTION_EDITED = "TRANSACTION_EDITED"
+    TRANSACTION_DELETED = "TRANSACTION_DELETED"
+    MONTH_ROLLOVER = "MONTH_ROLLOVER"
+
+
 # ─── Pipeline: Load Data ───────────────────────────────────────────────────
 
 def _load_data(db, uid: str, month_key: str) -> dict:
-    """Raw inputs only — income, budgets, active goals. No derived values."""
+    """
+    Raw inputs only — income, budgets (limits only), confirmed transactions
+    (via sum_category_expense), active goals. No derived values.
+
+    Ground Truth Principle (spec Section 8): a budget's `spent` is not read
+    from the stored counter on the budget document — that counter is
+    derived data historically hand-maintained by scattered Increment()
+    calls, which is exactly the drift/edit/delete bug the Transactions
+    migration exists to eliminate. Instead, `spent` is summed fresh from
+    confirmed, non-deleted transactions every recompute, so an edited or
+    deleted transaction is reflected correctly with no special-case
+    reversal logic anywhere.
+    """
     user_doc = db.collection("users").document(uid).get().to_dict() or {}
     income_map = user_doc.get("income") or {}
     income = (
@@ -45,15 +81,16 @@ def _load_data(db, uid: str, month_key: str) -> dict:
         .where("monthKey", "==", month_key)
         .stream()
     )
-    budgets = [
-        {
+    budgets = []
+    for b in budget_docs:
+        bd = b.to_dict() or {}
+        category = bd.get("category", "")
+        budgets.append({
             "_id": b.id,
-            "category": (b.to_dict() or {}).get("category", ""),
-            "limit": float((b.to_dict() or {}).get("limit") or 0),
-            "spent": float((b.to_dict() or {}).get("spent") or 0),
-        }
-        for b in budget_docs
-    ]
+            "category": category,
+            "limit": float(bd.get("limit") or 0),
+            "spent": sum_category_expense(db, uid, category, month_key),
+        })
 
     goals = get_active_goals(db, uid)
 
@@ -140,15 +177,21 @@ def _calculate_goal_impact(db, uid: str, month_key: str, data: dict, savings_poo
     goal_progress = []
     for g in data["goals"]:
         target = float(g.get("targetAmount") or 0)
+        months = int(g.get("timeframeMonths") or 1)
         saved = progress.get(g["_id"], 0.0)
         goal_progress.append({
             "id": g["_id"],
             "name": g.get("name", "Goal"),
             "priority": int(g.get("priority") or 1),
             "targetAmount": target,
-            "saved": saved,
+            "timeframeMonths": months,
+            "saved": saved,                 # kept for internal/audit use
+            "savedSoFar": saved,             # alias — what the API response uses
             "remaining": max(0.0, target - saved),
             "percent": round(min(100, (saved / target) * 100), 1) if target > 0 else 0,
+            "percentComplete": round(min(100, (saved / target) * 100), 1) if target > 0 else 0,
+            "monthlyTarget": round(target / months, 2) if months > 0 else 0,
+            "status": "completed" if saved >= target and target > 0 else g.get("status", "active"),
         })
     decision_log.append(
         f"Computed progress for {len(goal_progress)} active goal(s) "
@@ -160,7 +203,8 @@ def _calculate_goal_impact(db, uid: str, month_key: str, data: dict, savings_poo
 # ─── Pipeline: Build + Save Summary ────────────────────────────────────────
 
 def _build_summary(data, category_remaining, total_spent, remaining_budget,
-                    savings_pool, rebalance_result, goal_progress, reason, decision_log) -> dict:
+                    savings_pool, rebalance_result, goal_progress, reason,
+                    decision_log, recompute_id, duration_ms) -> dict:
     return {
         "income": data["income"],
         "totalSpent": total_spent,
@@ -172,7 +216,9 @@ def _build_summary(data, category_remaining, total_spent, remaining_budget,
         "metadata": {
             "version": SUMMARY_SCHEMA_VERSION,
             "engineVersion": ENGINE_VERSION,
+            "recomputeId": recompute_id,
             "reason": reason,
+            "durationMs": duration_ms,
             "decisionLog": decision_log,
         },
     }
@@ -196,12 +242,14 @@ def _save_summary(db, uid: str, month_key: str, summary: dict):
 # modules directly.
 # ═══════════════════════════════════════════════════════════════════════════
 
-def recompute(db, uid: str, month_key: str = None, reason: str = "manual") -> dict:
+def recompute(db, uid: str, month_key: str = None, reason: str = RecomputeReason.MANUAL) -> dict:
     """
     Rebuilds users/{uid}/financialSummary/{monthKey} from raw data. The
     only operation allowed to write to financialSummary (spec Section 4).
     """
     month_key = month_key or get_current_month_key()
+    recompute_id = uuid.uuid4().hex[:12]
+    started_at = time.perf_counter()
     decision_log = []
 
     data = _load_data(db, uid, month_key)
@@ -216,12 +264,14 @@ def recompute(db, uid: str, month_key: str = None, reason: str = "manual") -> di
     rebalance_result = _apply_rebalancing(decision_log)
     goal_progress = _calculate_goal_impact(db, uid, month_key, data, savings_pool, decision_log)
 
+    duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
     summary = _build_summary(
         data, category_remaining, total_spent, remaining_budget,
         savings_pool, rebalance_result, goal_progress, reason, decision_log,
+        recompute_id, duration_ms,
     )
     _save_summary(db, uid, month_key, summary)
-    logger.info(f"[ENGINE] recompute uid={uid} month={month_key} reason={reason}")
+    logger.info(f"[ENGINE] recompute id={recompute_id} uid={uid} month={month_key} reason={reason} duration={duration_ms}ms")
     return summary
 
 
@@ -237,7 +287,7 @@ def get_summary(db, uid: str, month_key: str = None) -> dict:
         .collection("financialSummary").document(month_key).get()
     )
     if not doc.exists:
-        return recompute(db, uid, month_key, reason="summary_missing")
+        return recompute(db, uid, month_key, reason=RecomputeReason.SUMMARY_MISSING)
     return doc.to_dict()
 
 

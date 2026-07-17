@@ -6,6 +6,7 @@ from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment
 from typing import Optional, List
 from pydantic import BaseModel
 from services.budget_service import apply_pending_rebalance, reject_pending_rebalance
+from services.financial_engine import recompute as engine_recompute, RecomputeReason
 
 router = APIRouter()
 
@@ -128,8 +129,9 @@ async def confirm_transaction(
     tx_type  = tx.get("type", "expense")
     month_key = tx.get("monthKey", get_current_month_key())
 
-    # ── 2a. ENFORCE CATEGORY for notifications ───────────────────────────
-    if tx.get("source") == "notification" and not category:
+    # ── 2a. ENFORCE CATEGORY for notifications — expenses only. Income
+    # never has a spending category, so it must never be required here.
+    if tx.get("source") == "notification" and tx_type == "expense" and not category:
         raise HTTPException(
             status_code=400,
             detail={
@@ -142,10 +144,24 @@ async def confirm_transaction(
         )
 
     # ── 2b. Apply optional overrides + confirm ────────────────────────────
+    # PRE-EXISTING BUG, fixed here: update_payload was built but never
+    # written to tx_ref, so a transaction confirmed through this single
+    # endpoint stayed status="pending" in Firestore forever — the old
+    # budget.spent Increment() below doesn't check the transaction's own
+    # persisted status, so it silently "worked" anyway, but the transaction
+    # itself never actually became confirmed. This was invisible before the
+    # Engine started summing from confirmed transactions directly; it's the
+    # first thing this migration needs correct, since the Engine now
+    # depends on this write actually happening.
     update_payload: dict = {
         "status":    "confirmed",
         "updatedAt": SERVER_TIMESTAMP,
     }
+    if body.amount is not None:
+        update_payload["amount"] = amount
+    if body.category is not None:
+        update_payload["category"] = category
+    tx_ref.update(update_payload)
 
     # ── 3. Update matching notification ─────────────────────────────────
     notif_query = (
@@ -311,6 +327,11 @@ async def confirm_transaction(
     except Exception as e:
         print(f"[CONFIRM] Assistant message FAILED: {e}")
 
+    try:
+        engine_recompute(db, uid, month_key, reason=RecomputeReason.TRANSACTION_CONFIRMED)
+    except Exception as _re:
+        print(f"[CONFIRM] Engine recompute failed (non-fatal): {_re}")
+
     return {
         "success": True,
         "message": "Transaction confirmed.",
@@ -391,6 +412,7 @@ async def bulk_confirm_transactions(
     print(f"[BULK_CONFIRM] uid={uid} action={action} count={len(body.transactions)}")
 
     results = []
+    confirmed_month_keys = set()
     for item in body.transactions:
         tx_id = item.id
         try:
@@ -452,6 +474,7 @@ async def bulk_confirm_transactions(
                 category = item.category        if item.category is not None else tx.get("category")
                 tx_type  = tx.get("type", "expense")
                 month_key = tx.get("monthKey", get_current_month_key())
+                confirmed_month_keys.add(month_key)
 
                 # ENFORCE CATEGORY for notifications
                 if tx.get("source") == "notification" and not category:
@@ -546,6 +569,14 @@ async def bulk_confirm_transactions(
     total_confirmed = sum(1 for r in results if r.get("status") == "confirmed")
     total_cancelled = sum(1 for r in results if r.get("status") == "cancelled")
     total_errors    = sum(1 for r in results if r.get("status") == "error")
+
+    # One recompute per month actually touched by a confirm — not per item,
+    # and not at all if nothing in this batch became financially real.
+    for mk in confirmed_month_keys:
+        try:
+            engine_recompute(db, uid, mk, reason=RecomputeReason.TRANSACTION_CONFIRMED)
+        except Exception as _re:
+            print(f"[BULK_CONFIRM] Engine recompute failed for month={mk} (non-fatal): {_re}")
 
     return {
         "success": True,

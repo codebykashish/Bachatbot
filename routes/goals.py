@@ -4,7 +4,7 @@ from typing import Optional
 from firebase_config import get_firestore
 from auth import get_current_user
 from utils import serialize_doc, get_current_month_key
-from services.goal_service import compute_goal_progress, get_available_pool
+from services.financial_engine import recompute as engine_recompute, get_summary, RecomputeReason
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 import logging
 
@@ -30,20 +30,44 @@ class GoalUpdateRequest(BaseModel):
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _with_computed_fields(goal: dict, saved: float) -> dict:
+def _merge_engine_fields(goal: dict, summary: dict) -> dict:
     """
-    Adds savedSoFar/percentComplete/remaining/monthlyTarget — all derived
-    live, never stored. `saved` comes from compute_goal_progress (the
-    unallocated-income pool), not from any stored field.
+    No math happens here — every derived field (savedSoFar, remaining,
+    percentComplete, monthlyTarget, status) comes straight from the
+    Engine's goalProgress (financial_engine.py's _calculate_goal_impact).
+    This function only merges that entry onto the raw serialized doc.
+
+    A completed goal is excluded from the Engine's active-goal set (by
+    design — see goal_service.get_active_goals), so it won't have an entry;
+    fall back to "fully saved" for a goal already marked completed, or a
+    defensive zero-progress default for the rare case of a goal not yet
+    reflected in the summary (e.g. a legacy write path that hasn't
+    triggered a recompute).
     """
+    entry = next((g for g in summary.get("goalProgress", []) if g["id"] == goal["id"]), None)
+    if entry is not None:
+        goal.update({
+            "priority": entry["priority"],
+            "savedSoFar": entry["savedSoFar"],
+            "remaining": entry["remaining"],
+            "percentComplete": entry["percentComplete"],
+            "monthlyTarget": entry["monthlyTarget"],
+            "status": entry["status"],
+        })
+        return goal
+
     target = float(goal.get("targetAmount", 0) or 0)
     months = int(goal.get("timeframeMonths", 1) or 1)
-    goal["priority"] = int(goal.get("priority") or 1)
-    goal["savedSoFar"] = saved
-    goal["percentComplete"] = round(min(100, (saved / target) * 100), 1) if target > 0 else 0
-    goal["remaining"] = max(0.0, target - saved)
-    goal["monthlyTarget"] = round(target / months, 2) if months > 0 else 0
-    goal["status"] = "completed" if saved >= target and target > 0 else goal.get("status", "active")
+    already_complete = goal.get("status") == "completed"
+    saved = target if already_complete else 0.0
+    goal.update({
+        "priority": int(goal.get("priority") or 1),
+        "savedSoFar": saved,
+        "remaining": max(0.0, target - saved),
+        "percentComplete": 100.0 if already_complete else 0.0,
+        "monthlyTarget": round(target / months, 2) if months > 0 else 0,
+        "status": goal.get("status", "active"),
+    })
     return goal
 
 
@@ -78,12 +102,12 @@ async def create_goal(
     saved_doc["id"] = new_ref.id
 
     month_key = get_current_month_key()
-    progress = compute_goal_progress(db, uid, month_key)
+    summary = engine_recompute(db, uid, month_key, reason=RecomputeReason.GOAL_CREATED)
 
     return {
         "success": True,
         "message": f"Goal '{body.name}' created.",
-        "data": {"goal": _with_computed_fields(serialize_doc(saved_doc), progress.get(new_ref.id, 0.0))},
+        "data": {"goal": _merge_engine_fields(serialize_doc(saved_doc), summary)},
     }
 
 
@@ -105,7 +129,7 @@ async def get_goals(
     )
 
     month_key = get_current_month_key()
-    progress = compute_goal_progress(db, uid, month_key)
+    summary = get_summary(db, uid, month_key)  # read-only, self-heals if missing — no recompute here
 
     goals = []
     for doc in docs:
@@ -113,13 +137,9 @@ async def get_goals(
         if data.get("isDeleted", False):
             continue
         data["id"] = doc.id
-        saved = progress.get(doc.id, float(data.get("targetAmount", 0) or 0))  # completed goals: full
-        if data.get("status") == "completed":
-            saved = float(data.get("targetAmount", 0) or 0)
-        goals.append(_with_computed_fields(serialize_doc(data), saved))
+        goals.append(_merge_engine_fields(serialize_doc(data), summary))
 
-    available_to_save = get_available_pool(db, uid, month_key)
-    return {"success": True, "data": {"goals": goals, "availableToSave": available_to_save}}
+    return {"success": True, "data": {"goals": goals, "availableToSave": summary["savingsPool"]}}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -160,12 +180,12 @@ async def update_goal(
     updated["id"] = goal_id
 
     month_key = get_current_month_key()
-    progress = compute_goal_progress(db, uid, month_key)
+    summary = engine_recompute(db, uid, month_key, reason=RecomputeReason.GOAL_UPDATED)
 
     return {
         "success": True,
         "message": "Goal updated.",
-        "data": {"goal": _with_computed_fields(serialize_doc(updated), progress.get(goal_id, 0.0))},
+        "data": {"goal": _merge_engine_fields(serialize_doc(updated), summary)},
     }
 
 
@@ -191,5 +211,10 @@ async def delete_goal(
 
     goal_ref.update({"isDeleted": True, "updatedAt": SERVER_TIMESTAMP})
     logger.info(f"[GOALS] uid={uid} deleted goal id={goal_id}")
+
+    try:
+        engine_recompute(db, uid, get_current_month_key(), reason=RecomputeReason.GOAL_DELETED)
+    except Exception as _re:
+        logger.warning(f"[GOALS] Engine recompute failed (non-fatal): {_re}")
 
     return {"success": True, "message": "Goal removed."}
