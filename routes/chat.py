@@ -17,7 +17,7 @@ from services.report_service import (
     get_top_spending_category,
     get_spend_alerts
 )
-from services.financial_engine import recompute as engine_recompute, RecomputeReason
+from services.financial_engine import recompute as engine_recompute, get_summary, RecomputeReason
 import logging
 
 logger = logging.getLogger("bachatbot.chat")
@@ -1316,7 +1316,7 @@ async def chat(
 
         # ── QUERY MONTH TOTAL ────────────────────────────────────────────
         elif intent == "query_month_total":
-            total = sum_month_expense(db, uid, month_key)
+            total = get_summary(db, uid, month_key).get("totalSpent", 0.0)
             reply_parts.append(f"Yo mahina Rs {int(total)} kharcha vayo")
             print(f"[CHAT] query_month_total: Rs {total}")
 
@@ -1410,24 +1410,29 @@ async def chat(
                     reply_parts.append("Yo hapta ma kei kharcha bhayena")
 
             else:
-                # monthly (default)
+                # monthly (default) — expense figures come from the
+                # Engine's summary (same data as everywhere else now).
+                # Income here is deliberately the sum of logged income
+                # TRANSACTIONS this month — a different concept from the
+                # Engine's declared `income` (used for budget planning) —
+                # so it still needs its own pass over tx_docs.
+                summary = get_summary(db, uid, month_key)
+                r_expense = summary.get("totalSpent", 0.0)
+                r_categories = {
+                    cat: v.get("spent", 0.0)
+                    for cat, v in (summary.get("categoryRemaining", {}) or {}).items()
+                    if v.get("spent", 0.0) > 0
+                }
                 for doc in tx_docs:
                     data = doc.to_dict()
                     if data.get("isDeleted", False):
                         continue
-                    amount = data.get("amount", 0.0)
-                    tx_type = data.get("type", "")
-                    category = data.get("category")
-                    if tx_type == "expense":
-                        r_expense += amount
-                        if category:
-                            r_categories[category] = r_categories.get(category, 0.0) + amount
-                    elif tx_type == "income":
-                        r_income += amount
+                    if data.get("type", "") == "income":
+                        r_income += data.get("amount", 0.0)
 
                 savings = r_income - r_expense
                 cat_breakdown = "\n".join(f"{c}: Rs {int(v)}" for c, v in sorted(r_categories.items(), key=lambda x: -x[1]))
-                
+
                 reply = (
                     f"Yo mahina:\n\n"
                     f"Total Expense: Rs {int(r_expense)}\n"
@@ -1442,18 +1447,22 @@ async def chat(
         # ── QUERY CATEGORY SPEND ─────────────────────────────────────────
         elif intent == "query_category_spend" and action.get("category"):
             cat = action["category"]
-            total = sum_category_expense(db, uid, cat, month_key)
+            total = (get_summary(db, uid, month_key).get("categoryRemaining", {}) or {}).get(cat, {}).get("spent", 0.0)
             reply_parts.append(f"{cat} ma Rs {int(total)} kharcha gareko chau yo mahina")
             print(f"[CHAT] query_category_spend: {cat} -> Rs {total}")
 
         # ── QUERY BUDGET STATUS ──────────────────────────────────────────
+        # Was reading fetch_budget()'s raw budgets.spent — the deprecated
+        # mutable counter (Ground Truth Principle, spec Section 8), which
+        # can drift from reality. Reads categoryRemaining instead, which
+        # the Engine derives fresh from confirmed transactions every time.
         elif intent == "query_budget_status" and action.get("category"):
             cat = action["category"]
-            b = fetch_budget(db, uid, cat, month_key)
+            b = (get_summary(db, uid, month_key).get("categoryRemaining", {}) or {}).get(cat)
             if b:
                 bl = b.get("limit", 0)
                 bs = b.get("spent", 0)
-                br = max(0, bl - bs)
+                br = b.get("remaining", max(0, bl - bs))
                 bp = round((bs / bl * 100), 1) if bl > 0 else 0
                 reply_parts.append(f"{cat} budget Rs {int(bl)}, spent Rs {int(bs)}, baki Rs {int(br)} ({bp}%)")
             else:
@@ -1465,29 +1474,31 @@ async def chat(
             mk = month_key  # already resolved via resolve_month_key above
             print(f"[CHAT] query_past_report: monthKey={mk} category={action.get('category')}")
 
-            # Fetch all confirmed, non-deleted transactions for that month
+            # Expense figures come from the Engine's summary for that month
+            # (get_summary self-heals — recomputes fresh if never computed
+            # for this month before). Income is deliberately the sum of
+            # logged income transactions, a different concept from the
+            # Engine's declared `income`, so it still needs its own pass.
+            past_summary = get_summary(db, uid, mk)
+            r_expense = past_summary.get("totalSpent", 0.0)
+            r_categories = {
+                cat: v.get("spent", 0.0)
+                for cat, v in (past_summary.get("categoryRemaining", {}) or {}).items()
+                if v.get("spent", 0.0) > 0
+            }
+            r_income = 0.0
             past_tx_docs = list(
                 db.collection("users").document(uid).collection("transactions")
                 .where("monthKey", "==", mk)
                 .where("status", "==", "confirmed")
                 .stream()
             )
-            r_expense = 0.0
-            r_income = 0.0
-            r_categories = {}
             for doc in past_tx_docs:
                 data = doc.to_dict()
                 if data.get("isDeleted", False):
                     continue
-                amt = data.get("amount", 0.0)
-                tx_t = data.get("type", "")
-                cat = data.get("category")
-                if tx_t == "expense":
-                    r_expense += amt
-                    if cat:
-                        r_categories[cat] = r_categories.get(cat, 0.0) + amt
-                elif tx_t == "income":
-                    r_income += amt
+                if data.get("type", "") == "income":
+                    r_income += data.get("amount", 0.0)
 
             target_cat = action.get("category")
             if target_cat:
@@ -2341,7 +2352,7 @@ async def chat_sync(
 
                 # ── QUERY MONTH TOTAL ────────────────────────────────────
                 elif intent == "query_month_total":
-                    total = sum_month_expense(db, uid, month_key)
+                    total = get_summary(db, uid, month_key).get("totalSpent", 0.0)
                     reply_parts.append(f"Yo mahina total kharcha Rs {int(total)} cha")
 
                 # ── QUERY REPORT ─────────────────────────────────────────
@@ -2413,18 +2424,22 @@ async def chat_sync(
                             reply_parts.append("Yo hapta ma kei kharcha bhayena")
 
                     else:
+                        # Expense figures come from the Engine's summary;
+                        # income stays a transaction-sum (a different
+                        # concept from the Engine's declared `income`).
+                        monthly_summary = get_summary(db, uid, month_key)
+                        r_expense = monthly_summary.get("totalSpent", 0.0)
+                        r_categories = {
+                            cat: v.get("spent", 0.0)
+                            for cat, v in (monthly_summary.get("categoryRemaining", {}) or {}).items()
+                            if v.get("spent", 0.0) > 0
+                        }
                         for doc in tx_docs:
                             data = doc.to_dict()
                             if data.get("isDeleted", False):
                                 continue
-                            amount = data.get("amount", 0.0)
-                            if data.get("type") == "expense":
-                                r_expense += amount
-                                cat = data.get("category")
-                                if cat:
-                                    r_categories[cat] = r_categories.get(cat, 0.0) + amount
-                            elif data.get("type") == "income":
-                                r_income += amount
+                            if data.get("type") == "income":
+                                r_income += data.get("amount", 0.0)
                         net = r_income - r_expense
                         cat_parts = ", ".join(f"{c}: Rs {int(v)}" for c, v in sorted(r_categories.items(), key=lambda x: -x[1]))
                         if r_expense > 0 and cat_parts:
@@ -2437,17 +2452,19 @@ async def chat_sync(
                 # ── QUERY CATEGORY SPEND ─────────────────────────────────
                 elif intent == "query_category_spend" and action.get("category"):
                     cat = action["category"]
-                    total = sum_category_expense(db, uid, cat, month_key)
+                    total = (get_summary(db, uid, month_key).get("categoryRemaining", {}) or {}).get(cat, {}).get("spent", 0.0)
                     reply_parts.append(f"{cat} ma Rs {int(total)} kharcha gareko chau yo mahina")
 
                 # ── QUERY BUDGET STATUS ──────────────────────────────────
+                # Reads categoryRemaining (Engine-derived), not the
+                # deprecated budgets.spent mutable counter.
                 elif intent == "query_budget_status" and action.get("category"):
                     cat = action["category"]
-                    b = fetch_budget(db, uid, cat, month_key)
+                    b = (get_summary(db, uid, month_key).get("categoryRemaining", {}) or {}).get(cat)
                     if b:
                         bl = b.get("limit", 0)
                         bs = b.get("spent", 0)
-                        br = max(0, bl - bs)
+                        br = b.get("remaining", max(0, bl - bs))
                         bp = round((bs / bl * 100), 1) if bl > 0 else 0
                         reply_parts.append(f"{cat} budget Rs {int(bl)}, spent Rs {int(bs)}, baki Rs {int(br)} ({bp}%)")
                     else:
@@ -2456,28 +2473,26 @@ async def chat_sync(
                 # ── QUERY PAST REPORT (sync) ─────────────────────────────
                 elif intent == "query_past_report":
                     mk = month_key
+                    past_summary = get_summary(db, uid, mk)
+                    r_expense = past_summary.get("totalSpent", 0.0)
+                    r_categories = {
+                        cat: v.get("spent", 0.0)
+                        for cat, v in (past_summary.get("categoryRemaining", {}) or {}).items()
+                        if v.get("spent", 0.0) > 0
+                    }
+                    r_income = 0.0
                     past_tx_docs = list(
                         db.collection("users").document(uid).collection("transactions")
                         .where("monthKey", "==", mk)
                         .where("status", "==", "confirmed")
                         .stream()
                     )
-                    r_expense = 0.0
-                    r_income = 0.0
-                    r_categories = {}
                     for doc in past_tx_docs:
                         data = doc.to_dict()
                         if data.get("isDeleted", False):
                             continue
-                        amt = data.get("amount", 0.0)
-                        tx_t = data.get("type", "")
-                        cat = data.get("category")
-                        if tx_t == "expense":
-                            r_expense += amt
-                            if cat:
-                                r_categories[cat] = r_categories.get(cat, 0.0) + amt
-                        elif tx_t == "income":
-                            r_income += amt
+                        if data.get("type", "") == "income":
+                            r_income += data.get("amount", 0.0)
 
                     target_cat = action.get("category")
                     if target_cat:

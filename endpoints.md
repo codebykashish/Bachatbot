@@ -133,10 +133,38 @@ async def get_current_user(request: Request):
 | 17 | POST | `/contact` | Contact form submission | ❌ | None (sends email via SMTP) |
 | 18 | GET | `/income` | Get declared income sources | ✅ | `users/{uid}` (income sub-map) |
 | 19 | POST | `/income` | Set/update declared income sources | ✅ | `users/{uid}`, `users/{uid}/alerts` |
+| 20 | GET | `/financial-summary` | Financial Engine's summary (Phase 1.9) | ✅ | Read-only — `users/{uid}/financialSummary/{monthKey}` |
+| 21 | GET | `/financial-metrics` | Metrics Engine's interpretations (Phase 2) | ✅ | Read-only — no Firestore writes |
+| 22 | GET | `/financial-health` | Health Engine's Overall + Category Health (Phase 3.1/3.2) | ✅ | Read-only — no Firestore writes |
 
 ---
 
 ## 📝 Detailed Endpoint Specifications
+
+### Endpoints 20-22: Financial Engine, Metrics Engine, Health Engine
+
+**These three superseded the ad hoc per-endpoint calculations documented
+below** (`/budgets`' `spent`/`percentUsed`, `/monthly-report`'s
+`budgetUtilization`/`survivalBudgetPerDay`, the alert-generation math in
+the "Alert Generation Logic" section) once `backend/FINANCIAL_ENGINE_SPEC.md`
+was written. **`FINANCIAL_ENGINE_SPEC.md` is the authoritative source for
+all three** — this file only lists them for discoverability alongside
+the rest of the API surface; the detailed specs, formulas, invariants,
+and version history live there, not here.
+
+- **`GET /financial-summary?monthKey=`** — `{ income, totalSpent,
+  remainingBudget, categoryRemaining, savingsPool, goalProgress,
+  metadata }`. The single source every screen reads calculated money
+  values from — no screen or route computes `spent`, `remaining`, or
+  `percentUsed` independently anymore.
+- **`GET /financial-metrics?monthKey=`** — `{ daysRemaining,
+  budgetUtilization, recommendedDailySpend, spendingPace, recoveryPlan,
+  categoryPressure, projectedSavings, metadata }`. Interpretations of
+  the summary above — never raw transactions.
+- **`GET /financial-health?monthKey=`** — `{ overallHealth,
+  decisionTrace, categoryHealth, metadata }`. Green/Amber/Red judgment
+  with reason codes, built only from the two engines above — never a
+  numeric score, never a recomputed financial value.
 
 ---
 

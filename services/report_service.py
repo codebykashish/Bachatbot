@@ -6,6 +6,7 @@ from utils import (
     fetch_budget,
     sum_month_expense
 )
+from services.financial_engine import get_summary
 
 def get_missing_budget_categories(db, uid: str, month_key: str) -> list[str]:
     """
@@ -38,34 +39,24 @@ def get_top_spending_category(db, uid: str, month_key: str) -> dict:
     """
     Finds the category with the highest spending in the given month.
     Returns e.g. {"category": "Food", "amount": 1500} or None.
+
+    Reads from the Financial Engine's summary instead of independently
+    re-scanning and re-summing transactions — this used to be a second,
+    parallel aggregation of the exact same data the Engine already
+    computes (`categoryRemaining[cat].spent`).
     """
     try:
-        docs = (
-            db.collection("users").document(uid)
-            .collection("transactions")
-            .where("monthKey", "==", month_key)
-            .where("type", "==", "expense")
-            .where("status", "==", "confirmed")
-            .stream()
-        )
-        
-        category_totals = {}
-        for doc in docs:
-            data = doc.to_dict()
-            if data.get("isDeleted", False):
-                continue
-            cat = data.get("category", "Other")
-            amt = float(data.get("amount", 0.0))
-            category_totals[cat] = category_totals.get(cat, 0.0) + amt
-            
-        if not category_totals:
+        summary = get_summary(db, uid, month_key)
+        category_remaining = summary.get("categoryRemaining", {}) or {}
+        if not category_remaining:
             return None
-            
-        top_cat = max(category_totals, key=category_totals.get)
-        return {
-            "category": top_cat,
-            "amount": category_totals[top_cat]
-        }
+
+        top_cat, top_data = max(
+            category_remaining.items(), key=lambda kv: kv[1].get("spent", 0.0)
+        )
+        if top_data.get("spent", 0.0) <= 0:
+            return None
+        return {"category": top_cat, "amount": top_data.get("spent", 0.0)}
     except Exception as e:
         print(f"[REPORT_SERVICE] Error in get_top_spending_category: {e}")
         return None
@@ -75,40 +66,40 @@ def get_spend_alerts(db, uid: str, month_key: str) -> dict:
     Returns spending insights:
     - highestCategory and highestAmount
     - overBudgetCategories: list of categories exceeding their budget
+
+    Reads from the Financial Engine's summary for both. Previously this
+    read budgets.spent (the deprecated mutable counter — the docstring
+    even used to note it "might be slightly out of sync" and worked
+    around that locally instead of fixing the root cause); now it reads
+    categoryRemaining, which the Engine already derives from confirmed
+    transactions, so there's nothing left to be out of sync with.
     """
     try:
-        top = get_top_spending_category(db, uid, month_key)
-        
-        # Get all budgets for the month
-        budget_docs = (
-            db.collection("users").document(uid)
-            .collection("budgets")
-            .where("monthKey", "==", month_key)
-            .stream()
-        )
-        
-        over_budget = []
-        for doc in budget_docs:
-            b_data = doc.to_dict()
-            limit = float(b_data.get("limit", 0.0))
-            if limit <= 0:
-                continue
-                
-            cat = b_data.get("category")
-            # We use sum_category_expense to be accurate vs b_data.get("spent") which might be slightly out of sync
-            spent = sum_category_expense(db, uid, cat, month_key)
-            
-            if spent > limit:
-                over_budget.append({
-                    "category": cat,
-                    "spent": spent,
-                    "budget": limit
-                })
-                
+        summary = get_summary(db, uid, month_key)
+        category_remaining = summary.get("categoryRemaining", {}) or {}
+
+        top = None
+        if category_remaining:
+            top_cat, top_data = max(
+                category_remaining.items(), key=lambda kv: kv[1].get("spent", 0.0)
+            )
+            if top_data.get("spent", 0.0) > 0:
+                top = {"category": top_cat, "amount": top_data.get("spent", 0.0)}
+
+        over_budget = [
+            {
+                "category": cat,
+                "spent": data.get("spent", 0.0),
+                "budget": data.get("limit", 0.0),
+            }
+            for cat, data in category_remaining.items()
+            if data.get("limit", 0.0) > 0 and data.get("spent", 0.0) > data.get("limit", 0.0)
+        ]
+
         return {
             "highestCategory": top["category"] if top else None,
             "highestAmount": top["amount"] if top else 0,
-            "overBudgetCategories": over_budget
+            "overBudgetCategories": over_budget,
         }
     except Exception as e:
         print(f"[REPORT_SERVICE] Error in get_spend_alerts: {e}")

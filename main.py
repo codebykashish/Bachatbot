@@ -119,6 +119,10 @@ from routes.upload import router as upload_router
 from routes.income import router as income_router
 from routes.goals import router as goals_router
 from routes.engine_debug import router as engine_debug_router
+from routes.financial_summary import router as financial_summary_router
+from routes.financial_metrics import router as financial_metrics_router
+from routes.financial_health import router as financial_health_router
+from routes.financial_recommendations import router as financial_recommendations_router
 
 app.include_router(signup_router)
 app.include_router(profile_router)
@@ -134,6 +138,10 @@ app.include_router(upload_router)
 app.include_router(income_router)
 app.include_router(goals_router)
 app.include_router(engine_debug_router)
+app.include_router(financial_summary_router)
+app.include_router(financial_metrics_router)
+app.include_router(financial_health_router)
+app.include_router(financial_recommendations_router)
 
 
 # Health check - test if server is running

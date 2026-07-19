@@ -17,12 +17,12 @@ def get_current_month_key() -> str:
     return get_month_key()
 
 
-def get_days_remaining_in_month() -> int:
+def get_days_remaining_in_month(dt: datetime = None) -> int:
     """
     Returns how many days are remaining in current month
     Including today
     """
-    today = datetime.now(timezone.utc)
+    today = dt or datetime.now(timezone.utc)
     total_days = calendar.monthrange(today.year, today.month)[1]
     days_remaining = total_days - today.day + 1  # +1 includes today
     return max(days_remaining, 1)  # never return 0
