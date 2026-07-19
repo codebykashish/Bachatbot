@@ -37,6 +37,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   double _declaredIncome = 0.0;
   double _totalAllocated = 0.0;
   double _otherUnspentBuffer = 0.0;
+  double? _categoryDailyTarget; // Metrics Engine (Phase 2.3a) — null if not budgeted or no days remain
 
   final _amountController = TextEditingController();
   final _noteController = TextEditingController();
@@ -58,39 +59,50 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     _fetchBudgetMeta();
   }
 
+  // The only financial request this screen makes. _totalAllocated and
+  // _otherUnspentBuffer are aggregations of already-Engine-given
+  // per-category values (categoryRemaining[cat].limit/.remaining) — no
+  // local subtraction happens here, only summing numbers the Engine
+  // already computed.
   Future<void> _fetchBudgetMeta() async {
     try {
       final results = await Future.wait([
-        ApiService.get('/income'),
-        ApiService.get('/budgets'),
+        ApiService.get('/financial-summary'),
+        ApiService.get('/financial-metrics'),
       ]);
+      final res = results[0];
+      final metricsRes = results[1];
       if (!mounted) return;
-      final incomeData = results[0];
-      final budgetsData = results[1];
-      if (incomeData['success'] == true) {
-        final d = incomeData['data'] as Map<String, dynamic>? ?? {};
-        final income = (d['inHand'] ?? 0).toDouble() +
-            (d['inBank'] ?? 0).toDouble() +
-            (d['onlineBanking'] ?? 0).toDouble();
-        final budgets = (budgetsData['data']?['budgets'] as List<dynamic>?) ?? [];
+      // Category Daily Target (Phase 2.3a) — read directly, never
+      // recomputed here. Null when this category isn't budgeted or the
+      // month has no days left.
+      final categoryDailyTarget = metricsRes['success'] == true
+          ? (metricsRes['data']?['categoryDailyTarget']?[widget.category]?['value'] as num?)?.toDouble()
+          : null;
+      if (res['success'] == true) {
+        final summary = res['data'] as Map<String, dynamic>? ?? {};
+        final categoryRemaining = (summary['categoryRemaining'] as Map?)?.cast<String, dynamic>() ?? {};
+        final income = (summary['income'] ?? 0).toDouble();
+
         double totalAllocated = 0;
         double otherBuffer = 0;
         Map<String, dynamic>? thisBudget;
-        for (final b in budgets) {
+        for (final entry in categoryRemaining.entries) {
+          final b = entry.value as Map<String, dynamic>;
           final bLimit = (b['limit'] ?? 0).toDouble();
           totalAllocated += bLimit;
-          if ((b['category'] as String?) == widget.category) {
-            thisBudget = b as Map<String, dynamic>;
+          if (entry.key == widget.category) {
+            thisBudget = b;
           } else {
-            final bSpent = (b['spent'] ?? 0).toDouble();
-            otherBuffer += (bLimit - bSpent).clamp(0.0, double.infinity);
+            otherBuffer += (b['remaining'] ?? 0).toDouble();
           }
         }
         setState(() {
           _declaredIncome = income;
           _totalAllocated = totalAllocated;
           _otherUnspentBuffer = otherBuffer;
-          // Update limit/spent from API so navigation from any screen works correctly
+          _categoryDailyTarget = categoryDailyTarget;
+          // Update limit/spent from the summary so navigation from any screen works correctly
           if (thisBudget != null) {
             _budgetLimit = (thisBudget['limit'] ?? _budgetLimit).toDouble();
             _budgetSpent = (thisBudget['spent'] ?? _budgetSpent).toDouble();
@@ -624,6 +636,17 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                 ),
               ],
             ),
+            // Category Daily Target (Phase 2.3a) — this category's own
+            // remaining budget spread across the days left, never pooled
+            // with any other category. Null (not budgeted, or no days
+            // left) simply hides the line.
+            if (_categoryDailyTarget != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Aim for Rs ${_categoryDailyTarget!.round()}/day in ${widget.category} for the rest of the month',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              ),
+            ],
           ] else ...[
             // "No budget set" — clear, tappable CTA so first-time users know what to do
             GestureDetector(

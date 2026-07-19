@@ -31,6 +31,10 @@ class ReportsScreenState extends State<ReportsScreen>
   List<dynamic> _dailyBreakdown = [];
   String _overallStatus = 'ok';
   List<Goal> _goals = [];
+  Map<String, dynamic>? _recoveryPlan; // Metrics Engine (Phase 2.5, Advisory) — null when no plan is needed
+  Map<String, dynamic>? _projectedSavings; // Metrics Engine (Phase 2.7, Predictive) — null when no budgets exist
+  List<dynamic> _riskFlags = []; // Health Engine (Phase 3.3) — already in priority order, read directly
+  Map<String, dynamic>? _primaryRecommendation; // Recommendation Engine (Phase 4) — null only if fetch failed
 
   @override
   void initState() {
@@ -108,9 +112,15 @@ class ReportsScreenState extends State<ReportsScreen>
       final futures = await Future.wait([
         ApiService.get('/monthly-report?monthKey=$_selectedMonthKey&view=$_selectedView'),
         ApiService.get('/goals'),
+        ApiService.get('/financial-metrics?monthKey=$_selectedMonthKey'),
+        ApiService.get('/financial-health?monthKey=$_selectedMonthKey'),
+        ApiService.get('/financial-recommendations?monthKey=$_selectedMonthKey'),
       ]);
       final res = futures[0];
       final goalsRes = futures[1];
+      final metricsRes = futures[2];
+      final healthRes = futures[3];
+      final recommendationsRes = futures[4];
 
       if (!mounted) return;
 
@@ -125,12 +135,39 @@ class ReportsScreenState extends State<ReportsScreen>
               .toList();
         }
 
+        // Recovery Plan (Phase 2.5) — read directly from the Metrics
+        // Engine, never recomputed here. Null when no plan is needed.
+        final recoveryPlan = metricsRes['success'] == true
+            ? (metricsRes['data']?['recoveryPlan'] as Map<String, dynamic>?)
+            : null;
+        // Projected Savings (Phase 2.7) — same treatment, null when no
+        // budgets exist to project from.
+        final projectedSavings = metricsRes['success'] == true
+            ? (metricsRes['data']?['projectedSavings'] as Map<String, dynamic>?)
+            : null;
+        // Risk Flags (Phase 3.3) — already in priority order, read
+        // directly, never recomputed or re-sorted here.
+        final riskFlags = healthRes['success'] == true
+            ? (healthRes['data']?['riskFlags'] as List? ?? [])
+            : <dynamic>[];
+        // Recommendation Engine (Phase 4) — read directly, never
+        // recomputed here. Only primaryRecommendation is shown; a
+        // popup/expandable list of alternatives is a future UI
+        // decision, not this phase's job (expose only).
+        final primaryRecommendation = recommendationsRes['success'] == true
+            ? (recommendationsRes['data']?['primaryRecommendation'] as Map<String, dynamic>?)
+            : null;
+
         setState(() {
           _totalExpense = (report?['totalExpense'] ?? 0).toDouble();
           _categoryBreakdown = _mapToDouble(report?['categoryBreakdown'] ?? {});
           _dailyBreakdown = report?['dailyBreakdown'] as List? ?? [];
           _overallStatus = report?['insights']?['overallStatus'] ?? 'ok';
           _goals = goals;
+          _recoveryPlan = recoveryPlan;
+          _projectedSavings = projectedSavings;
+          _riskFlags = riskFlags;
+          _primaryRecommendation = primaryRecommendation;
           _isLoading = false;
         });
       } else {
@@ -279,9 +316,44 @@ class ReportsScreenState extends State<ReportsScreen>
                       _buildGoalsSummary(),
                     ],
 
-                    // Reserved spot for future "suggestions/alerts" teaser —
-                    // add it here as a single collapsed entry point once that
-                    // feature exists, not stacked content on this screen.
+                    // Recommendation Engine (Phase 4) — the single best
+                    // next action, shown first since it's the headline
+                    // guidance everything else (Recovery Plan, Risk
+                    // Flags) already feeds into. Wording here is plain
+                    // sentence composition from structured fields (code/
+                    // actionValue/actionUnit/category) — no financial
+                    // math, same treatment every other card already gets.
+                    if (_primaryRecommendation != null) ...[
+                      const SizedBox(height: 16),
+                      _buildRecommendationCard(),
+                    ],
+
+                    // Recovery Plan (Phase 2.5, Advisory) — the "suggestions"
+                    // teaser this spot was reserved for. Only shown when the
+                    // Metrics Engine says a plan is actually needed; never a
+                    // popup, never on Home.
+                    if (_recoveryPlan != null) ...[
+                      const SizedBox(height: 16),
+                      _buildRecoveryPlanCard(),
+                    ],
+
+                    // Projected Savings (Phase 2.7, Predictive) — one simple
+                    // card, not flashy. The ≈ symbol is the visual cue that
+                    // this is a forecast, never a fact.
+                    if (_projectedSavings != null) ...[
+                      const SizedBox(height: 16),
+                      _buildProjectedSavingsCard(),
+                    ],
+
+                    // Risk Flags (Phase 3.3) — expose only, no redesign.
+                    // Already in priority order from the Health Engine;
+                    // Reports shows the list as-is. Phase 5 decides
+                    // whether/when any of these should interrupt the
+                    // user — this is display only, not a notification.
+                    if (_riskFlags.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _buildRiskFlagsCard(),
+                    ],
                   ],
                 ),
               ),
@@ -331,6 +403,263 @@ class ReportsScreenState extends State<ReportsScreen>
           Expanded(
             child: Text(statusText, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: statusColor)),
           ),
+        ],
+      ),
+    );
+  }
+
+  // Recommendation Engine (Phase 4) — one card, the single best next
+  // action. Wording is plain-sentence templating over structured fields
+  // (code/actionValue/actionUnit/category) — the same treatment every
+  // other card already gets; this is not the Explainer (Phase 6), just
+  // the same minimal composition Recovery Plan/Spending Pace already do.
+  String _recommendationMessage(Map<String, dynamic> rec) {
+    final code = rec['code'] as String?;
+    final category = rec['category'] as String?;
+    final actionValue = rec['actionValue'];
+    final actionUnit = rec['actionUnit'] as String?;
+    final amount = (actionValue is num) ? actionValue.round() : null;
+    final perDay = actionUnit == 'per_day' && amount != null ? 'Rs $amount/day' : null;
+
+    switch (code) {
+      case 'STOP_CATEGORY_SPENDING':
+        return 'Your $category budget is exhausted — try to avoid further $category spending for the rest of the month.';
+      case 'REDUCE_CATEGORY_SPENDING':
+        return perDay != null
+            ? 'Try keeping $category spending around $perDay for the rest of the month.'
+            : 'Try reducing $category spending for the rest of the month.';
+      case 'MONITOR_CATEGORY_SPENDING':
+        return 'Keep an eye on $category spending — it\'s trending toward pressure.';
+      case 'LIMIT_DAILY_SPENDING':
+        return perDay != null
+            ? 'Try to spend no more than $perDay for the rest of the month.'
+            : 'Try to limit your daily spending for the rest of the month.';
+      case 'START_RECOVERY_PLAN':
+        return 'Your projected savings are trending negative — consider reviewing your spending this week.';
+      case 'ACCEPT_REDUCED_SAVINGS':
+        return 'Full recovery isn\'t possible this month, but reducing spending now will minimize the impact.';
+      case 'REVIEW_MULTIPLE_CATEGORIES':
+        return 'Several categories are under pressure — worth reviewing your spending across the board.';
+      case 'SLOW_SPENDING_PACE':
+        return 'You\'re spending faster than planned — slowing down this week will help.';
+      case 'KEEP_CURRENT_HABITS':
+      default:
+        return 'You\'re on track. Keep your current spending pace.';
+    }
+  }
+
+  Color _recommendationTypeColor(String? type) {
+    switch (type) {
+      case 'stop':
+        return const Color(0xFFE0223B);
+      case 'recover':
+        return const Color(0xFFE0223B);
+      case 'reduce':
+        return Colors.orange.shade700;
+      case 'monitor':
+        return Colors.amber.shade700;
+      default:
+        return _primary;
+    }
+  }
+
+  Widget _buildRecommendationCard() {
+    final rec = _primaryRecommendation!;
+    final color = _recommendationTypeColor(rec['type'] as String?);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.arrow_circle_right_outlined, color: color, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'What To Do Next',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _recommendationMessage(rec),
+                  style: const TextStyle(fontSize: 12.5, color: Colors.black87),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Recovery Plan (Phase 2.5) — a simple card, never a popup. The wording
+  // here is presentation-layer templating over already-computed structured
+  // fields (dailyTarget, durationDays, recoveryPossible) — no financial
+  // math happens in this widget, only sentence composition, same treatment
+  // Spending Pace's status badge already got. Simple, plain language, per
+  // the chat/Explainer wording standard recorded in the spec.
+  Widget _buildRecoveryPlanCard() {
+    final plan = _recoveryPlan!;
+    final dailyTarget = (plan['dailyTarget'] as num?)?.toInt() ?? 0;
+    final durationDays = (plan['durationDays'] as num?)?.toInt() ?? 0;
+    final recoveryPossible = plan['recoveryPossible'] as bool? ?? true;
+    final affectedCategories = (plan['affectedCategories'] as List?)?.cast<String>() ?? [];
+
+    final message = recoveryPossible
+        ? 'Try staying around Rs $dailyTarget/day for the next $durationDays days to finish the month comfortably.'
+        : "This month's budget can no longer be fully recovered, but reducing spending now will minimize the impact.";
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.amber.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.lightbulb_outline, color: Colors.amber.shade800, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Recovery Plan',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.amber.shade900),
+                ),
+                const SizedBox(height: 4),
+                Text(message, style: const TextStyle(fontSize: 12.5, color: Colors.black87)),
+                if (affectedCategories.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Keep an eye on: ${affectedCategories.join(', ')}',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Projected Savings (Phase 2.7) — one simple card, not flashy. The ≈
+  // symbol is the visual cue that this is a forecast, never a fact — the
+  // same honesty-about-uncertainty principle the wording carries too.
+  Widget _buildProjectedSavingsCard() {
+    final projection = _projectedSavings!;
+    final value = (projection['value'] as num?)?.round() ?? 0;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _primary.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _primary.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.insights_outlined, color: _primary, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Projected End-of-Month Savings',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _primary),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '≈ Rs $value',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Based on your current spending pace',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Risk Flags (Phase 3.3) — expose only, no wording invented here beyond
+  // a plain severity label + the raw code (the Explainer, Phase 6, turns
+  // codes into sentences). Already sorted by the Health Engine; this
+  // widget doesn't re-sort or filter, just renders the list as given.
+  Color _riskSeverityColor(String? severity) {
+    switch (severity) {
+      case 'critical':
+        return const Color(0xFFB00020);
+      case 'high':
+        return const Color(0xFFE0223B);
+      case 'medium':
+        return Colors.orange.shade700;
+      case 'low':
+        return Colors.amber.shade700;
+      default:
+        return Colors.grey.shade600;
+    }
+  }
+
+  Widget _buildRiskFlagsCard() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 3))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Risks to Watch',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.black87),
+          ),
+          const SizedBox(height: 8),
+          for (final flag in _riskFlags)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 8, height: 8,
+                    margin: const EdgeInsets.only(top: 4),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _riskSeverityColor(flag['severity'] as String?),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      flag['category'] != null
+                          ? '${flag['category']}: ${flag['code']}'
+                          : (flag['code'] as String?) ?? '',
+                      style: const TextStyle(fontSize: 12, color: Colors.black87),
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );

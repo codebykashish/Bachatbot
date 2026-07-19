@@ -87,6 +87,7 @@ class _ChatScreenState extends State<ChatScreen> {
     'expense_log',
     'income_log',
     'undo_last_expense',
+    'correction',
   };
 
   static const _refreshCategoriesIntents = {
@@ -94,6 +95,7 @@ class _ChatScreenState extends State<ChatScreen> {
     'income_log',
     'set_budget',
     'undo_last_expense',
+    'correction',
   };
 
   @override

@@ -20,6 +20,12 @@ class CategoriesScreenState extends State<CategoriesScreen>
   bool _isLoading = true;
   List<dynamic> _budgets = [];
   double _declaredIncome = 0;
+  double _savingsPool = 0; // summary.savingsPool — never recomputed locally
+  double _remainingBudget = 0; // summary.remainingBudget — never recomputed locally
+  // Category Pressure (Phase 2.6) — the shared ranking every category
+  // list should sort by, not alphabetically or by budget size. Empty
+  // when categoryPressure is null (no budgets at all).
+  List<String> _priorityOrder = [];
   final Set<String> _deletingCategories = {};
 
   late final AnimationController _shakeCtrl;
@@ -51,7 +57,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
       TweenSequenceItem(tween: Tween(begin: -8.0, end: 8.0), weight: 2),
       TweenSequenceItem(tween: Tween(begin: 8.0, end: 0.0), weight: 1),
     ]).animate(CurvedAnimation(parent: _shakeCtrl, curve: Curves.easeInOut));
-    _fetchBudgets();
+    _fetchFinancialSummary();
   }
 
   @override
@@ -68,36 +74,73 @@ class CategoriesScreenState extends State<CategoriesScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _fetchBudgets();
+    if (state == AppLifecycleState.resumed) _fetchFinancialSummary();
   }
 
-  void refresh() => _fetchBudgets();
+  void refresh() => _fetchFinancialSummary();
 
   void openAddSheet() => _showAddCategorySheet();
 
-  Future<void> _fetchBudgets() async {
+  // The only financial request this screen makes. `_budgets` is rebuilt
+  // from `categoryRemaining` (already-computed per-category limit/spent/
+  // remaining) so every renderer below keeps its existing map shape —
+  // nothing downstream needed to change, only where the numbers came from.
+  Future<void> _fetchFinancialSummary() async {
     setState(() => _isLoading = true);
     try {
       final now = DateTime.now();
       final monthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+      // Metrics Engine (Phase 2.2) call runs alongside the summary call —
+      // budgetUtilization is a read-only interpretation of categoryRemaining,
+      // never recomputed here.
       final results = await Future.wait([
-        ApiService.get('/budgets?monthKey=$monthKey'),
-        ApiService.get('/income'),
+        ApiService.get('/financial-summary?monthKey=$monthKey'),
+        ApiService.get('/financial-metrics?monthKey=$monthKey'),
+        ApiService.get('/financial-health?monthKey=$monthKey'),
       ]);
+      final res = results[0];
+      final metricsRes = results[1];
+      final healthRes = results[2];
       if (!mounted) return;
-      final budgetRes = results[0];
-      final incomeRes = results[1];
-      if (budgetRes['success'] == true) {
-        final budgetsList = (budgetRes['data']?['budgets'] as List? ?? []);
+      if (res['success'] == true) {
+        final summary = res['data'] as Map<String, dynamic>? ?? {};
+        final categoryRemaining = (summary['categoryRemaining'] as Map?)?.cast<String, dynamic>() ?? {};
+        final budgetUtilization = metricsRes['success'] == true
+            ? ((metricsRes['data']?['budgetUtilization'] as Map?)?.cast<String, dynamic>() ?? {})
+            : <String, dynamic>{};
+        // Category Pressure (Phase 2.6) — read directly, never recomputed
+        // here. Null (categoryPressure absent) means no budgets exist yet;
+        // both maps stay empty and every category falls back to the
+        // curated _catMeta order in _buildDisplayList.
+        final categoryPressure = metricsRes['success'] == true
+            ? (metricsRes['data']?['categoryPressure'] as Map?)
+            : null;
+        final pressureByCategory =
+            (categoryPressure?['byCategory'] as Map?)?.cast<String, dynamic>() ?? {};
+        final priorityOrder =
+            (categoryPressure?['priorityOrder'] as List?)?.cast<String>() ?? [];
+        // Category Health (Phase 3.2) — read directly, never recomputed
+        // here. Null (categoryHealth absent) means no budgets exist yet.
+        final categoryHealth = healthRes['success'] == true
+            ? (healthRes['data']?['categoryHealth'] as Map?)?.cast<String, dynamic>()
+            : null;
         setState(() {
-          _budgets = budgetsList
-              .where((b) =>
-                  b['category']?.toString().toLowerCase() != 'salary' &&
-                  (b['limit'] ?? 0) > 0)
+          _budgets = categoryRemaining.entries
+              .where((e) => e.key.toLowerCase() != 'salary' && (e.value['limit'] ?? 0) > 0)
+              .map((e) => {
+                    'category': e.key,
+                    'limit': e.value['limit'],
+                    'spent': e.value['spent'],
+                    'remaining': e.value['remaining'],
+                    'utilization': (budgetUtilization[e.key]?['utilization'] ?? 0).toDouble(),
+                    'pressureStatus': pressureByCategory[e.key]?['status'] as String?,
+                    'healthStatus': categoryHealth?[e.key]?['status'] as String?,
+                  })
               .toList();
-          if (incomeRes['success'] == true) {
-            _declaredIncome = (incomeRes['data']?['total'] ?? 0).toDouble();
-          }
+          _declaredIncome = (summary['income'] ?? 0).toDouble();
+          _savingsPool = (summary['savingsPool'] ?? 0).toDouble();
+          _remainingBudget = (summary['remainingBudget'] ?? 0).toDouble();
+          _priorityOrder = priorityOrder;
         });
       }
     } catch (e) {
@@ -120,31 +163,49 @@ class CategoriesScreenState extends State<CategoriesScreen>
     catch (_) { return Icons.category; }
   }
 
+  // Sorted by Category Pressure's priorityOrder (highest pressure first)
+  // — not alphabetically, not by budget size. Falls back to the curated
+  // _catMeta order for any budgeted category priorityOrder doesn't cover
+  // (e.g. categoryPressure is null because no budgets exist at all), so
+  // a category never silently disappears from the list.
   List<Map<String, dynamic>> _buildDisplayList() {
     final budgetedNames = _budgets.map((b) => b['category'] as String).toSet();
     final ordered = <Map<String, dynamic>>[];
+    for (final cat in _priorityOrder) {
+      if (budgetedNames.contains(cat)) {
+        ordered.add(_budgets.firstWhere((b) => b['category'] == cat));
+      }
+    }
     for (final meta in _catMeta) {
-      if (budgetedNames.contains(meta['name'])) {
-        ordered.add(_budgets.firstWhere((b) => b['category'] == meta['name']));
+      final name = meta['name'] as String;
+      if (budgetedNames.contains(name) && !ordered.any((b) => b['category'] == name)) {
+        ordered.add(_budgets.firstWhere((b) => b['category'] == name));
       }
     }
     return ordered;
   }
 
+  // _totalLimit aggregates already-Engine-given per-category limits — not a
+  // new formula, just a total of numbers the Engine already reported. Kept
+  // local only because it feeds `_spentPercent`, a presentation-only ratio
+  // the Engine doesn't expose yet (noted below, Phase 3 territory).
   double get _totalLimit => _budgets.fold(0.0, (s, b) => s + (b['limit'] ?? 0).toDouble());
   double get _totalSpent => _budgets.fold(0.0, (s, b) => s + (b['spent'] ?? 0).toDouble());
-  // Unused budget already allocated to other categories (limit - spent, per
-  // category, floored at 0). The backend can auto-rebalance this into a new
-  // or increased category budget, so it counts as available too.
-  double get _totalBuffer => _budgets.fold(0.0, (s, b) {
-        final limit = (b['limit'] ?? 0).toDouble();
-        final spent = (b['spent'] ?? 0).toDouble();
-        return s + (limit - spent).clamp(0.0, double.infinity);
-      });
-  // Total savings = income − what was actually spent (not just unspent budget)
-  double get _netSavings => _declaredIncome > 0
-      ? (_declaredIncome - _totalSpent).clamp(0.0, double.infinity)
-      : (_totalLimit - _totalSpent).clamp(0.0, double.infinity);
+  // Unused budget already allocated to other categories — this is exactly
+  // categoryRemaining[cat].remaining per category (the Engine already
+  // computed limit-spent, floored at 0); summed here, never re-derived.
+  double get _totalBuffer => _budgets.fold(0.0, (s, b) => s + (b['remaining'] ?? 0).toDouble());
+  // Total savings = savingsPool + remainingBudget — both read directly from
+  // the Engine, zero subtraction happening in Flutter. Algebraically
+  // identical to the old "income − actual spend" formula (proven equal:
+  // savingsPool + remainingBudget = (income−limit) + (limit−spent) =
+  // income−spent), but now it's a sum of two Engine outputs, not a
+  // Flutter-side derivation.
+  double get _netSavings => _savingsPool + _remainingBudget;
+  // Presentation-only percentage — the Engine doesn't expose this as a
+  // field yet (belongs in the Engine once Phase 3 / Health adds it), so
+  // this one ratio is left local, computed from already-summary-sourced
+  // totals rather than a separately-fetched list.
   double get _spentPercent => _totalLimit > 0 ? (_totalSpent / _totalLimit * 100) : 0;
 
   // ── Add Category ──────────────────────────────────────────────────────────
@@ -164,7 +225,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const IncomePage()),
-            ).then((_) => _fetchBudgets()),
+            ).then((_) => _fetchFinancialSummary()),
           ),
         ),
       );
@@ -245,12 +306,13 @@ class CategoriesScreenState extends State<CategoriesScreen>
     final catName   = catMeta['name']  as String;
     final catColor  = catMeta['color'] as Color;
     final catIcon   = catMeta['icon']  as IconData;
-    // Available = unallocated income + unused buffer sitting in other
-    // categories (limit - spent). The backend auto-rebalances from that
-    // buffer when needed, so it must count as available here too —
-    // otherwise the dialog wrongly blocks additions the backend would allow.
+    // Available = Savings Pool (already the Engine's unallocated-income
+    // figure) + unused buffer sitting in other categories. The backend
+    // auto-rebalances from that buffer when needed, so it must count as
+    // available here too — otherwise the dialog wrongly blocks additions
+    // the backend would allow. Both terms are direct Engine reads now.
     final available = _declaredIncome > 0
-        ? (_declaredIncome - _totalLimit).clamp(0.0, double.infinity) + _totalBuffer
+        ? _savingsPool + _totalBuffer
         : double.infinity;
 
     // Use a proper StatefulWidget for the dialog so Flutter manages
@@ -266,7 +328,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
         available: available,
         declaredIncome: _declaredIncome,
         onSaved: () {
-          if (mounted) _fetchBudgets();
+          if (mounted) _fetchFinancialSummary();
         },
         onError: (msg) {
           if (mounted) {
@@ -330,7 +392,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
       final now = DateTime.now();
       final monthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
       await ApiService.delete('/budgets/$category?monthKey=$monthKey');
-      _fetchBudgets();
+      _fetchFinancialSummary();
     } catch (e) {
       if (!mounted) return;
       final msg = e.toString().contains('HAS_TRACKED_EXPENSES')
@@ -386,7 +448,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
           : null,
       body: RefreshIndicator(
         color: _primary,
-        onRefresh: _fetchBudgets,
+        onRefresh: _fetchFinancialSummary,
         child: _isLoading && _budgets.isEmpty
             ? const Center(child: CircularProgressIndicator(color: Color(0xFF2DBE7F)))
             : SingleChildScrollView(
@@ -490,7 +552,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
                                 context,
                                 MaterialPageRoute(
                                     builder: (_) => const IncomePage()),
-                              ).then((_) => _fetchBudgets()),
+                              ).then((_) => _fetchFinancialSummary()),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 18, vertical: 16),
@@ -553,7 +615,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
                                 context,
                                 MaterialPageRoute(
                                     builder: (_) => const IncomePage()),
-                              ).then((_) => _fetchBudgets()),
+                              ).then((_) => _fetchFinancialSummary()),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 16, vertical: 11),
@@ -715,17 +777,67 @@ class CategoriesScreenState extends State<CategoriesScreen>
     );
   }
 
+  // Category Health (Phase 3.2) — status label only, never a reason code
+  // or raw pressure value shown to the user. "green" shows no chip, to
+  // avoid labeling every unremarkable category (same restraint Category
+  // Pressure's chip already used in Phase 2.6 — this replaces it, since
+  // Category Health is the more authoritative judgment layer built
+  // directly on top of Category Pressure + Recovery Plan).
+  String? _healthChipLabel(String? status) {
+    switch (status) {
+      case 'red':
+        return 'Critical';
+      case 'amber':
+        return 'Needs Attention';
+      default:
+        return null;
+    }
+  }
+
+  Color _healthChipColor(String? status) {
+    switch (status) {
+      case 'red':
+        return const Color(0xFFE0223B);
+      case 'amber':
+        return Colors.orange.shade700;
+      default:
+        return _primary;
+    }
+  }
+
+  Widget _buildHealthChip(String? status) {
+    final label = _healthChipLabel(status)!;
+    final color = _healthChipColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: color),
+      ),
+    );
+  }
+
   Widget _buildBucketCard(Map<String, dynamic> item) {
     final category = item['category'] ?? 'Unknown';
     final spent = (item['spent'] ?? 0).toDouble();
     final limit = (item['limit'] ?? 0).toDouble();
     final isNotSet = limit == 0;
-    final percent = isNotSet ? 0.0 : (spent / limit).clamp(0.0, 2.0);
+    // utilization comes from the Metrics Engine's budgetUtilization (Phase
+    // 2.2) — already spent/limit*100, unclamped. /100 here is a unit
+    // conversion for the progress-bar widget, not a re-derivation of the
+    // ratio itself; the 0.0-2.0 and 0.0-1.0 clamps below are this screen's
+    // own display thresholds (badge/bar bounds), same as before.
+    final utilization = (item['utilization'] ?? 0).toDouble();
+    final percent = isNotSet ? 0.0 : (utilization / 100).clamp(0.0, 2.0);
     final isOver = !isNotSet && percent > 1.0;
     // Fully used (100%+) — this is the "spending too much" state, whole
     // card turns red so it's impossible to miss while scrolling categories.
     final isCritical = !isNotSet && percent >= 1.0;
-    final displayPercent = isNotSet ? 0.0 : (spent / limit).clamp(0.0, 1.0);
+    final displayPercent = isNotSet ? 0.0 : (utilization / 100).clamp(0.0, 1.0);
 
     final color = _catColor(category);
     final icon = _catIcon(category);
@@ -745,7 +857,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
                 budgetSpent: spent,
               ),
             ),
-          ).then((_) => _fetchBudgets()),
+          ).then((_) => _fetchFinancialSummary()),
           borderRadius: BorderRadius.circular(16),
           child: Container(
             padding: const EdgeInsets.all(14),
@@ -839,6 +951,10 @@ class CategoriesScreenState extends State<CategoriesScreen>
                     color: barColor,
                   ),
                 ),
+                if (_healthChipLabel(item['healthStatus'] as String?) != null) ...[
+                  const SizedBox(height: 6),
+                  _buildHealthChip(item['healthStatus'] as String?),
+                ],
               ],
             ),
           ),

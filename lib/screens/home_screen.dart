@@ -45,15 +45,15 @@ class HomeScreenState extends State<HomeScreen> {
   final GlobalKey eyeIconKey = GlobalKey();
 
   bool _isLoading = true;
-  List<dynamic> _budgets = [];
+  Map<String, dynamic>? _summary; // financialSummary — the only source of calculated values
+  Map<String, dynamic>? _metrics; // financialMetrics — the Metrics Engine's read-only interpretations (Phase 2)
+  Map<String, dynamic>? _overallHealth; // Health Engine's judgment (Phase 3.1) — status/confidence/reasons, never computed here
   Map<String, dynamic>? _report;
   Map<String, double> _categoryBreakdown = {};
 
   bool _hideAmounts = true;
   String _selectedMonth = '';
 
-  // Declared income (from /income endpoint)
-  double _declaredIncome = 0;
   String _latestActivityText = '';
 
   // Latest first name fetched from profile — overrides widget.firstName when set
@@ -94,7 +94,7 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _fetchAll() async {
     setState(() => _isLoading = true);
     try {
-      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend(), _fetchIncome(), _fetchLatestActivity(), _fetchProfileName()]);
+      await Future.wait([_fetchFinancialSummary(), _fetchFinancialMetrics(), _fetchOverallHealth(), _fetchReport(), _fetchTrend(), _fetchLatestActivity(), _fetchProfileName()]);
       _maybeShowYesterdayInsight();
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -145,7 +145,7 @@ class HomeScreenState extends State<HomeScreen> {
 
   Future<void> _refreshData() async {
     try {
-      await Future.wait([_fetchBudgets(), _fetchReport(), _fetchTrend(), _fetchIncome(), _fetchLatestActivity(), _fetchProfileName()]);
+      await Future.wait([_fetchFinancialSummary(), _fetchFinancialMetrics(), _fetchOverallHealth(), _fetchReport(), _fetchTrend(), _fetchLatestActivity(), _fetchProfileName()]);
     } catch (_) {}
   }
 
@@ -160,16 +160,16 @@ class HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
   }
 
-  Future<void> _fetchBudgets() async {
+  // The only place Home reads calculated financial values from — no local
+  // formulas (remaining/savings/over-budget math) live in this screen
+  // anymore, they all come from financial_engine.py via this one endpoint.
+  Future<void> _fetchFinancialSummary() async {
     try {
-      final res = await ApiService.get('/budgets?monthKey=$_selectedMonth');
+      final res = await ApiService.get('/financial-summary?monthKey=$_selectedMonth');
       if (!mounted) return;
       if (res['success'] == true) {
-        final budgetsList = (res['data']?['budgets'] as List? ?? []);
         setState(() {
-          _budgets = budgetsList
-              .where((b) => b['category']?.toString().toLowerCase() != 'salary')
-              .toList();
+          _summary = res['data'] as Map<String, dynamic>?;
         });
         // Drives the app-wide ambient background — uses true month-scoped
         // totals (not the home screen's week-scoped report), so it reflects
@@ -177,7 +177,40 @@ class HomeScreenState extends State<HomeScreen> {
         _updateFinancialStatus();
       }
     } catch (e) {
-      debugPrint('[HomeScreen] /budgets error: $e');
+      debugPrint('[HomeScreen] /financial-summary error: $e');
+    }
+  }
+
+  // Metrics Engine (Phase 2.1) — read-only interpretations of financialSummary.
+  // Never a formula computed here; daysRemaining comes straight from the endpoint.
+  Future<void> _fetchFinancialMetrics() async {
+    try {
+      final res = await ApiService.get('/financial-metrics?monthKey=$_selectedMonth');
+      if (!mounted) return;
+      if (res['success'] == true) {
+        setState(() {
+          _metrics = res['data'] as Map<String, dynamic>?;
+        });
+      }
+    } catch (e) {
+      debugPrint('[HomeScreen] /financial-metrics error: $e');
+    }
+  }
+
+  // Health Engine (Phase 3.1) — judgment layer, read-only. Only
+  // `overallHealth.status` is surfaced in the UI; reasons/trace stay
+  // backend-only until Chat (Phase 6) has an Explainer to word them.
+  Future<void> _fetchOverallHealth() async {
+    try {
+      final res = await ApiService.get('/financial-health?monthKey=$_selectedMonth');
+      if (!mounted) return;
+      if (res['success'] == true) {
+        setState(() {
+          _overallHealth = res['data']?['overallHealth'] as Map<String, dynamic>?;
+        });
+      }
+    } catch (e) {
+      debugPrint('[HomeScreen] /financial-health error: $e');
     }
   }
 
@@ -223,21 +256,6 @@ class HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
   }
 
-  Future<void> _fetchIncome() async {
-    try {
-      final res = await ApiService.get('/income');
-      if (!mounted) return;
-      if (res['success'] == true) {
-        final d = res['data'];
-        setState(() {
-          _declaredIncome = (d['total'] ?? 0).toDouble();
-        });
-      }
-    } catch (e) {
-      debugPrint('[HomeScreen] /income error: $e');
-    }
-  }
-
   Future<void> _fetchLatestActivity() async {
     try {
       final res = await ApiService.get('/alerts?limit=1');
@@ -263,24 +281,55 @@ class HomeScreenState extends State<HomeScreen> {
   double get _totalExpense =>
       (_report?['totalExpense'] ?? _report?['expense'] ?? 0).toDouble();
 
-  // For the income card: use declared income if set, else fall back to transaction income
+  Map<String, dynamic> get _categoryRemaining =>
+      (_summary?['categoryRemaining'] as Map?)?.cast<String, dynamic>() ?? {};
+
+  // For the income card: use the Engine's declared income if set, else fall
+  // back to transaction income from the weekly report.
   double get _incomeForCard {
-    if (_declaredIncome > 0) return _declaredIncome;
+    final declared = (_summary?['income'] ?? 0).toDouble();
+    if (declared > 0) return declared;
     return (_report?['incomeCardValue'] ?? _report?['totalIncome'] ?? _report?['income'] ?? 0).toDouble();
   }
 
-  double get _totalBudgetLimit =>
-      _budgets.fold(0.0, (s, b) => s + (b['limit'] ?? 0).toDouble());
-  double get _totalBudgetSpent =>
-      _budgets.fold(0.0, (s, b) => s + (b['spent'] ?? 0).toDouble());
+  // Category limits aren't a formula — they're raw per-category values the
+  // Engine already reports; this just totals them for the health-status
+  // threshold below (Phase 3 will replace this once the Engine exposes a
+  // health flag directly).
+  double get _totalBudgetLimit => _categoryRemaining.values
+      .fold(0.0, (s, c) => s + ((c as Map)['limit'] ?? 0).toDouble());
+  double get _totalBudgetSpent => (_summary?['totalSpent'] ?? 0).toDouble();
 
-  // Unused Budget = allocated to categories but not yet spent.
-  double get _unusedBudget =>
-      (_totalBudgetLimit - _totalBudgetSpent).clamp(0.0, double.infinity);
+  // Unused Budget — read directly from the Engine, never recomputed here.
+  double get _unusedBudget => (_summary?['remainingBudget'] ?? 0).toDouble();
 
-  // Pure Savings = income never allocated to any category budget at all.
-  double get _pureSavings =>
-      (_incomeForCard - _totalBudgetLimit).clamp(0.0, double.infinity);
+  // Savings Pool — read directly from the Engine, never recomputed here.
+  double get _pureSavings => (_summary?['savingsPool'] ?? 0).toDouble();
+
+  // Days Remaining — read directly from the Metrics Engine (Phase 2.1),
+  // never recomputed here.
+  int get _daysRemaining => (_metrics?['daysRemaining'] ?? 0) as int;
+
+  // Recommended Daily Spend — Advisory metric (Phase 2.3), read directly
+  // from the Metrics Engine. Null when no budgets exist yet — that case
+  // is not faked as 0, so the UI must hide the line rather than show
+  // "Rs 0" (see spec: Phase 2.3 Design, the null-vs-fabricated-number rule).
+  double? get _recommendedDailySpend {
+    final rds = _metrics?['recommendedDailySpend'];
+    if (rds == null) return null;
+    return (rds['value'] as num?)?.toDouble();
+  }
+
+  // Spending Pace — Analytical metric (Phase 2.4), read directly from the
+  // Metrics Engine. Only the status label is surfaced in the UI, never the
+  // raw difference — this metric describes, it doesn't recommend.
+  String? get _spendingPaceStatus =>
+      (_metrics?['spendingPace']?['status'] as String?);
+
+  // Overall Health — Health Engine judgment (Phase 3.1), read directly.
+  // Only the status is surfaced; reasons/decisionTrace stay backend-only
+  // until Phase 6's Explainer exists to word them for the user.
+  String? get _overallHealthStatus => (_overallHealth?['status'] as String?);
 
   bool get _isOverAllocatedBudget => _totalBudgetSpent > _totalBudgetLimit;
 
@@ -312,6 +361,9 @@ class HomeScreenState extends State<HomeScreen> {
       isOverBudget: _isOverAllocatedBudget,
       spendingThisMonth: _totalExpense,
       incomeThisMonth: _incomeForCard,
+      daysRemaining: _daysRemaining,
+      recommendedDailySpend: _recommendedDailySpend,
+      spendingPaceStatus: _spendingPaceStatus,
       hideAmounts: _hideAmounts,
       onExpenseTap: () => Navigator.push(
         context,
@@ -324,10 +376,64 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Overall Health (Phase 3.1) — one simple badge, no gauge, no score.
+  // Status only; reasons stay backend-only until Phase 6's Explainer
+  // exists to word them for the user.
+  Widget _buildHealthBadge() {
+    final status = _overallHealthStatus;
+    if (status == null) return const SizedBox.shrink();
+
+    String emoji;
+    String label;
+    switch (status) {
+      case 'green':
+        emoji = '🟢';
+        label = 'Looking good';
+        break;
+      case 'red':
+        emoji = '🔴';
+        label = 'Needs attention now';
+        break;
+      default:
+        emoji = '🟡';
+        label = 'Stable but needs attention';
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF6F7F9),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 16)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Overall Financial Health',
+                  style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500),
+                ),
+                Text(
+                  label,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Categories row ────────────────────────────────────────────────────────
 
   Widget _buildCategoriesRow() {
-    final budgetMap = {for (var b in _budgets) (b['category'] ?? ''): b};
+    final budgetMap = _categoryRemaining;
     final filtered = _catMeta.where((m) => budgetMap.containsKey(m['name'])).toList();
 
     if (filtered.isEmpty) {
@@ -657,7 +763,12 @@ class HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 12),
             showLoading
                 ? const SizedBox(height: 200, child: Center(child: CircularProgressIndicator(color: _primary)))
-                : _buildSummaryCards(),
+                : Column(
+                    children: [
+                      _buildSummaryCards(),
+                      _buildHealthBadge(),
+                    ],
+                  ),
 
             const SizedBox(height: 28),
 

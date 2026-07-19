@@ -7,6 +7,9 @@ class BalanceCard extends StatelessWidget {
   final bool isOverBudget;       // total spent across categories > total allocated
   final double spendingThisMonth;
   final double incomeThisMonth;
+  final int? daysRemaining;      // Metrics Engine (Phase 2.1) — null while loading
+  final double? recommendedDailySpend; // Metrics Engine (Phase 2.3, Advisory) — null if no budgets exist
+  final String? spendingPaceStatus; // Metrics Engine (Phase 2.4, Analytical) — "ahead"/"on_pace"/"slightly_fast"/"too_fast", null if no budget
   final bool hideAmounts;
   final VoidCallback? onExpenseTap;
   final VoidCallback? onIncomeTap;
@@ -18,10 +21,30 @@ class BalanceCard extends StatelessWidget {
     required this.isOverBudget,
     required this.spendingThisMonth,
     required this.incomeThisMonth,
+    this.daysRemaining,
+    this.recommendedDailySpend,
+    this.spendingPaceStatus,
     this.hideAmounts = false,
     this.onExpenseTap,
     this.onIncomeTap,
   });
+
+  // Status label only — never the raw difference. This metric describes
+  // pace, it never recommends an action (spec: Phase 2.4 Design).
+  String? get _paceLabel {
+    switch (spendingPaceStatus) {
+      case 'ahead':
+        return '✓ Ahead of Pace';
+      case 'on_pace':
+        return '✓ On Pace';
+      case 'slightly_fast':
+        return '▲ Spending a Bit Fast';
+      case 'too_fast':
+        return '▲ Spending Faster Than Planned';
+      default:
+        return null;
+    }
+  }
 
   String _fmt(double amount) {
     if (hideAmounts) return '****';
@@ -122,6 +145,43 @@ class BalanceCard extends StatelessWidget {
                                 ],
                               ],
                             ),
+                  if (daysRemaining != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      '$daysRemaining ${daysRemaining == 1 ? 'day' : 'days'} remaining this month',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.75),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                  // Advisory metric — worded as "aim for," never "safe to
+                  // spend" (spec: Phase 2.3). Hidden entirely, not shown as
+                  // Rs 0, when no budgets exist yet.
+                  if (recommendedDailySpend != null && !hideAmounts) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Aim for ${_fmt(recommendedDailySpend!)}/day for the rest of the month',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.75),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                  // Status label only, never the raw difference — this
+                  // metric describes pace, it doesn't recommend (spec:
+                  // Phase 2.4 Design).
+                  if (_paceLabel != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      _paceLabel!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
