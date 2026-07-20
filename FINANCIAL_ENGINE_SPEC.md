@@ -6179,6 +6179,197 @@ something to say, not for the moment mattering.
    notification about a condition that's no longer true is worse than no
    notification at all.
 
+### Phase 5.0b — Notification Psychology (deepens Rule 2, doesn't replace it)
+
+**First principle, frozen, sharpening Rule 2 rather than adding a new
+one: the Notification Engine is not a reminder engine — it is a
+behavior-change engine.** Every notification answers exactly one
+question: *"can this notification improve the user's financial
+behavior?"* If the answer is no, it doesn't get sent, regardless of
+whether it's technically true. **Deliberately not copying Duolingo's
+notification system** — studying *why* it works and applying the
+underlying psychology to a fundamentally different problem (financial
+behavior, not a language-learning game) is the frozen approach; the two
+apps should not feel the same, because they aren't solving the same
+problem.
+
+**Five behavioral-economics principles, frozen, each with the BachatBot
+vocabulary they apply to — not abstract theory, concrete phrasing:**
+
+1. **Loss aversion (strongest lever)** — frame the *consequence*, not
+   just the state. Not "You have a 12-day streak" but "One missed day
+   ends your 12-day healthy streak." Not "Recovery plan active" but
+   "Spending ₹400 today could extend your recovery by another week."
+2. **Goal gradient effect** — proximity motivates more than distance.
+   Not "Keep saving" but "Only Rs. 320 left to complete this month's
+   target," or "Two more healthy days and you'll unlock your first
+   Healthy Week."
+3. **Small wins, explained, not just praised** — not "Good job" but
+   "Seven days of consistent logging. Your reports are now far more
+   accurate." The *why it matters* is what makes it land.
+4. **Identity, not instruction** — invite the user into an identity
+   rather than commanding them. Not "Log today's expenses" but
+   "Consistent budgeters rarely miss two days in a row." Never "You
+   are X" — the invitation, not the label, is what's frozen.
+5. **Curiosity gap** — not "View report" but "Something changed in your
+   spending today." The user is drawn to find out, never told what to
+   feel about it first.
+
+**What NOT to do, frozen as explicit anti-patterns — things Duolingo
+itself does that this app must not:**
+
+- **Fake urgency** ("Your owl is sad") — finance must never manipulate;
+  every notification's urgency must be real, traceable to an actual
+  engine output, never manufactured for engagement.
+- **Shame** ("You failed your streak") — reframe instead: "Your healthy
+  streak ended today. Tomorrow starts a new opportunity." The fact is
+  identical; only the framing changes, never the underlying truth
+  (matching the "tone changes, not the facts" principle below).
+- **Infinite reminders** — every reminder chain terminates. Example:
+  a pending transaction follows up at 30 minutes, 4 hours, then the next
+  morning, then **stops** — this extends, not replaces, the frequency
+  discipline already frozen in 5.4.
+- **Clickbait** — never "Something exciting happened!" Always something
+  concrete and true: "A new recommendation is available to reduce this
+  week's food spending."
+
+**User state shapes tone, never the underlying facts, frozen:**
+
+| User state | Emotion | Notification style |
+|---|---|---|
+| New user | Curious | Educational |
+| First expense | Encouraging | Positive reinforcement |
+| Building habit | Gentle | Small progress |
+| Healthy streak | Protective | Preserve momentum |
+| Recovery | Supportive | Practical guidance |
+| Overspending | Calm | Actionable |
+| Goal reached | Celebration | Achievement |
+| Long inactivity | Re-engagement | Low pressure |
+
+This table governs *tone only* — the facts a notification reports are
+always whatever the source engine (5.1's families) already computed;
+nothing here invents a new fact for a given emotional state, per Rule 1.
+
+**Seven psychological purposes, frozen — every notification belongs to
+exactly one, and there is deliberately no "spam" category:**
+
+| Purpose | Question it answers | Example |
+|---|---|---|
+| Awareness | Something happened | Transaction detected |
+| Action | Something needs your attention | Confirm transaction |
+| Protection | Prevent losing progress | Healthy streak at risk, recovery getting worse |
+| Progress | Show improvement | 7 healthy days, logging streak extended |
+| Achievement | Celebrate a meaningful milestone | First Healthy Week, 30-Day Logging Streak, Goal Completed |
+| Reflection | Help users understand themselves | "You spent 18% less on transport this month" |
+| Re-engagement | Bring the user back after absence | "You haven't reviewed this week's spending yet" |
+
+**This is a second, orthogonal dimension to 5.1's seven families below —
+not a replacement.** 5.1 answers "which engine produced this fact";
+this table answers "why does the user care." A single notification
+carries both: e.g. a Family E (Behavior) notification about a healthy
+streak at risk is simultaneously a Protection-purpose notification. The
+Notification Generator (5.6) records both, since each answers a
+genuinely different question about the same notification.
+
+### Phase 5.0c — Attention, Value, and Interruption (frozen before 5.2)
+
+**Principle: respect the user's attention, treated as a spent resource,
+not an infinite channel.** Every notification costs something. This
+reframes the standing question from "can we notify" to **"is this
+interruption worth spending the user's attention?"** — a mindset shift,
+not a new rule layered on top of the already-frozen Rule 3, but the
+reasoning that makes Rule 3 ("respect the user's attention... one
+useful notification beats ten annoying ones") an actual decision
+procedure instead of a sentiment.
+
+**Rule: every notification must justify the interruption, frozen.**
+One question: *if the user never opened this notification, would
+something meaningful be lost?* No → don't notify. Yes → continue
+through the eligibility pipeline (5.2). Concrete, using facts this
+system already produces:
+
+- ❌ `LOGGING_STREAK_EXTENDED` (a routine day, no threshold crossed) —
+  nothing is lost seeing it tomorrow in the Notification Center. No
+  interruption.
+- ✅ `RECOVERY_BECAME_IMPOSSIBLE` — waiting until tomorrow may let
+  spending worsen further. Interrupt now.
+- ❌ Primary recommendation reordering alternatives without changing the
+  primary (e.g. an alternative moving from 5th to 4th place) — nothing
+  the user needs to act on differently. No interruption.
+- ✅ `PRIMARY_RECOMMENDATION_CHANGED` from `LIMIT_DAILY_SPENDING` to
+  `START_RECOVERY_PLAN` — this changes what the user should actually do.
+  Interrupt.
+
+**A second, related but distinct rule: never notify because something
+changed — notify because the user should care that it changed.**
+These sound similar and are not. `HEALTH_WORSENED`/`HEALTH_IMPROVED`
+firing between two amber substates a user was never shown as distinct
+in the first place is a real Diff Generator event that nobody should
+be notified about; `spending.currentHealthyStreak: 6 → 7` is the same
+kind of "a field changed" fact, but here the user genuinely cares. **This
+becomes a design filter sitting directly after the Diff Generator**: the
+Diff Generator's job ends at "this changed" (Step 10's own frozen
+question); the Notification Engine's first real job is asking "should a
+human care that it changed" — a separate, later question, never
+answered by the Diff Generator itself, which is exactly why Diff Rule 5
+(Step 10.0) already forbade it from judging importance.
+
+**A new concept, frozen: Notification Value — distinct from Priority
+(5.3), not a replacement for it.** Priority (already frozen) answers
+"how important is this event." Value answers a different question:
+**"how valuable is it for the user to know this right now"** — timing-
+sensitivity combined with importance, not importance alone. (The
+"Urgency" label used informally when first describing this is the same
+axis as the already-frozen Priority — one concept, not a fourth
+dimension; named here explicitly so it isn't mistaken for something
+new, the same "one fact, one name" discipline already enforced
+elsewhere.)
+
+| Notification | Priority (Urgency) | Value | Outcome |
+|---|---|---|---|
+| Pending transaction confirmation | High | High | Notify immediately |
+| Monthly report available | Low | High | Notify tomorrow morning |
+| Healthy streak extended | Low | Medium | Notify at night |
+| Minor recommendation reordering | Low | Low | Don't interrupt — Notification Center only |
+
+**A third new concept, frozen: Interruption Levels — a different
+decision from Priority, informed by it and by Value, but not a strict
+function of either.** Priority answers "how important is this event;"
+Interruption Level answers **"how much of the user's attention may I
+consume to deliver it."**
+
+| Level | Delivery | Example |
+|---|---|---|
+| 0 | No notification — visible only inside the app | A minor recommendation reordering |
+| 1 | Notification Center only, badge appears, no push | Routine progress facts a user might want later, not now |
+| 2 | Standard push notification | Healthy streak, monthly report, pending transaction |
+| 3 | High-importance push, very rare | Recovery became impossible, monthly rollover failed, bank sync requires attention |
+
+### The overarching philosophy for Phase 5, frozen
+
+**The Diff Generator detects changes. The Notification Engine protects
+the user's attention.** One sentence, and it's the same separation of
+responsibility this entire architecture has maintained end to end:
+
+```
+Financial Engine       → money truth
+Metrics Engine         → measurements
+Health Engine          → interpretation
+Recommendation Engine  → actions
+Behavior Engine        → habits
+Snapshot/Diff          → historical change detection
+Notification Engine    → decides whether a change deserves attention
+```
+
+Notification Engine invents no facts and detects no events of its own —
+consistent with everything frozen since Phase 4.5A. It decides how,
+when, and whether to communicate what already exists. **5.2's
+Eligibility waterfall (already sketched) will need a new first gate**
+— "would something meaningful be lost if this were never seen" — sitting
+before the existing preference/relevance/already-shown/expired checks;
+not designed in detail yet, named here so it isn't missed when 5.2 is
+actually built.
+
 ### Phase 5.1 — Notification Types (seven families)
 
 | Family | Source | Example |
@@ -6194,104 +6385,1563 @@ something to say, not for the moment mattering.
 Each family has a distinct source engine — Notification never
 re-derives what any of them already computed, per Rule 1.
 
-### Phase 5.2 — Eligibility Engine (a waterfall, same shape as Health)
+### Phase 5.2 — Eligibility (superseding the earlier six-step sketch above)
+
+**One question, frozen**: *"Should this event become a notification?"*
+Not how important it is, not when it should be sent, not how it should
+look — those are 5.3 (Priority), 5.5 (Timing), and 5.6 (Generator).
+Eligibility decides yes/no and nothing else.
+
+**One input, frozen**: an Event — the object Step 10's Diff Generator
+already produces. Not a snapshot, not Health, not Recommendation, not a
+transaction. This is what keeps ownership intact: Notification Engine
+starts exactly where the pipeline already ends
+(`Snapshot → Diff Generator → Events → Notification Engine`), never
+reaching back upstream to recompute or re-read a domain engine's output
+for itself.
+
+**Seven-gate waterfall, frozen — one failure ends evaluation, same
+shape as every prior waterfall (Health's status determination, the
+Recommendation Matrix's lookup):**
 
 ```
-Event occurs
-  → Is this notification type enabled (user preference)?
-  → Relevant? (does it still apply right now)
-  → Already shown? (not a repeat of the same unresolved thing)
-  → Expired? (the underlying condition may have already resolved)
-  → Still true? (re-check against the live engines, not a cached fact)
-  → Eligible
+Event
+  |
+  v
+Gate 1  Justification         -- would something meaningful be lost
+  |                              if this were never seen?
+  v
+Gate 2  Context                -- is the user already looking at this
+  |                              information right now?
+  v
+Gate 3  Notification Eligible? -- does this event TYPE ever notify,
+  |                              or does it only ever populate history?
+  v
+Gate 4  Already Informed?      -- has this exact fact already been
+  |                              communicated?
+  v
+Gate 5  Frequency               -- has this event type already fired
+  |                              too recently?
+  v
+Gate 6  Timing                  -- is right now a good moment to
+  |                              deliver it? (delays, never rejects)
+  v
+Gate 7  Interruption Level      -- how much attention may delivering
+  |                              this actually spend?
+  v
+Create Notification
 ```
 
-No money calculation anywhere in this waterfall — every check is a
-read against an existing engine's current output.
+**Gate 1 — Justification.** The philosophy just frozen in 5.0c, applied
+as the literal first gate: `LOGGING_STREAK_EXTENDED` on a routine day
+fails here (nothing lost seeing it tomorrow); `RECOVERY_STARTED` and
+`PENDING_TRANSACTION_DETECTED` pass (the user needs to know, or must
+act); `PRIMARY_RECOMMENDATION_CHANGED` passes only when the change is
+itself meaningful (per the Eligibility Matrix, not hardcoded here).
 
-### Phase 5.3 — Priority (frozen tiers, first cut)
+**Gate 2 — Context, a new gate found while designing this step, inserted
+between Justification and "Notification Eligible."** A fact can pass
+Justification and still not deserve a push: if the user is already
+looking at the relevant screen (just opened the app, is viewing the
+dashboard when a goal completes), a push notification for something
+they're already seeing feels broken — open app, receive push, while
+inside the app. Context doesn't reject the fact; it downgrades *how* it
+surfaces (a banner, not a push) — which is why it sits before Gate 3,
+not after: context can turn a would-be-push into an in-app-only
+presentation before eligibility-for-notification is even asked.
 
-| Notification | Priority |
+**Gate 3 — Notification Eligible?, a genuinely different question from
+Justification.** Some event *types* never become a notification at all,
+even when a specific instance would individually pass Gate 1. Example:
+`NEW_BEST_STREAK` — the event legitimately exists (Behavior Engine
+computed it, the Diff Generator correctly detected it), but this gate
+can decide the type itself only notifies every 7/30/100/365 days, never
+on every single occurrence. **The event existing and the event
+notifying are two different facts, and this gate is where that
+distinction lives** — not in the Diff Generator (which only detects
+transitions) and not in Justification (which asks about one instance,
+not the type as a whole).
+
+**Gate 4 — Already Informed?** Not a repeat of Justification (which
+asks "does this matter") or Frequency (which asks "too often") — this
+asks only: *has this exact fact already been communicated?* Three
+snapshots today all still showing `RECOVERY_STARTED` (because the
+condition hasn't changed) means one notification, not three; the same
+holds for a pending transaction already surfaced once.
+
+**Gate 5 — Frequency.** Already frozen (5.4) — per-family windows, not
+one global rule: Recovery at most once a day; a pending confirmation
+follows up at 30 minutes, 4 hours, then the next morning, then stops
+(the already-frozen anti-infinite-reminders rule); a healthy streak
+notifies only on a genuine extension, never on an hourly poll.
+
+**Gate 6 — Timing.** Already frozen (5.5) — and explicitly **a delay,
+never a rejection**: healthy streak waits for night, recovery reminder
+waits for evening, monthly report waits for the next morning, pending
+confirmation goes immediately. Timing never turns a "yes" into a "no" —
+it only decides *when* the already-decided "yes" gets delivered.
+
+**Gate 7 — Interruption Level.** Already frozen (5.0c) — the last
+decision, made only once every earlier gate has passed: Level 0 (in-app
+only) through Level 3 (rare, high-importance push).
+
+### A new frozen principle: events are immutable, notifications are contextual
+
+**The same event can produce a push, a Notification-Center-only entry,
+or nothing at all, depending on context (Gate 2) and the user's prior
+notification history (Gate 4/5) — the event itself never changes.**
+This is what keeps the `events` collection (Step 10) and whatever the
+Notification Engine produces permanently separate: an event is a
+historical fact, written once, immutable; a notification is a decision
+made *about* that fact, which can legitimately differ from one delivery
+attempt to the next without ever touching the event record itself.
+
+### Eligibility Matrix, frozen as the structural pattern — not hardcoded event names in the waterfall
+
+**Following the same discipline as the Diff Matrix (Step 10.2) and the
+Recommendation Matrix (Phase 4): the waterfall above stays generic —
+`Justification`, `Context`, `Notification Eligible?`, and so on are
+fixed, permanent gate *names*, never branching on a specific event code
+inline.** Every event-specific decision (does `NEW_BEST_STREAK` need a
+7/30/100/365-day gate; does `PRIMARY_RECOMMENDATION_CHANGED` need a
+"meaningful change" sub-rule; which events skip Context entirely) lives
+in a separate Eligibility Matrix — a table the waterfall's Gate 3 (and
+others, where relevant) looks up against, never a growing chain of
+`if event == "X"` branches inside the engine itself. Adding a new event
+type later means adding one matrix row, exactly the same maintenance
+shape the Diff Matrix already proved out. **The matrix itself is not
+built yet** — this freezes the *pattern* it must follow, not its
+contents.
+
+### Acceptance test, frozen
+
+Every eligibility decision must be explainable in exactly this shape:
+
+```
+LOGGING_STREAK_EXTENDED  -> Should notify? No.
+                            Why? Fails Justification (Gate 1) --
+                            nothing lost seeing it tomorrow.
+
+RECOVERY_STARTED         -> Should notify? Yes.
+                            Why? Passes Justification (Gate 1) --
+                            the user loses actionable information
+                            otherwise.
+```
+
+Same traceability discipline every engine since Health has carried —
+never a decision without a named, gate-level reason.
+
+### Phase 5.2A — Eligibility Matrix
+
+**Purpose, frozen: the waterfall (5.2) never changes; the matrix
+contains the policy.** Every row answers exactly one question: *can
+this event type ever become a notification?* Frequency, timing, and
+interruption-level specifics are looked up from their own already-frozen
+tables (5.4/5.5/5.0c), not duplicated here.
+
+**Eligibility Type, frozen as three values, not a boolean** — this is
+the refinement that makes the matrix scale:
+
+| Type | Meaning |
 |---|---|
-| Transaction confirmation | High |
-| Health → Red | High |
-| Healthy streak | Medium |
-| Goal milestone | Low |
-| Tip of the day | Very Low |
+| `ALWAYS` | Always proceeds to the later gates (Frequency/Timing/Interruption still apply — `ALWAYS` means "always eligible," not "always notifies unconditionally") |
+| `CONDITIONAL` | An additional rule (owned by whichever engine the condition references — see `Condition Source`) must evaluate true first |
+| `NEVER` | Never becomes a notification — history/analytics only, no further logic needed |
 
-Not every recommendation or risk automatically becomes a notification,
-and not every notification deserves the same interruption weight —
-`KEEP_CURRENT_HABITS` (Recommendation) should probably never notify at
-all; `STOP_CATEGORY_SPENDING` probably deserves near-immediate
-attention. This table is where that judgment gets made explicitly,
-never implicitly.
+**The matrix, built from this system's actual frozen event vocabulary**
+(Step 10.2's Diff Matrix, Step 7's Milestones, and the reused Financial
+Events) — not illustrative placeholders:
 
-### Phase 5.4 — Frequency (per family, not global)
+| Event | Eligibility | Condition Source | Why user cares |
+|---|---|---|---|
+| `TRANSACTION_CREATED` / `TRANSACTION_CONFIRMED` (pending confirmation) | `ALWAYS` | — | Needs confirmation before it affects finances |
+| `HEALTH_WORSENED` | `ALWAYS` | — | Financial health declined |
+| `HEALTH_IMPROVED` | `CONDITIONAL` | Health Engine (only when recovering from Red/Amber, not amber-to-amber) | Positive reinforcement, not noise |
+| `PRIMARY_RECOMMENDATION_CHANGED` | `ALWAYS` | — (see note below) | Advice changed — this event, by the Diff Matrix's own frozen definition, only fires on an actual `primaryRecommendationCode` change, never on alternatives reordering |
+| `RECOVERY_STARTED` | `ALWAYS` | — | User should begin corrective action |
+| `RECOVERY_COMPLETED` | `ALWAYS` | — | Reinforces success |
+| `RECOVERY_FAILED` | `ALWAYS` | — | The recovery attempt didn't work — user needs to know |
+| `RECOVERY_BECAME_IMPOSSIBLE` | `ALWAYS` | — | Immediate attention needed |
+| `CATEGORY_BECAME_EXHAUSTED` | `ALWAYS` | — | A budget category just ran out |
+| `HEALTHY_STREAK_EXTENDED` | `CONDITIONAL` | Behavior Engine (celebrate meaningful checkpoints only — e.g. 7/14/30 days, not every single day) | Avoid daily congratulation fatigue |
+| `HEALTHY_STREAK_BROKEN` | `ALWAYS` | — | A protected streak just ended |
+| `LOGGING_STREAK_EXTENDED` | `CONDITIONAL` | Behavior Engine (same checkpoint cadence as above) | Avoid daily congratulation fatigue |
+| `LOGGING_STREAK_BROKEN` | `CONDITIONAL` | Behavior Engine (only past a minimum streak length — breaking a 1-day streak isn't news) | User may want to re-engage |
+| `SAVING_STREAK_EXTENDED` | `CONDITIONAL` | Behavior Engine (monthly cadence already limits frequency naturally, but still gated by checkpoint) | Encourage long-term saving |
+| `SAVING_STREAK_BROKEN` | `ALWAYS` | — | A savings-protection month just failed |
+| `NEW_BEST_STREAK` | `CONDITIONAL` | Behavior Engine (only a personal record beyond some minimum margin — not every 1-day improvement over a previous best of 1) | Notify only at genuinely major personal records |
+| `MILESTONE_UNLOCKED` | `ALWAYS` | — | A permanent, one-time achievement — never repeats, always worth surfacing |
 
-| Family / Case | Frequency rule |
+**Infrastructure operations were never given event codes to begin
+with — a stronger form of the same principle, not a `NEVER` row.**
+Snapshot creation, Diff Generator runs, and scheduler executions have
+no corresponding row in the Diff Matrix (Step 10.2) at all — they were
+never events in this system's vocabulary, so there's nothing for the
+Eligibility Matrix to even mark `NEVER`. The `NEVER` type is frozen and
+kept in the table above as a genuine safety net for whenever a future
+event turns out to be infrastructure-flavored despite having a Diff
+Matrix row — not because any real event needs it today.
+
+**One reconciliation surfaced while building this, not silently
+resolved**: `PRIMARY_RECOMMENDATION_CHANGED` was proposed as
+`CONDITIONAL` ("only if advice materially changed") — but the Diff
+Matrix (Step 10.2) already only fires this event when
+`primaryRecommendationCode` itself changes, never on `alternatives`
+reordering, since only the primary code is a diffed field at all. Every
+firing is already a real change in what the user should do. Frozen here
+as `ALWAYS` for that reason — revisit only if a future case surfaces
+where two different codes turn out to feel equivalent to a user (not
+demonstrated yet).
+
+**`PENDING_TRANSACTION_DETECTED`, named honestly as not yet a formal
+event code**: Family A (5.1) already describes this as "the existing
+pending-transaction flow, formalized, not new," but it has never
+actually been assigned a Diff-Matrix-style event code — it's detected
+live (a bank notification parse), not via daily snapshot comparison,
+the same immediate-trigger shape as the reused Financial Events. Listed
+above by its natural name for now; formalizing its actual event code is
+Family A's own unfinished business, not something to invent inline
+here.
+
+### Policy Matrix Pattern — named, frozen as a standing design rule
+
+**Whenever business rules are expected to evolve independently of
+engine logic, represent them as declarative tables owned by the
+relevant engine, rather than embedding them in procedural code.** This
+project has now accumulated four such tables, each doing the same
+thing in a different layer:
+
+```
+Recommendation Matrix   (Phase 4)     -- Recommendation Engine
+Risk Severity Table     (Phase 3.3)   -- Health Engine
+Diff Matrix             (Step 10.2)   -- Diff Generator
+Eligibility Matrix      (Step 5.2A)   -- Notification Engine
+```
+
+Naming this now gives future contributors a standing answer to "where
+does a new rule go": if it's a business rule likely to change on its
+own timeline, it becomes a table row, not a code branch — the same
+"one row, not a rewrite" property that made the Recommendation Matrix
+and Diff Matrix each easy to extend without touching their engine's
+actual logic.
+
+### Phase 5.3 — Priority (supersedes the earlier five-tier sketch above)
+
+**One question, frozen**: *if every eligible notification were delivered
+at the same moment, which should appear first?* Nothing more — Priority
+only orders notifications. It has nothing to do with whether a push is
+sent (5.0c's Interruption Level), when (5.5's Timing), or how often
+(5.4's Frequency).
+
+**Frozen distinction from Eligibility**: Eligibility (5.2) asks "should
+this event become a notification at all"; Priority asks a completely
+different, later question — given that it already passed Eligibility,
+how urgently does it deserve attention relative to everything else that
+also passed.
+
+**Four levels, frozen — not five or six; simpler systems reason more
+easily:**
+
+| Priority | Meaning |
 |---|---|
-| Health → Red | Don't repeat for 12 hours |
-| Healthy streak | At most once daily |
-| Transaction confirmation | Immediately, every time |
-| Pending transaction ignored | Follow-up at 30 min, 6 hours, then next morning |
+| Critical | User may lose money or miss an important action |
+| High | User should know soon |
+| Normal | Useful information, delay is acceptable |
+| Low | Positive reinforcement or informational update |
 
-Different families need different suppression windows — a single
-global "don't notify more than N times a day" rule would either
-starve the important cases or spam the trivial ones.
+**Frozen principle: Priority depends on user impact, never on the
+producing engine.** `RECOVERY_BECAME_IMPOSSIBLE` and
+`HEALTHY_STREAK_EXTENDED` both originate from Behavior-adjacent
+reasoning, yet land at opposite ends of the scale — Critical vs. Low —
+because the question is "what does this mean for the user," never
+"which engine said so." A hardcoded `Behavior → High` /
+`Health → Medium` mapping was explicitly rejected for this reason.
 
-### Phase 5.5 — Timing (never random)
+**A second application of the same principle, found while building the
+matrix below, not given in the original example**: a shared name prefix
+isn't a shared priority either. `HEALTHY_STREAK_BROKEN`,
+`LOGGING_STREAK_BROKEN`, and `SAVING_STREAK_BROKEN` all match the shape
+"a streak broke," but they carry different real consequences — a
+healthy-spending streak ending is a financial-behavior signal
+(High); a logging streak ending is an engagement gap, not a financial
+one (Normal); a saving-protection streak ending is retrospective, the
+month already closed with nothing left to act on immediately (Normal).
+Grouping all three under one "`*_BROKEN` → High" rule would repeat
+the exact mistake the engine-based mapping was rejected for, just one
+level lower — priority by naming pattern instead of by engine, still
+not by actual impact.
 
-| Notification | Good timing |
+**Priority Matrix, frozen, covering this system's real event vocabulary
+(Step 10.2's Diff Matrix, Step 7's Milestones):**
+
+| Event | Priority | Reason (one sentence) |
+|---|---|---|
+| `RECOVERY_BECAME_IMPOSSIBLE` | Critical | Immediate financial action needed |
+| `TRANSACTION_CREATED`/`CONFIRMED` (pending confirmation) | High | Needs confirmation before it affects the user's real financial picture |
+| `HEALTH_WORSENED` | High | Financial condition deteriorated |
+| `RECOVERY_STARTED` | High | User should begin corrective action |
+| `RECOVERY_FAILED` | High | The recovery attempt didn't succeed; understanding why matters now |
+| `CATEGORY_BECAME_EXHAUSTED` | High | A budget category just ran out; further spending there is unbudgeted |
+| `HEALTHY_STREAK_BROKEN` | High | A protected financial-behavior streak just ended — a fresh window to understand why |
+| `PRIMARY_RECOMMENDATION_CHANGED` | Normal | Better guidance is available, but not urgent to act on immediately |
+| `RECOVERY_COMPLETED` | Normal | Informational success |
+| `LOGGING_STREAK_BROKEN` | Normal | An engagement gap, not a financial one |
+| `SAVING_STREAK_BROKEN` | Normal | Retrospective — the month already closed, nothing left to act on now |
+| `HEALTH_IMPROVED` | Low | Positive reinforcement |
+| `LOGGING_STREAK_EXTENDED` | Low | Celebration |
+| `HEALTHY_STREAK_EXTENDED` | Low | Celebration |
+| `SAVING_STREAK_EXTENDED` | Low | Celebration |
+| `NEW_BEST_STREAK` | Low | Achievement |
+| `MILESTONE_UNLOCKED` | Low | Achievement |
+
+**Frozen: Priority is absolute — context is handled later, never here.**
+`RECOVERY_BECAME_IMPOSSIBLE` stays Critical whether the app is open,
+closed, or the user is asleep. Whether that Critical priority actually
+becomes an immediate push, a morning push, or a Notification-Center
+entry is entirely Context (5.2's Gate 2) and Interruption Level's job —
+Priority itself never bends to the situation, which is exactly what
+keeps it from quietly becoming a second context engine.
+
+**Frozen: Priority is stable — it never changes because another
+notification exists.** If `RECOVERY_STARTED` and `HEALTH_WORSENED` both
+fire together, both stay High; the Notification Engine decides display
+*order* between them, but neither is demoted to Normal just because the
+other is also High. Priority is a property of the event, not of the
+batch it happens to arrive in.
+
+**Frozen: every row must be explainable in exactly one sentence**, never
+"we decided." The `Reason` column above is not decoration — it's the
+same auditability discipline every prior matrix in this spec has
+carried.
+
+**Frozen: Priority, Value (5.0c), Timing (5.5), and Interruption (5.0c)
+never collapse into a single weighted score.** No `Priority=8, Value=6,
+Interruption=2, Final=16`. This project has spent every phase up to now
+avoiding hidden weights and opaque scoring (Health's rule-based
+waterfall, the Recommendation Matrix, the Diff Matrix, the Eligibility
+Matrix — none of them score, all of them classify) — collapsing four
+independently-explainable dimensions into one number here would
+quietly reintroduce exactly the kind of unexplainable decision this
+architecture has refused everywhere else. Each dimension keeps
+answering its own distinct question: Priority — how important is the
+event; Value — how beneficial is it for the user to know; Timing — when
+is the best moment; Interruption — how much attention is justified. None
+of the four ever substitutes for another.
+
+### Phase 5.4 — Frequency Philosophy (supersedes the earlier per-family sketch above)
+
+**One question, frozen**: *"How often is it beneficial for the user to
+hear about this fact?"* Not "how often can we send notifications" —
+that framing optimizes for engagement, not for the user, and is exactly
+the mindset Phase 5.0c already rejected.
+
+**Seven rules, frozen:**
+
+1. **Attention is renewable, trust is not.** A user forgives one
+   unnecessary notification; they rarely forgive twenty. Frequency's
+   real job is protecting long-term trust, not managing a send-count
+   budget.
+2. **Different facts expire at different rates.** `RECOVERY_BECAME_IMPOSSIBLE`
+   stays useful for hours; `PRIMARY_RECOMMENDATION_CHANGED` stays useful
+   until viewed; `MILESTONE_UNLOCKED` is a celebration once, forever
+   after that; `LOGGING_STREAK_EXTENDED` matters for roughly one day.
+   Frequency is a function of how long the underlying fact stays
+   actionable, never a flat, fact-agnostic timer.
+3. **Repeat only if value still exists, never because the user ignored
+   it.** Never resend `MILESTONE_UNLOCKED` — nothing changes by
+   repeating it. Do resend a still-pending transaction — the action is
+   still available and still matters. The test is "can this still
+   change behavior," never "did they open the last one."
+4. **Events own their own frequency rule — another Policy Matrix
+   (Phase 5.2A's named pattern), never a branch keyed on Priority.**
+   Not `if priority == HIGH: resend every 2 hours` — that conflates two
+   independent dimensions (5.3 already froze Priority and Frequency as
+   separate questions). Instead, each event type gets its own row,
+   exactly like the Diff Matrix and Priority Matrix before it.
+5. **Frequency decides whether to remind, never whether the event
+   happened.** Events (Step 10) stay immutable; notifications are the
+   only thing that's ever temporary or repeated.
+6. **Escalation is not repetition — a genuinely new event, never a
+   resend of the old one.** Recovery Needed on Monday becoming Recovery
+   Impossible on Tuesday is not a second reminder about Monday's fact —
+   it's `RECOVERY_BECAME_IMPOSSIBLE`, a distinct event the Diff
+   Generator already produces on its own frozen terms (Step 10.2).
+   Frequency governs repeats of the *same* fact; it has nothing to say
+   about a situation becoming a *different*, worse fact.
+7. **Silence is always an allowed answer.** A frequency policy may
+   legitimately say "never repeat, one notification is enough" —
+   milestones are the clearest case; this isn't a gap in the policy,
+   it's a valid policy value.
+
+**Frequency Categories, frozen — reusable policies, not raw time values
+assigned per event:**
+
+| Policy | Meaning |
 |---|---|
-| Transaction confirmation | Immediately |
-| Healthy streak | Evening |
-| Goal reminder | Morning |
-| Recovery reminder | Before lunch |
+| `ONCE` | Never repeated |
+| `UNTIL_RESOLVED` | Repeats on a bounded, event-specific schedule while the condition persists — **not literal infinite repetition**; every `UNTIL_RESOLVED` policy still terminates eventually (the already-frozen anti-infinite-reminder rule from 5.0b: a pending transaction follows up at 30 minutes, 4 hours, then the next morning, then **stops**, even if still unconfirmed) |
+| `DAILY` | Maximum once per day |
+| `WEEKLY` | Maximum once per week |
+| `MONTHLY` | Maximum once per month |
+
+The Frequency Matrix itself (assigning one policy per event, mirroring
+the Priority Matrix's per-event rows) is the next sub-step, not built
+here — this freezes the categories and the philosophy governing them,
+the same order Eligibility (5.2) preceded its own Matrix (5.2A).
+Illustrative, not yet the full table:
+
+| Event | Policy |
+|---|---|
+| `MILESTONE_UNLOCKED` (any milestone) | `ONCE` |
+| `RECOVERY_BECAME_IMPOSSIBLE` | `DAILY` |
+| Pending transaction confirmation | `UNTIL_RESOLVED` (the already-frozen 30min/4hr/next-morning/stop schedule) |
+| `HEALTHY_STREAK_EXTENDED` | `WEEKLY` |
+
+**Acceptance test, frozen**: a frequency policy is correct if the
+answer to "why did we notify again" is never *"because they ignored
+us"* — it must always be *"because the situation still mattered."*
+
+### Phase 5.4A — Frequency Matrix
+
+**One question, frozen**: *for each event, what reminder policy best
+preserves usefulness without wasting attention?* Unlike Priority,
+Frequency is never about importance — it's about whether repeating this
+specific fact can still change the user's behavior.
+
+**Two mechanism questions surfaced while building the actual table
+below, resolved here rather than silently glossed over:**
+
+**First — "ONCE" covers two structurally different reasons, not one.**
+For Milestones, `ONCE` means *lifetime-permanent*: the exact same
+`eventId` can only ever exist once, ever (Step 7's idempotent unlock).
+For `RECOVERY_STARTED`/`RECOVERY_COMPLETED`/`RECOVERY_FAILED`/
+`HEALTH_IMPROVED`, `ONCE` means something narrower: these are
+*transition-moment* events — the Diff Generator only fires them at the
+instant a transition happens (Step 10.2), never again for the same
+occurrence, so there is structurally only one notification opportunity
+per firing regardless of any policy. Both correctly use the label
+`ONCE`, but for different underlying reasons — worth naming so a future
+reader doesn't assume every `ONCE` row is lifetime-unique the way a
+milestone is.
+
+**Second — a real gap: `DAILY`/`WEEKLY`/`MONTHLY` repeat policies need a
+standing-condition check the Diff Generator alone cannot provide.**
+`HEALTH_WORSENED` and `RECOVERY_BECAME_IMPOSSIBLE` are themselves
+transition-moment events too — the Diff Generator fires them once, at
+the moment Health moves to Red or Recovery becomes impossible, and
+never again while the condition merely *persists* unchanged across
+subsequent days. A `DAILY` reminder policy for either therefore cannot
+be "repeat the original event" (there's nothing to repeat — it already
+fired once) — it must instead mean **"while today's current snapshot
+still shows this condition true, and the last reminder was sent more
+than a day ago, generate a new reminder notification."** This is a
+distinct mechanism — reading the *current* state directly, not reacting
+to a Diff-detected transition — and is **named here as a real
+implementation requirement for whenever the Notification Generator
+(5.6) is actually built, not resolved in full now.**
+
+**Reconciled against this system's real event vocabulary — some
+proposed rows removed or merged, named honestly:**
+
+- **The five separate milestone rows collapse into one.** There is only
+  one Diff-Matrix-level event, `MILESTONE_UNLOCKED` (Step 10.2) — which
+  specific milestone unlocked (`FIRST_EXPENSE_LOGGED`,
+  `FIRST_HEALTHY_WEEK`, `FIRST_GOAL_COMPLETED`,
+  `LOGGING_STREAK_30_DAYS`) is a payload field, never a distinct event
+  type of its own. One row, not five.
+- **`UNHEALTHY_SPENDING_PATTERN` removed — it isn't a real event.** It's
+  a Behavior Summary *reason* (Step 8), computed from `behaviorState`
+  directly; the Diff Matrix (Step 10.2) has no rule watching Behavior
+  Summary's `status`/`primaryReason` fields at all, so the Diff
+  Generator would never actually produce this as an event. Not
+  included, named honestly rather than silently kept as if it existed.
+- **`OTP_REQUIRED`, `TRANSFER_FAILED`, `BILL_DUE_TODAY` removed — these
+  describe features this app hasn't built** (no OTP flow, no transfers,
+  no bill-due-date tracking anywhere in this spec). Illustrative of a
+  real future category ("live, non-diff events also need frequency
+  policies"), not fabricated here to fill the table.
+- **`PENDING_TRANSACTION_DETECTED` kept, with its already-named
+  caveat** (5.2A): not yet a formal event code, live-triggered rather
+  than diff-detected — included because the underlying flow is real,
+  even though its exact event code isn't formalized yet.
+
+**The Frozen Frequency Matrix:**
+
+| Event | Policy | Reason |
+|---|---|---|
+| `MILESTONE_UNLOCKED` | `ONCE` | Lifetime-permanent per unique milestone code (Step 7) |
+| `LOGGING_STREAK_EXTENDED` | `WEEKLY` | Daily praise becomes repetitive |
+| `LOGGING_STREAK_BROKEN` | `DAILY` | User can recover tomorrow — situation may change day to day |
+| `HEALTHY_STREAK_EXTENDED` | `WEEKLY` | Celebrate sustained behavior, not every increment |
+| `HEALTHY_STREAK_BROKEN` | `DAILY` | Actionable while rebuilding |
+| `SAVING_STREAK_EXTENDED` | `MONTHLY` | Evaluated monthly (Step 5's own cadence) |
+| `SAVING_STREAK_BROKEN` | `MONTHLY` | A month-level outcome, nothing sub-monthly to repeat |
+| `RECOVERY_STARTED` | `ONCE` | Transition-moment event — one firing per occurrence, structurally |
+| `RECOVERY_COMPLETED` | `ONCE` | Transition-moment event — celebrate the completion once |
+| `RECOVERY_FAILED` | `ONCE` | Transition-moment event — the outcome is already finalized |
+| `RECOVERY_BECAME_IMPOSSIBLE` | `DAILY` | Standing-condition check (see mechanism note above) — action is still valuable each day it remains true |
+| `HEALTH_WORSENED` | `DAILY` | Standing-condition check — the user still has opportunity to improve while Health stays Red |
+| `HEALTH_IMPROVED` | `ONCE` | Transition-moment event — the positive transition already occurred |
+| `PRIMARY_RECOMMENDATION_CHANGED` | `UNTIL_RESOLVED` | Continues until the user acts, or the recommendation changes again |
+| `CATEGORY_BECAME_EXHAUSTED` | `DAILY` | Standing-condition check — the category may un-exhaust or stay exhausted; each day it's still true is still worth a reminder, same shape as `HEALTH_WORSENED` |
+| Pending transaction confirmation | `UNTIL_RESOLVED` | The bounded 30min/4hr/next-morning/stop schedule already frozen in 5.0b/5.4 |
+
+**`CATEGORY_BECAME_EXHAUSTED` added here, found missing while auditing
+this matrix for 5.6B's Rule 3** — every other event in the frozen
+Priority Matrix (5.3) and Eligibility Matrix (5.2A) had a Frequency
+policy; this one didn't, an oversight in the original pass, not a
+deliberate omission.
+
+**Rule 8 — Frequency is event-owned, frozen.** Every event has exactly
+one frequency policy; the matrix is the single source of truth. No
+event inherits a policy from its family or its Priority — the same
+"policy in data, not code" discipline the Diff Matrix and Priority
+Matrix already established.
+
+**Rule 9 — Frequency and Timing are independent, frozen.** `Frequency =
+DAILY` answers "may we notify again"; `Timing = 8:00 PM` (5.5) answers
+"if we do, when." Neither ever substitutes for the other — the same
+non-collapsing-dimensions principle already frozen for Priority/Value/
+Interruption in 5.0c/5.3, extended here to a fourth dimension.
+
+**Acceptance test, frozen**: every row must be defensible with one
+sentence — *"repeating this notification at this cadence can still help
+the user make a better decision."* If that sentence can't honestly be
+defended, the policy is too frequent.
+
+### Phase 5.5 — Timing Philosophy (supersedes the earlier "never random" sketch above)
+
+**One question, frozen**: *if this notification deserves to exist, when
+is the moment the user is most likely to benefit from seeing it?* Not
+"when are they most likely to click," not "when are they online" —
+either framing optimizes for engagement, the same mistake 5.0c already
+rejected for the rest of Phase 5.
+
+**Nine rules, frozen:**
+
+1. **Timing optimizes benefit, not delivery.** A notification can be
+   important, eligible, and valuable, and still be badly timed — "your
+   spending is unhealthy" at 2:30 AM is technically correct and
+   practically useless; the same fact at 8 PM, before tomorrow's
+   spending begins, is actually useful.
+2. **Timing never changes importance.** Priority (5.3) decides how
+   important; Timing decides only when to say it. Completely
+   independent dimensions, the same non-collapsing principle already
+   frozen for Priority/Value/Interruption/Frequency.
+3. **Deliver before the next relevant decision.** Spending feedback
+   before tomorrow begins; a recommendation shortly after it's
+   computed; a pending transaction soon after detection; a saving
+   evaluation once the month has actually closed.
+4. **Natural user rhythm beats clock precision.** Prefer Morning/
+   Afternoon/Evening/Night over `19:43` — humans live by routines, not
+   timestamps; the scheduler maps a rhythm window to an actual
+   execution time, never the reverse.
+5. **Late is better than wrong.** If the ideal window is missed, deliver
+   later — a healthy-streak celebration arriving tomorrow morning is
+   acceptable; one arriving "yesterday" is impossible, and fabricating
+   urgency to avoid the delay would violate the anti-manipulation rule
+   already frozen in 5.0b.
+6. **Timing may delay, batch, or suppress duplicate delivery — it never
+   invents a new event.** The same "transports, never creates" boundary
+   already frozen for every piece of Era 2 infrastructure.
+7. **Immediate is justified only when delay would reduce usefulness.**
+   Pending transaction detected, a changed recommendation, recovery
+   becoming impossible — these lose value quickly, so they're delivered
+   immediately; most facts don't share this property and shouldn't be
+   rushed just because urgency feels more important.
+8. **Celebrations prefer reflection over action.** Healthy week, monthly
+   savings, recovery completed — the achievement already happened;
+   recognition after the fact reinforces the behavior better than
+   recognition mid-action would.
+9. **Timing is context-aware — the event never changes, only delivery
+   does.** A recommendation generated at 9 AM can send immediately; the
+   same recommendation generated at 2 AM waits until morning. This is
+   Gate 2 (Context, spec 5.2) and Rule 5 above working together, not a
+   new decision layered on top of them.
+
+**A real scheduling conflict found while reconciling this against what
+Steps 9-12 actually built, resolved here rather than left implicit**:
+Spending/Recovery Behavior can only be evaluated once a day is *fully
+over* (4.5.2's own frozen reasoning — a day's health status isn't known
+until it ends), and the Daily Snapshot Scheduler that performs that
+evaluation is registered to run at **00:30**, not midnight itself (Step
+12.4). This means a healthy-streak fact about *today* isn't actually
+known until roughly half an hour into *tomorrow* — a `NIGHT` timing
+window, read literally as "tonight," is structurally impossible for
+anything depending on that day's own evaluation. **Resolved: `NIGHT`
+means the evening of the day the scheduler's 00:30 run belongs to (the
+next calendar day from the user's perspective), not the same evening
+the underlying day's activity happened** — there is an inherent ~20-hour
+lag between "the streak extended" and "the user finds out," and per
+Rule 5, that lag is the correct, honest tradeoff, not a bug to
+engineer around. The already-frozen "3 AM is never acceptable" floor
+rule is exactly what prevents anyone from "fixing" this by pushing the
+notification the moment the 00:30 job completes.
+
+**Timing Categories, frozen — reusable windows, not raw timestamps:**
+
+| Category | Meaning |
+|---|---|
+| `IMMEDIATE` | Within minutes |
+| `MORNING` | First active period of the day |
+| `AFTERNOON` | Midday |
+| `EVENING` | End of the active day |
+| `NIGHT` | After that day's evaluation has actually completed (see the scheduling note above — in practice, the following day's evening, not the same night) |
+| `MONTH_END` | After that month's evaluation (the month rollover, Step 12.3) has completed |
+
+The Timing Matrix itself (assigning one category per event, mirroring
+the Frequency Matrix's per-event rows) is the next sub-step, not built
+here — same order as Eligibility/Frequency, philosophy before matrix.
+
+**Acceptance test, frozen**: for every notification, ask *"would
+delivering this earlier or later reduce its usefulness?"* If no, timing
+doesn't matter and should stay simple (deliver whenever it's eligible).
+If yes, the chosen window must maximize usefulness — never clicks.
+
+**The four communication dimensions are now complete, frozen as a
+set**: Eligibility (should this become a notification), Priority (how
+important), Frequency (how often may it repeat), Timing (when should it
+be delivered). Once the Timing Matrix exists, the remaining work shifts
+from philosophy into orchestration — taking an event and applying all
+four policies consistently to produce the final notification.
 
 **3 AM is never an acceptable time for anything**, regardless of family
-or priority — a floor rule, not a per-family exception.
+or priority — a floor rule carried forward, not a per-family exception.
 
-### Phase 5.6 — Notification Generator (output shape)
+### Phase 5.5A — Timing Matrix
 
-Same discipline as the Recommendation object — a complete, self-
-contained, traceable record, written once by a lookup/template, never
-free text improvised inline:
+**One question, frozen**: *given this event, when is the first moment
+the user can actually benefit from knowing it?* Not when it happened,
+not when it was detected, not when the scheduler runs — those are
+implementation details Timing must not leak into its own reasoning.
+
+**The redefinition already proposed for `NIGHT`/`MONTH_END`, adopted
+exactly as given**: `NIGHT` means *first delivery after the daily
+evaluation cycle completes*, not a literal clock time; `MONTH_END`
+means *first delivery after the monthly rollover finishes*. Both are
+now defined relative to a completed computation, never a wall-clock
+hour — removing the clock dependency entirely, consistent with Rule 4
+(natural rhythm over clock precision).
+
+**A larger finding, surfaced by auditing *how* these events actually
+get produced, not just what they mean — bigger than any prior matrix's
+correction:** nearly every event in the proposed `IMMEDIATE` column is
+**only ever discovered once a day, at 00:30**, because the Diff
+Generator (Step 10) that produces `HEALTH_WORSENED`, `HEALTH_IMPROVED`,
+`RECOVERY_STARTED`, `RECOVERY_BECAME_IMPOSSIBLE`, `RECOVERY_COMPLETED`,
+`PRIMARY_RECOMMENDATION_CHANGED`, and `MILESTONE_UNLOCKED` is *only ever
+invoked* by the Daily Snapshot Scheduler (Step 11/12), which runs once
+daily. There is no live, intra-day path that calls the Diff Generator
+at all. **This means "immediate" cannot mean "the instant the
+underlying real-world fact became true" for any of these events — it's
+already hours-to-a-day old by the time it's even discovered.** Only
+genuinely live-triggered facts (the reused Financial Events —
+`TRANSACTION_CREATED`/`CONFIRMED` — and the not-yet-formalized
+`PENDING_TRANSACTION_DETECTED`) can be truly instantaneous, because
+they never pass through the once-daily Diff Generator at all.
+
+**Resolution, frozen: `IMMEDIATE` means two different things depending
+on the event's source, the same "one label, two underlying reasons"
+shape already found for `ONCE` in the Frequency Matrix (5.4A) — named
+explicitly here for the same reason, so it isn't misread as a single
+concept:**
+
+- **Live-triggered `IMMEDIATE`** (Financial Events,
+  `PENDING_TRANSACTION_DETECTED`) — genuinely real-time, no scheduler
+  dependency, delivered within minutes of the actual fact.
+- **Diff-sourced `IMMEDIATE`** (everything else in the table below) —
+  *don't artificially withhold past the earliest available moment*,
+  where "earliest available" is bounded by the 00:30 discovery and the
+  already-frozen "3 AM is never acceptable" floor — in practice, this
+  resolves to **first thing the following morning**, not real-time.
+  `IMMEDIATE` here is a statement about *not deliberately delaying
+  further*, not a claim about matching the speed of the underlying
+  event.
+
+**This reframes what `NIGHT` actually means relative to diff-sourced
+`IMMEDIATE`, too**: since both are discovered at the same 00:30 moment,
+the distinction isn't "how fast can we tell the user" — it's **whether
+the notification should ship at the earliest available moment
+(`IMMEDIATE`) or be deliberately *held* past that moment for a better
+psychological effect (`NIGHT`)**. A streak celebration doesn't wait
+until evening because discovery was slow — it waits because reflection
+(5.5's Rule 8) genuinely lands better later in the day, even though the
+fact was already known since early morning.
+
+**One real, honest limitation named here, not solved**: under the
+current once-daily-scheduler architecture, `RECOVERY_BECAME_IMPOSSIBLE`
+cannot actually reach the user same-day if the underlying overspending
+happened, say, at 8 PM — the earliest possible discovery is still
+00:30 the *next* day. Achieving genuine same-day urgency for a
+Diff-Matrix event would require either a live, intra-day diff check or
+computing Recovery Plan status directly at transaction time (bypassing
+the Diff Generator for this one case) — neither exists today. Timing
+policy alone cannot close this gap; it can only decide not to make the
+gap worse by adding an artificial delay on top of it.
+
+**The Frozen Timing Matrix:**
+
+| Event | Timing | Why |
+|---|---|---|
+| Pending transaction confirmation | `IMMEDIATE` (live-triggered) | User can still act — genuinely real-time, not scheduler-bound |
+| `PRIMARY_RECOMMENDATION_CHANGED` | `IMMEDIATE` (diff-sourced) | Don't withhold past the morning discovery — the advice is already actionable |
+| `HEALTH_WORSENED` | `IMMEDIATE` (diff-sourced) | The sooner known, the sooner today's decisions improve |
+| `HEALTH_IMPROVED` | `IMMEDIATE` (diff-sourced) | Reinforce progress without artificial delay |
+| `RECOVERY_STARTED` | `IMMEDIATE` (diff-sourced) | User should begin corrective action without delay |
+| `RECOVERY_BECAME_IMPOSSIBLE` | `IMMEDIATE` (diff-sourced) | Requires attention; already inherently late (see limitation above) — don't make it later |
+| `RECOVERY_COMPLETED` | `IMMEDIATE` (diff-sourced) | Positive reinforcement loses value if withheld further |
+| `LOGGING_STREAK_EXTENDED` | `NIGHT` | Deliberately held for evening reflection, not urgent |
+| `LOGGING_STREAK_BROKEN` | `NIGHT` | User should know before tomorrow, not mid-afternoon |
+| `HEALTHY_STREAK_EXTENDED` | `NIGHT` | Reflection-timed celebration |
+| `HEALTHY_STREAK_BROKEN` | `NIGHT` | Same day's evaluation, held for evening |
+| `SAVING_STREAK_EXTENDED` | `MONTH_END` | Only discoverable once the month closes |
+| `SAVING_STREAK_BROKEN` | `MONTH_END` | Same — a month-level outcome |
+| `MILESTONE_UNLOCKED` | `IMMEDIATE` (diff-sourced) | Positive reinforcement strongest without delay — a judgment call, not forced by Rule 8's reflection preference, which could equally justify `NIGHT` here; kept `IMMEDIATE` per explicit product intent |
+| `CATEGORY_BECAME_EXHAUSTED` | `IMMEDIATE` (diff-sourced) | The sooner known, the sooner the user can stop overspending in that category |
+| `RECOVERY_FAILED` | `IMMEDIATE` (diff-sourced) | The outcome is already finalized; withholding it further serves no purpose |
+
+**Both rows above were missing, found while auditing this matrix for
+5.6B's Rule 3** — each already has a Priority and (for
+`CATEGORY_BECAME_EXHAUSTED`, now) a Frequency row; Timing simply hadn't
+caught up, an oversight in the original pass, not a deliberate
+omission.
+
+**Frozen principle, exactly as proposed**: *the Timing Matrix describes
+the earliest beneficial delivery window, never an exact timestamp.*
+The matrix says *when it becomes appropriate*; a future Delivery layer
+(5.8) decides the exact moment within that window (quiet hours,
+batching, device availability) — the same "policy decides what,
+infrastructure decides how" split this project has used everywhere
+else.
+
+### Phase 5.6 — Notification Generator Philosophy (supersedes the earlier output-shape sketch above)
+
+**One question, frozen**: *given one event, how do we produce exactly
+one notification?* Not how do we send it, not how do we schedule it —
+those are 5.8's (Delivery) job. The Generator owns composition only.
+
+**What it must never do, frozen**: detect changes, evaluate health,
+compute streaks, determine spending, recompute recommendations, choose
+eligible events, or schedule delivery. Every one of those is already
+solved by an earlier layer; the Generator only receives their answers.
+
+```
+Event
+  |
+  v
+Eligibility Matrix (5.2A) -> Priority Matrix (5.3) ->
+Frequency Matrix (5.4A) -> Timing Matrix (5.5A)
+  |
+  v
+Notification Generator
+  |
+  v
+Notification Object
+```
+
+This is Notification Engine's equivalent of Snapshot Builder (Step
+9.3): Snapshot Builder assembled fields from five engines into one
+record; the Notification Generator assembles one record from four
+matrix lookups. Neither computes anything new — pure assembly, both
+times.
+
+**One input, reconciled against what this system actually produces —
+not the illustrative shape first proposed.** The real Event object
+(`services/diff_generator.py`'s actual output, Step 10.3) is
+`{diffRuleId, event, payload, eventId}` — no `uid` field embedded (it's
+implicit in the Firestore path the event was read from, `users/{uid}/
+events/{eventId}`, the same "don't duplicate what's already known from
+context" discipline used everywhere else), and, found while reconciling
+this step, **no `occurredAt`/timestamp field at all** — the only trace
+of *when* is embedded inside `eventId`'s string
+(`{uid}:{snapshotDate}:{diffRuleId}[:distinguisher]`), which works, but
+only implicitly. **Named as a real, small gap, not fixed by changing
+already-frozen code here**: a proper `snapshotDate` field on the event
+object itself would make "when did this happen" an explicit, readable
+field instead of something a caller has to parse out of an ID string —
+worth adding to `diff_generator.py`'s `_build_events()` whenever 5.6
+actually moves to implementation, not required to design the
+Generator's philosophy today.
+
+**Existing inputs, besides the event, frozen as delivery preferences,
+never business logic**: user profile, notification preferences,
+current quiet hours, language. None of these change *what* the
+notification says — only how/when it's ultimately delivered (5.8).
+
+**One output — exactly one Notification object, reconciled against the
+already-frozen Lifecycle (5.7) and vocabularies (5.0c, 5.3, 5.5A) rather
+than the illustrative shape first proposed:**
 
 ```
 {
+  "id": "...",
+  "eventId": "...",              // traces back to exactly one Event, Rule 2
+  "eventCode": "HEALTH_WORSENED",
+  "priority": "High",            // 5.3's real vocabulary: Critical/High/Normal/Low
+  "timing": "IMMEDIATE",         // 5.5A's real vocabulary: IMMEDIATE/NIGHT/MONTH_END
+  "interruptionLevel": 2,        // 5.0c's real vocabulary: 0/1/2/3, never a new label
   "title": "...",
   "body": "...",
-  "priority": "high",
   "deepLink": "...",
-  "expiresAt": "...",
-  "generatedFrom": "CATEGORY_EXHAUSTED",
-  "trace": [...]
+  "createdAt": "...",
+  "status": "Created"            // 5.7's real first lifecycle state, not a new "Pending"
 }
 ```
 
-### Phase 5.7 — Notification Lifecycle
+**Corrected from the first draft**: `interruptionLevel: "ACTIVE"` and
+`status: "PENDING"` were placeholder labels that don't match anything
+actually frozen — Interruption Level is a numeric 0-3 scale (5.0c), and
+the Lifecycle's first state is `Created` (5.7), not a separately
+invented `Pending`. Reusing the real vocabularies here rather than
+letting the Generator's own output drift into a third naming scheme.
+
+**Rule: one event produces one notification candidate, frozen.** Never
+one event fanning out to three notifications, never three events
+collapsing into one mega-notification — bundling, if it ever happens,
+is a Delivery-layer concern (5.8), never the Generator's.
+
+**Six Generator rules, frozen:**
+
+1. **Never invents facts — only copies.** Every value in the output
+   traces back to the event, a matrix lookup, or user preferences —
+   never a new computation.
+2. **Every notification originates from exactly one event** — `eventId`
+   is always present and always singular, never a merge of several.
+3. **Deterministic.** The same event, run through the Generator twice,
+   produces the same notification — the same Rule 9 determinism
+   already frozen for Snapshot Builder, extended here.
+4. **Never decides delivery.** It proposes; Delivery (5.8) executes —
+   the same "logic owns logic, caller owns timing/execution" split
+   already used for Snapshot Builder vs. the Scheduler.
+5. **Never changes the event.** Events (Step 10) stay immutable;
+   notifications are the disposable, re-creatable side of the pipeline.
+6. **Owns wording — the first layer in this entire system that converts
+   a system fact into human language.** `HEALTH_WORSENED` becomes "You've
+   been spending faster than planned." **Checked against Recommendation
+   Engine's own output for a potential duplicate-wording conflict**:
+   Recommendation objects carry `code`/`type`/`actionValue`/
+   `actionUnit`/`category`, never a natural-language sentence — so there
+   is no existing wording anywhere upstream for the Generator to
+   duplicate or fail to reuse. This really is new ground, not a
+   re-authoring of something that already existed.
+
+### Where templates live — the Template Matrix (Option C), frozen as the pattern
+
+**Same discipline as every matrix before it**: not hardcoded
+`if event == X` branches (Option A), not a bare dictionary with no
+review structure (Option B) — a **Notification Template Matrix**,
+`Event -> Title -> Body -> CTA -> Deep Link`, the same "policy in data,
+never in procedural code" shape as the Recommendation Matrix, Diff
+Matrix, Eligibility Matrix, Priority Matrix, Frequency Matrix, and
+Timing Matrix before it. **The actual per-event wording table is the
+next sub-step (5.6A), not built here** — this freezes the pattern the
+table must follow, matching how Eligibility/Priority/Frequency/Timing
+each froze their philosophy before their own matrix.
+
+**Acceptance test, frozen**: *if a product designer wants to change a
+notification's wording, can they do it by editing the Template Matrix
+alone, without touching Generator logic?* If yes, product content stays
+separate from system behavior — the same separation this project has
+maintained at every layer since the Recommendation Matrix.
+
+### Phase 5.6A — Notification Template Matrix
+
+**One question, frozen**: *given an event, how should BachatBot talk to
+the user?* Not what notification to send — the event, eligibility,
+priority, and timing are already decided by the time this question is
+asked. Only expression remains.
+
+**Two corrections found while reconciling this against what's actually
+real, before building the table:**
+
+1. **The localization claim needed checking, not assuming.** The actual
+   frozen `LanguageEnum` (`schemas/common.py`) has exactly two values —
+   `NEPALI ('ne')` and `ENGLISH ('en')` — no third "Romanized Nepali"
+   language preference exists anywhere in this codebase. Romanized
+   Nepali is something the chat NLU can *parse as input* (e.g. "aja
+   maile 500 momo ma khaye"), which is a different capability from
+   having a *declared output-language target* — conflating the two
+   would overstate what's actually built. **The localization
+   *principle* is still correct and frozen as given** (template
+   identifiers resolved through a localization layer, never a literal
+   string baked into the matrix) — it just resolves against the real
+   two-language `LanguageEnum`, not three.
+2. **"Guidance" (used in the illustrative Purpose examples) isn't one of
+   the seven psychological purposes actually frozen in 5.0b.** The real
+   seven are Awareness, Action, Protection, Progress, Achievement,
+   Reflection, Re-engagement — no eighth category. Every row below maps
+   to one of those seven exactly, not a new one invented to fit a
+   specific event more comfortably.
+
+**Five rules, frozen, exactly as given:**
+
+1. **Title states the fact; body explains the meaning; CTA suggests the
+   next action.** Never mixed — "Spend less today!" is advice
+   masquerading as a title, not a fact.
+2. **Never lie, never exaggerate beyond what the source engine actually
+   concluded.** A template for `HEALTH_WORSENED` may not say "You're in
+   danger" unless Health Engine's own classification actually reached
+   that severity — the template can never editorialize past its source.
+3. **One emotional purpose per notification, never several stacked
+   together** — one emotion, one action, not "Congratulations! But be
+   careful! Check your report!"
+4. **The CTA must always resolve the specific event, never a generic
+   "Open App."** `LOGGING_STREAK_BROKEN` → "Log today's expenses";
+   `HEALTH_WORSENED` → "Review your spending"; `RECOVERY_STARTED` →
+   "Open Recovery Plan"; `PRIMARY_RECOMMENDATION_CHANGED` → "View
+   Recommendation."
+5. **Never mention internal terminology.** No "Recovery Behavior
+   updated," no "Spending Behavior Engine detected," no "Diff Generator
+   found" — only human language. This is the same Fact/Presentation
+   separation already frozen for the Event vs. the Notification
+   themselves (5.6): the event is `HEALTH_WORSENED`; the notification is
+   "Spending is increasing faster than planned."
+
+**The Frozen Template Matrix** — `Event | Purpose | Title (template ID) |
+Body (template ID) | CTA | Deep Link`, reconciled against this system's
+real event vocabulary. Template IDs stand in for the actual localized
+string, which a future localization layer resolves per user
+`preferences.language` — the English shown here is illustrative, not
+the frozen artifact itself:
+
+| Event | Purpose | Title (`TEMPLATE_ID` → illustrative English) | Body | CTA |
+|---|---|---|---|---|
+| Pending transaction confirmation | Action | `TITLE_PENDING_TXN` → "New transaction detected" | `BODY_PENDING_TXN` → "Was this your transaction?" | "Confirm transaction" |
+| `PRIMARY_RECOMMENDATION_CHANGED` | Action | `TITLE_RECOMMENDATION_CHANGED` → "Your recommendation has changed" | `BODY_RECOMMENDATION_CHANGED` → "Your financial situation changed, so has our advice" | "View recommendation" |
+| `HEALTH_WORSENED` | Awareness | `TITLE_HEALTH_WORSENED` → "Spending pace increased" | `BODY_HEALTH_WORSENED` → "You're spending faster than your monthly plan" | "Review your spending" |
+| `HEALTH_IMPROVED` | Progress | `TITLE_HEALTH_IMPROVED` → "Your finances are back on track" | `BODY_HEALTH_IMPROVED` → "Your spending pace has improved this week" | "View your report" |
+| `RECOVERY_STARTED` | Action | `TITLE_RECOVERY_STARTED` → "Recovery plan started" | `BODY_RECOVERY_STARTED` → "We've built a plan to help you get back on track" | "Open Recovery Plan" |
+| `RECOVERY_BECAME_IMPOSSIBLE` | Protection | `TITLE_RECOVERY_IMPOSSIBLE` → "Your recovery plan needs attention" | `BODY_RECOVERY_IMPOSSIBLE` → "The current plan is no longer enough — let's adjust it" | "Review Recovery Plan" |
+| `RECOVERY_COMPLETED` | Achievement | `TITLE_RECOVERY_COMPLETED` → "Recovery complete" | `BODY_RECOVERY_COMPLETED` → "You brought your spending back on track" | "View your progress" |
+| `LOGGING_STREAK_EXTENDED` | Progress | `TITLE_LOGGING_EXTENDED` → "{n}-day logging streak" | `BODY_LOGGING_EXTENDED` → "Consistent budgeters rarely miss two days in a row" | "View your streak" |
+| `LOGGING_STREAK_BROKEN` | Protection | `TITLE_LOGGING_BROKEN` → "Your logging streak ended" | `BODY_LOGGING_BROKEN` → "Tomorrow starts a new opportunity" | "Log today's expenses" |
+| `HEALTHY_STREAK_EXTENDED` | Progress | `TITLE_HEALTHY_EXTENDED` → "{n} healthy days" | `BODY_HEALTHY_EXTENDED` → "Your spending has stayed on track this week" | "View your streak" |
+| `HEALTHY_STREAK_BROKEN` | Protection | `TITLE_HEALTHY_BROKEN` → "Your healthy streak ended today" | `BODY_HEALTHY_BROKEN` → "Tomorrow starts a new opportunity" | "Review today's spending" |
+| `SAVING_STREAK_EXTENDED` | Progress | `TITLE_SAVING_EXTENDED` → "Another month protected" | `BODY_SAVING_EXTENDED` → "You saved money again this month" | "View your savings" |
+| `SAVING_STREAK_BROKEN` | Reflection | `TITLE_SAVING_BROKEN` → "This month's savings goal was missed" | `BODY_SAVING_BROKEN` → "Here's what changed this month" | "View monthly report" |
+| `MILESTONE_UNLOCKED` | Achievement | `TITLE_MILESTONE_{code}` → e.g. "First Healthy Week unlocked!" | `BODY_MILESTONE_{code}` → per-milestone, e.g. "You kept your spending healthy for 7 days straight" | "View milestone" |
+| `CATEGORY_BECAME_EXHAUSTED` | Protection | `TITLE_CATEGORY_EXHAUSTED` → "{category} budget exhausted" | `BODY_CATEGORY_EXHAUSTED` → "You've used all of this month's {category} budget" | "Review {category} spending" |
+| `RECOVERY_FAILED` | Reflection | `TITLE_RECOVERY_FAILED` → "This recovery attempt didn't succeed" | `BODY_RECOVERY_FAILED` → "Here's what happened, and what might help next time" | "View recovery history" |
+
+**Both rows above were missing, found while auditing this matrix for
+5.6B's Rule 3** — same oversight as the Frequency and Timing gaps just
+found; neither was a deliberate exclusion.
+
+**Deep Link column intentionally left as a design placeholder, not
+frozen row-by-row here** — it depends on Flutter's actual route names
+(Step 13, not yet built), so freezing exact route strings now would be
+guessing at a UI layer that doesn't exist yet; each row still gets one
+once routes exist, per Rule 4's "always resolves the event."
+
+**Acceptance test, frozen**: *if the app's tone changes (formal to
+friendly, English to Nepali, emoji to no emoji), can the Template Matrix
+change without touching Notification Generator logic?* If yes, the same
+separation held everywhere else in this project — facts from engines,
+policy from matrices, language from templates — extends cleanly to
+this final, most human-facing layer too.
+
+### Phase 5.6B — Notification Generator Pipeline
+
+**One question, frozen**: *how does one event become one notification?*
+Not how it's delivered, not how it's stored — only how it's assembled.
+
+**One input, frozen**: exactly one Event. Nothing else triggers the
+Generator — no polling, no business logic of its own.
+
+**A structural overlap resolved before freezing the pipeline, found by
+checking this against the already-frozen 5.2 Eligibility waterfall
+rather than accepting the proposed stage list as-is**: the original
+sketch listed "Run Eligibility Matrix" then separately "Assign
+Frequency," "Assign Timing," "Assign Interruption Level" as later
+Generator stages — but 5.2's own waterfall *already* has Frequency
+(Gate 5), Timing (Gate 6), and Interruption Level (Gate 7) as its own
+gates. By the time the Generator is ever invoked, the full waterfall
+has already run and those three values are already decided — the
+Generator doesn't re-decide them, it only **carries them forward**
+(pure copying, no lookup) onto the output object. **Priority (5.3) is
+different — the Eligibility waterfall never touches it at all**
+(5.3 itself: "Priority only orders notifications... after passing
+eligibility"), so Priority genuinely does need its own fresh lookup
+inside the Generator, unlike the other three.
+
+**Corrected pipeline, frozen:**
 
 ```
-Created → Delivered → Seen → Opened → Completed → Expired → Dismissed
+Receive an already-eligible Event (Eligibility waterfall has already run)
+        |
+        v
+Look up Priority (5.3)              -- a genuine new lookup
+        |
+        v
+Carry forward Frequency/Timing/Interruption Level
+        (already decided by the Eligibility waterfall's own gates 5-7 --
+         copied, never re-decided)
+        |
+        v
+Find Template (5.6A)
+        |
+        v
+Resolve Localization
+        |
+        v
+Assemble Notification
+        |
+        v
+Return Notification
 ```
 
-Explicit states, tracked conceptually the same way transactions already
-have a state machine (Section 8) — this is what makes analytics on
-"does this notification actually change behavior" (Rule 2's own test)
-possible later, not guessed at.
+Every stage either looks something up once or copies an already-decided
+value — nothing computes new financial information, matching the
+original intent exactly, just without the redundant double-decision the
+first sketch would have created.
 
-### Phase 5.8 — Notification Center
+**Seven rules, frozen:**
 
-An in-app surface where every notification appears, even if the push
-itself was missed — the same pattern Gmail/Duolingo/Instagram already
-use. Not a new financial concept, a delivery guarantee: nothing
-important is lost just because a push notification didn't land.
+1. **The Generator never re-evaluates.** Eligibility already answered
+   "should this notify" — the Generator never asks again.
+2. **One matrix per decision, no matrix depends on another.** Priority,
+   Frequency, Timing, Template — each a single, independent lookup.
+3. **Missing policy is an error, never a silent default.** If an event
+   has no Priority row, no Frequency row, or no Template row, that is a
+   configuration error, not "default Normal" — the mirror image of the
+   Diff Generator's Rule 10 ("unknown changes produce nothing"): there,
+   silence is correct because the change was never claimed by any rule;
+   here, silence is *wrong*, because the event is already known to
+   exist and every policy table is expected to know about it too.
+4. **The Generator is pure.** Same input, same notification, every
+   time — no timestamps generated internally, no randomness, no
+   database writes, no side effects. Fully unit-testable.
+5. **Delivery metadata comes later.** No `deliveredAt`/`readAt`/
+   `openedAt`/`dismissedAt` — those belong to the Lifecycle (5.7); the
+   Generator only creates the initial object.
+6. **Human language is the final step.** All policy decisions happen
+   before wording, never the reverse — text is never generated and then
+   conditionally discarded.
+7. **The payload is preserved, never discarded.** The event's own
+   payload (e.g. `{"from": 6, "to": 7}` or `{"code": "FIRST_HEALTHY_WEEK"}`)
+   carries through onto the notification object unchanged — templates,
+   future UI, and analytics may all need it later.
+
+**Rule 3, actually run as an audit against the four already-frozen
+matrices, not just stated as a principle — and it found real gaps,
+exactly as every previous cross-matrix check in this project has:**
+
+- **`CATEGORY_BECAME_EXHAUSTED`** had Eligibility and Priority rows, but
+  **no Frequency, Timing, or Template row at all** — now added to all
+  three (above).
+- **`RECOVERY_FAILED`** had Eligibility, Priority, and Frequency rows,
+  but **no Timing or Template row** — now added to both (above).
+- **`NEW_BEST_STREAK`** is a different, deeper kind of gap, named but
+  not fixed here: it has Eligibility (5.2A) and Priority (5.3) rows, but
+  no Frequency, Timing, or Template row *and*, more fundamentally, **no
+  Diff Matrix rule producing it at all** (Step 10.2) — the same
+  unreachable-event status already flagged for `BACK_ON_TRACK`,
+  `CONSISTENT_LOGGER`, and `MONTH_FINISHED_UNDER_BUDGET` in the Event
+  Catalog. A phantom event with partial downstream policy but no
+  upstream producer can never actually violate Rule 3 in practice (it
+  never fires), but the partial configuration is worth naming as
+  unfinished, not silently left inconsistent. Completing its Diff
+  Matrix rule is a Step 10.2 amendment, out of scope for this pipeline
+  step.
+
+**Output, frozen, reconciled against the real Event/vocabulary
+corrections already made in 5.6:**
+
+```
+{
+  "id": "...",
+  "eventId": "...",
+  "eventCode": "HEALTH_WORSENED",
+  "priority": "High",
+  "frequency": "DAILY",
+  "timing": "IMMEDIATE",
+  "interruptionLevel": 2,
+  "templateId": "TITLE_HEALTH_WORSENED",
+  "title": "Spending pace increased",
+  "body": "You're spending faster than your monthly plan",
+  "payload": { "from": "green", "to": "amber" },
+  "deepLink": "...",
+  "status": "Created"
+}
+```
+
+No delivery information anywhere in this object — `createdAt` is
+assigned by whichever layer actually persists the notification (5.7),
+not fabricated inside the pure Generator itself (Rule 4).
+
+**Acceptance test, frozen**: *if tomorrow a new event is added to the
+Diff Matrix, can the Notification Generator support it by adding one
+row to each policy matrix and one template, without modifying Generator
+logic?* Given the corrected pipeline above (Priority, Template, and
+Localization are the only genuine lookups; Frequency/Timing/
+Interruption are carried forward, never re-implemented), the answer is
+yes — the same "code defines the pipeline, matrices define product
+behavior" property this project has held since the Recommendation
+Matrix.
+
+### Rule 8 — Generator Fails Fast, frozen
+
+**If any required policy is missing — no Template, no Priority, a
+malformed event, an unknown event code — the Generator must fail
+explicitly.** It must never silently assign a default priority, invent
+a template, skip wording, or produce a partial notification. A
+notification is either fully defined, or it is not generated at all.
+
+This is the same "complete or nothing" invariant already frozen for
+Snapshot Builder (Rule 3, Step 9.0) and the mirror image of the Diff
+Generator's Rule 10 ("unknown changes produce nothing") — there,
+silence is correct because nothing claimed the change; here, silence
+would be *wrong*, because the event is already known to exist and every
+policy table is expected to know about it too. Both rules protect the
+same property from opposite directions: neither module ever fabricates
+a fact it wasn't given.
+
+### Notification Generator — Implementation — FROZEN
+
+Implemented in `services/notification_generator.py`,
+`generate_notification(event) -> dict`, matching the corrected 5.6B
+pipeline exactly: Priority is a genuine lookup; Frequency and Timing are
+read from their own static tables (Rule 3's audit already confirmed
+every real event has a row in each); Template resolution and payload
+interpolation are the only remaining work. `MILESTONE_UNLOCKED` gets a
+second-level lookup keyed by `payload["code"]`, since it needs a
+different template per milestone rather than one shared template.
+
+**One real mismatch found and fixed during implementation, not
+silently worked around**: the illustrative Template Matrix (5.6A) used
+`{n}` as a streak-count placeholder, but the actual Event payload shape
+`diff_generator.py` produces is `{"from": X, "to": Y}` — there is no
+`n` key anywhere. Every streak-count template now interpolates `{to}`
+(the new value after the transition), matching the real payload rather
+than the illustrative one.
+
+All 15 unit test scenarios pass (`tests/test_notification_generator.py`
+— no Firestore needed, since this module only looks up static tables
+and assembles an object): correct resolution for a plain event, correct
+`{to}`/`{category}` interpolation using the real payload shape, both
+rows the Rule 3 audit added (`CATEGORY_BECAME_EXHAUSTED`,
+`RECOVERY_FAILED`) resolving correctly end to end, the milestone
+per-code lookup returning genuinely different templates for different
+codes, Rule 8 firing for an unknown milestone code/unknown event
+code/missing `event` key/payload missing a required template key,
+determinism across two identical calls, and the output containing
+exactly the frozen keys with no delivery metadata leaking in.
+
+**Deliberately not implemented yet**: the 5.2 Eligibility waterfall
+itself (the stateful gates — Justification, Context, Already-Informed —
+that decide whether `generate_notification()` should even be called for
+a given event) doesn't exist as code. This module assumes its
+precondition is already satisfied, per Rule 1; building the waterfall
+itself is separate, future work, not something this step needed to
+implement to be complete on its own terms.
+
+**A second real gap found while starting Phase 5.7, fixed before
+building the Repository around it**: the frozen 5.6B output shape
+includes `interruptionLevel` and `deepLink`, but the actual
+implementation had silently dropped both. Fixed — both fields are now
+always present on the object, valued `None` rather than fabricated,
+since neither has a real dependency built yet (`interruptionLevel`
+needs the unimplemented Context gate; `deepLink` needs Flutter routes,
+Step 13). Present-but-honestly-unknown, not missing.
+
+### Phase 5.7 — Notification Repository
+
+**A numbering collision found and fixed before adding new content**:
+this slot previously held an early "Notification Lifecycle" placeholder
+(a 7-state sketch: `Created → Delivered → Seen → Opened → Completed →
+Expired → Dismissed`), and the next slot held a "Notification Center"
+placeholder — both written long before the current roadmap fixed 5.7 as
+Repository, 5.8 as Delivery, 5.9 as Review & Freeze. Reconciled below,
+not left colliding with two different meanings for the same phase
+number.
+
+**One question, frozen**: *how are notifications stored and retrieved?*
+Not sending, not push, not FCM, not scheduling, not templates, not
+wording — those are already solved (5.6) or belong to Delivery (5.8).
+Only persistence.
+
+**Repository responsibilities, frozen — exactly these operations, never
+more**: `save(notification)`, `get(notificationId)`, `list(uid)`,
+`listUnread(uid)`, `listRecent(uid, limit)`, `markRead(notificationId)`,
+`markDismissed(notificationId)`. `listUnread`/`listRecent` are included
+deliberately — filtering logic belongs in the Repository, never
+duplicated inline in Flutter.
+
+**Five rules, frozen:**
+
+1. **The Repository never generates.** It cannot change wording,
+   priority, or timing — those are 5.6's outputs, copied in, never
+   edited here.
+2. **The Repository never delivers.** It stores; Delivery (5.8) sends.
+3. **The Repository never deletes history.** Notifications are user
+   history — a user dismissing one doesn't erase it, it only changes
+   `status`. This is the append-only-in-spirit philosophy already
+   frozen for snapshots and events, extended to notifications.
+4. **`status` is the only mutable part.** `title`/`body`/`priority`/
+   `eventId`/`payload`/`createdAt` never change after creation; only
+   `status`, `readAt`, and `dismissedAt` may.
+5. **One notification, one document.** No batching, no arrays — the
+   same pattern already used for `dailySnapshots` and `events`.
+
+**The Lifecycle, reconciled — five states, not the original seven,
+named as a deliberate simplification**: `Created → Delivered → Read →
+Dismissed`, plus `Expired` (a status a notification can reach instead of
+being read/dismissed, if its underlying condition resolves first). The
+original sketch's `Seen`/`Opened` collapse into `Read` (no distinct
+product need yet to track "seen but not opened" separately), and
+`Completed` is dropped — a notification doesn't have a completion state
+of its own; the underlying event either resolved or didn't, and that's
+tracked by the event/behavior layers, not duplicated here.
+
+**A real, serious collision found during real-account verification,
+before any test data was written — the collection name itself, not just
+its contents.** `users/{uid}/notifications` is already in active
+production use by the existing bank-SMS pending-transaction flow
+(`routes/chat.py`, `routes/confirm.py` — documents shaped like
+`rawText`/`parsedAmount`/`transactionId`/`status: pending|confirmed`,
+a completely different system answering a completely different
+question). Writing this Repository's documents into that same
+collection would have silently mixed two unrelated document shapes
+together — caught only because a real-account check found 4
+pre-existing, unrelated documents before any write happened, not
+because anything in the design phase flagged it. **Frozen: this
+Repository uses `users/{uid}/generatedNotifications`, not
+`notifications`** — verified free of any existing use anywhere in the
+codebase, `firestore.rules`, or `firestore.indexes.json` before
+adopting it, the same "check the claim against real code" discipline
+already applied to the localization claim in 5.6A.
+
+**Firestore structure, frozen**: `users/{uid}/generatedNotifications/{notificationId}`.
+**`notificationId` is the same as the originating `eventId`, not a
+freshly generated ID** — this is a deliberate, deterministic choice
+(not explicitly stated in the original sketch, added here for the same
+idempotency reasons as every other ID in this system): since 5.6B
+already guarantees one event produces at most one notification,
+reusing `eventId` as the document ID makes `save()` naturally
+idempotent — calling it twice for the same event is a safe no-op,
+exactly like `create_daily_snapshot()` and `persist_events()` before it,
+rather than requiring a separate uniqueness check.
+
+```
+users/{uid}/generatedNotifications/{notificationId}   (== eventId)
+├── eventId
+├── eventCode
+├── priority
+├── frequency
+├── timing
+├── interruptionLevel
+├── templateId
+├── title
+├── body
+├── cta
+├── payload
+├── deepLink
+├── status          -- Created | Delivered | Read | Dismissed | Expired
+├── createdAt
+├── deliveredAt
+├── readAt
+└── dismissedAt
+```
+
+**Acceptance test, frozen**: *if Delivery changes from Firebase Cloud
+Messaging to another provider tomorrow, does the Notification
+Repository remain unchanged?* If yes, storage and transport are
+correctly separated — the same test already applied to every other
+storage-vs-transport boundary in this project.
+
+**`Notification Center`, the other stale placeholder found in this
+slot, reframed rather than deleted**: it isn't a phase of its own — it's
+simply the Repository's `list`/`listUnread` operations, read by
+whichever UI surface (Flutter, Step 13) displays them. No separate
+design needed beyond what's already frozen above; noted here so the
+concept isn't lost, just correctly placed.
+
+### Notification Repository — Implementation — FROZEN
+
+Implemented in `services/notification_repository.py`:
+`save`/`get`/`list_notifications`/`list_unread`/`list_recent`/
+`mark_read`/`mark_dismissed`, exactly matching the five frozen rules —
+`save()` is idempotent by construction (`notificationId == eventId`),
+`mark_read`/`mark_dismissed` touch only `status` and their own
+timestamp field, and no function ever deletes a document.
+
+**A real, serious collision found during real-account verification,
+before any test data was written, not caught at design time.** The
+originally-planned collection name, `users/{uid}/notifications`, is
+already in active production use by the existing bank-SMS
+pending-transaction flow — a real-account check found 4 pre-existing,
+unrelated documents there before this Repository ever wrote anything.
+Fixed by renaming the collection to `users/{uid}/generatedNotifications`,
+verified free of any existing use across the whole codebase,
+`firestore.rules`, and `firestore.indexes.json` before adopting it. This
+is the same "check the claim against real code" discipline already
+applied to the 5.6A localization claim — except this time the thing
+being checked was a collection name, and getting it wrong would have
+meant silently corrupting a real, already-in-production feature rather
+than just an inaccurate spec sentence.
+
+All 15 unit test scenarios pass (`tests/test_notification_repository.py`
+— a fake Firestore supporting `order_by`/`limit`/`stream`, with a fake
+`SERVER_TIMESTAMP` resolved to a monotonic counter so ordering is
+testable without real time): idempotent `save()`, correct list ordering,
+`list_unread` correctly excluding Read/Dismissed notifications,
+`mark_read`/`mark_dismissed` touching only their own fields and never
+deleting the document, both being idempotent themselves, and `list_recent`
+respecting its limit. Verified end-to-end against the real account too —
+generate → save → idempotent re-save → mark_read → list_unread/
+list_recent, all against real Firestore — with the pre-existing bank-SMS
+`notifications` collection explicitly confirmed untouched before and
+after, and the test document cleaned up afterward.
+
+### Phase 5.8 — Delivery Philosophy (frozen before any code)
+
+**One principle, frozen: creation and delivery sit on two different
+idempotency boundaries, and they must never be conflated.** `Event →
+Notification` (5.6B) happens exactly once — the Generator's determinism
+and the Repository's `notificationId == eventId` guarantee this
+structurally. `Notification → Device` is the opposite: it *may* need to
+happen more than once internally (a push provider timeout, a transient
+network failure) before it succeeds, and every one of those retries
+must still resolve to the *same* notification, never a regenerated or
+duplicated one. This is the same shape already frozen for Snapshot
+Builder: if the Firestore write fails, the retry is the *same* write
+retried, never a freshly recomputed snapshot. Delivery inherits that
+exact discipline, one layer further downstream.
+
+**The philosophy question this phase must answer before any code,
+mirroring the question that opened Era 2 ("what is a Daily Snapshot"):
+what does it mean for a notification to be *delivered*?** Not "sent,"
+not "shown," not "opened" — those are genuinely different claims, and
+conflating them would make the already-frozen `Delivered` status (5.7)
+mean something no one actually decided.
+
+**The candidate breakdown, and which of it actually matters to
+BachatBot, decided here rather than left open:**
+
+```
+Created  ->  Handed to delivery service  ->  Accepted  ->
+Displayed on device  ->  Opened
+```
+
+**Decision, frozen: `Delivered` means "successfully handed to the push
+provider (FCM), confirmed accepted — not merely attempted."** Not
+"displayed on device": that's a claim push infrastructure generally
+cannot reliably confirm at all (FCM confirms hand-off, not that the OS
+actually rendered the notification on a screen that may be off, in Do
+Not Disturb, or offline) — freezing `Delivered` to mean "displayed"
+would be a status this system could never honestly set. "Handed to
+delivery service" and "Accepted" collapse into one moment for
+BachatBot's purposes — the same reasoning that already removed
+`Queued`/`Sending` from the Lifecycle (5.7) as delivery-implementation
+detail, not persisted state. "Opened" needs no new state at all — it's
+the same real-world signal `Read` (5.7) already captures; inventing a
+separate `Opened` status would just be two names for one fact, the same
+mistake already caught and fixed twice before in this project
+(the `*_STARTED`/`*_EXTENDED` merge, `NEW_RECOMMENDATION_GENERATED`).
+
+**What this means for Delivery's implementation, once it's built**:
+Delivery may retry its own hand-off to FCM as many times as needed
+(its own internal retry loop, its own concern) — but it only ever
+updates the Repository's `deliveredAt`/`status` fields once, the moment
+that hand-off is actually confirmed, never speculatively before, never
+more than once after. Delivery consumes an already-created notification
+exactly as-is; it never changes or reinterprets the fields the
+Generator and Repository already froze.
+
+### Phase 5.8 — Implementation Scope, decided before code
+
+**Checked before writing anything, the same discipline as every prior
+step**: this codebase has **no FCM infrastructure at all** — no
+device-token field anywhere in the user schema, no token-registration
+endpoint, and the Flutter app has no `firebase_messaging` dependency or
+client-side registration. `firebase-admin==6.5.0` (already a pinned
+dependency, used today for Firestore) fully supports
+`firebase_admin.messaging` with no additional setup — the server-side
+send is genuinely buildable today; there is simply nothing real to send
+*to* yet.
+
+**Decision: build the real `send()` function and a device-token
+registration endpoint (backend only); Flutter-side FCM registration is
+named as the explicit remaining prerequisite, not built here.** Building
+the Flutter half would be the first time this entire multi-hundred-turn
+design/implementation arc touches the frontend — a genuinely different
+scope of work than everything before it, and out of place to take on
+silently inside a "finish the backend Delivery layer" step. Without a
+real device token, `deliver_notification()` correctly has nothing to
+deliver to — that's not a flaw in this step, it's an honest reflection
+of where the project actually stands.
+
+### Delivery — Implementation — FROZEN
+
+Implemented in `services/delivery_service.py`:
+`save_device_token(db, uid, token)` and `deliver_notification(db, uid,
+notification, max_retries=3)`, plus `notification_repository.py`'s new
+`mark_delivered()` (the only function that ever sets `status:
+Delivered`, exactly once, only on confirmed FCM acceptance). A new
+route, `POST /notifications/device-token`
+(`routes/notifications.py`, registered in `main.py`), lets a client
+register its token — the backend half of the named prerequisite.
+
+**The idempotency-boundary principle holds exactly as designed**:
+`deliver_notification()` retries its own `messaging.send()` call up to
+`max_retries` times on failure, but every retry targets the *same*
+notification document — never regenerating it, never creating a second
+one. An already-`Delivered`/`Read`/`Dismissed` notification short-
+circuits immediately, without attempting to send again.
+
+All 9 unit test scenarios pass (`tests/test_delivery_service.py` — a
+fake Firestore, `messaging.send` swapped for a test function rather
+than mocked at the network layer): no-token no-op, successful send
+marking `Delivered` exactly once, exhausting all retries leaving the
+notification untouched and still retryable later, succeeding on a
+later attempt after prior failures, and an already-delivered
+notification never being re-sent.
+
+**Verified against real FCM, not just a mock** — this is the one place
+in the whole Notification Engine where a real external service could
+actually be exercised without needing a real device: a real token
+string was registered on the real test account, and `deliver_notification()`
+was pointed at real `firebase_admin.messaging.send()`. FCM correctly
+rejected the fake token ("The registration token is not a valid FCM
+registration token"), and the retry/error-handling logic correctly
+caught this real rejection, retried the configured number of times, and
+left the notification as `Created` rather than crashing or falsely
+marking it delivered. The test token and notification were removed from
+the real account afterward.
+
+**Confirms the Phase 5.8 scoping decision was correct**: the backend
+half (`send()`, token storage, the registration endpoint) is real,
+tested against real infrastructure, and complete on its own terms.
+Flutter-side FCM registration remains the one named, external
+prerequisite before an actual device can ever receive a push — not
+something this step could have closed on its own.
 
 ### Phase 5.9 — Review & Freeze
 
-Not reached yet — placeholder for the same "does this feel right in
-practice against a real account" pass every phase since Health has
-earned before being declared complete.
+**Milestone-5-style review performed against the real code, not just
+the spec** — six audits, two real findings:
+
+- **Ownership, Idempotency, Repository, Matrix (code) audits: pass.**
+  Every field has exactly one write-path; `save`/`mark_delivered`/
+  `mark_read`/`mark_dismissed` are all confirmed no-ops on repeat calls;
+  no duplicate storage; all 17 real event codes (15 Diff Matrix + 2
+  reused Financial Events) have consistent Priority/Frequency/Timing
+  rows, and Template's apparent gap on `MILESTONE_UNLOCKED` is a false
+  positive — it's intentionally handled by a separate per-milestone-code
+  lookup, not the flat table.
+- **Integration Audit: fails.** `scheduler_service.py` had zero
+  references to the Notification Engine at all (confirmed by grep, not
+  assumed) — events were generated and persisted, and nothing turned
+  them into notifications. The real cause: **the 5.2 Eligibility
+  waterfall was only ever designed, never implemented as code.**
+  Without it there was nothing legitimate to wire the pipeline through.
+- **Lifecycle Audit: incomplete.** `Created`/`Delivered`/`Read`/
+  `Dismissed` all have real code paths; `Expired` has none — no
+  `mark_expired()`, no staleness check anywhere.
+- **Re-confirmed, not new**: `NEW_BEST_STREAK` still has orphaned rows
+  in the Eligibility (5.2A) and Priority (5.3) matrices with no Diff
+  Matrix producer — already named during 5.6B's own audit, still open,
+  correctly excluded from the real code.
+
+### Eligibility Waterfall — Implementation, frozen before code
+
+**Scope, decided honestly rather than over-built**: Gates 6 (Timing)
+and 7 (Interruption Level) never reject — they only inform *when*/*how*
+an already-eligible notification is delivered (5.2's own frozen
+framing), so they contribute no gating logic here; their values are
+already looked up inside the Generator. Gate 2 (Context) has no real
+signal to check against — this codebase has no app-presence/session
+tracking anywhere — so it is implemented as a deliberate, named
+pass-through today, not a fabricated check. The gates that actually
+reject are **1/3 combined (Justification + Notification-Eligible, via
+the Eligibility Matrix's `ALWAYS`/`CONDITIONAL`/`NEVER` type), 4
+(Already Informed), and 5 (Frequency)**.
+
+**Several `CONDITIONAL` rows, checked against what their own Diff Rule
+already guarantees, turned out to need no extra logic at all — the
+same reconciliation already found once for `PRIMARY_RECOMMENDATION_CHANGED`
+in 5.6B, found again here for a second event**: `HEALTH_IMPROVED`'s
+condition ("not amber-to-amber") is already structurally guaranteed by
+its own Diff Rule (`_better(a, b)` only ever fires on a genuine
+downgrade in severity — an unchanged status can never satisfy it), so
+it's reclassified `ALWAYS`, needing no runtime check. The genuinely
+`CONDITIONAL` events are the ones whose Diff Rule fires on *every*
+occurrence regardless of magnitude: `LOGGING_STREAK_EXTENDED`,
+`HEALTHY_STREAK_EXTENDED`, `SAVING_STREAK_EXTENDED` (checkpoint-gated —
+eligible only when the new streak length lands on `{7, 14, 30, 60, 90,
+180, 365}`, first cut, tunable) and `LOGGING_STREAK_BROKEN` (eligible
+only when the broken streak was at least 3 days long — breaking a
+1-2 day streak isn't news, per 5.2A's own original reasoning).
+
+**Gate 5 (Frequency), implemented against the Repository's own
+history** — for each event code, its Frequency policy (5.4A) is
+checked against the most recent existing notification of that same
+`eventCode` for this user: `ONCE` passes only if none has ever been
+created; `DAILY`/`WEEKLY`/`MONTHLY` pass only if the most recent one is
+older than 1/7/30 days respectively (a calendar-naive first cut for
+`MONTHLY`, named as tunable); `UNTIL_RESOLVED` always passes here — its
+real escalating cadence (30min/4hr/next-morning/stop) is a Delivery/
+scheduling-layer concern beyond what a single eligibility check can
+express, simplified rather than half-built.
+
+**Gate 4 (Already Informed)** is checked directly against the
+Repository: if a notification already exists for this exact `eventId`,
+it's not eligible again — the same fact this Repository's own
+`save()` idempotency already guarantees downstream, checked here too
+for an explicit, named reason rather than relying on a side effect.
+
+### Eligibility Waterfall — Implementation — FROZEN
+
+**Built**: `services/eligibility_engine.py` (`check_eligibility()`,
+`process_event()`), wired into `scheduler_service.process_day()` right
+after `persist_events()` — every persisted Event is now offered to the
+waterfall, isolated per-event inside its own try/except so a
+notification-pipeline failure can never fail the snapshot/event
+pipeline it rides alongside. `notificationsCreated` was threaded
+through `process_day()` → `process_user()` → `run_daily_snapshot_job()`'s
+aggregation and logging, the same shape every other per-run stat
+already followed. `notification_repository.py` gained `mark_expired()`
+and `expire_stale_notifications()` (time-based staleness, 14-day
+default — named honestly as a limitation, since re-checking whether
+the underlying condition is still true would mean this infrastructure
+layer reaching back into domain engines, which it must never do).
+
+**Unit tests, all passing**: `test_eligibility_engine.py` (12
+scenarios — every `ALWAYS` pass, `CONDITIONAL` pass/fail at and off the
+streak checkpoints and the minimum mourned-streak length, an unknown
+event code's named rejection, Already-Informed rejection, a `ONCE`
+policy's second-event rejection, and `process_event()`'s full
+orchestration both ways); `test_notification_repository.py` extended
+with `mark_delivered`/`mark_expired`/`expire_stale_notifications`
+coverage (9 new scenarios, including one that deliberately backdates a
+real `datetime` past the cutoff to exercise the actual staleness
+comparison, not just the happy path); `test_scheduler_service.py`
+extended with two scenarios that exercise `process_day()`'s actual
+notification loop directly (both snapshots pre-seeded as already
+existing so the five-engine gather step is bypassed and only the
+diff → eligibility wiring is under test) — confirming
+`notificationsCreated` counts exactly the events eligibility actually
+accepted, and that one event's pipeline exception never fails the day
+or blocks the next event from being attempted. Full suite: 14 test
+files, zero regressions.
+
+**Real-account verification, against `BvjbjFOGHQNmI1xcRm5xowKPpoB3`,
+cleaned up afterward**: a fresh `HEALTH_WORSENED` event became a real,
+persisted notification; re-processing the identical event was rejected
+as Already Informed; a same-day second `HEALTH_WORSENED` (a `DAILY`
+policy) was rejected by Frequency; an unknown event code was rejected
+with a named reason and persisted nothing; `mark_expired()` and
+`expire_stale_notifications()` both behaved correctly against the real
+document. Every test document was deleted afterward.
+
+**Closes the Phase 5.9 Integration Audit finding.** Re-confirmed by
+grep: `scheduler_service.py` now reaches the Notification Engine
+(`eligibility_engine.process_event`, one call site) — no longer zero
+references. The Lifecycle Audit's `Expired` gap is also closed
+(`mark_expired`/`expire_stale_notifications` now exist and are tested).
+The `NEW_BEST_STREAK` orphaned-matrix-rows finding remains open,
+unchanged — a pre-existing, already-named gap, not something this pass
+introduced or was scoped to fix.
 
 ### Duolingo-style triggers, reframed for a finance app without becoming manipulative
 
@@ -8330,3 +9980,1126 @@ builds the actual document shape on top of this philosophy, reconciling
 it with the preliminary field sketch already drafted in Phase 4.5A
 ("Daily Snapshot — field shape, frozen," above) rather than starting
 from nothing.
+
+## Step 9.1 — Snapshot Schema
+
+**One question**: *what must be stored so that tomorrow can understand
+what happened today?* Not what the UI needs, not what Notifications
+need, not what analytics might someday want — only what must survive
+into history.
+
+### Rule 6 — Snapshot fields are contracts, not convenience, frozen
+
+Every field must satisfy exactly one of three reasons to exist:
+
+- **Type A — Domain Output.** Produced by exactly one engine
+  (`financialSummary`, `metrics`, `overallHealth`, `behaviorSummary`).
+- **Type B — Metadata.** Lets the snapshot be interpreted at all
+  (`snapshotVersion`, `generatedAt`, `snapshotDate`).
+- **Type C — Traceability.** Lets a future reader explain *why* history
+  looks the way it does (`healthEngineVersion`, `metricsEngineVersion`,
+  ...).
+
+A field belonging to none of these three doesn't go in the snapshot,
+full stop.
+
+### Rule 7 — No raw data, frozen
+
+Snapshots never contain transactions, budgets, goals, categories, or
+any queue (notification, event). Anything reconstructable from its own
+source-of-truth collection stays there — a snapshot that duplicated raw
+data would be a backup, not a historical observation.
+
+### Compression Principle, frozen
+
+**A snapshot records conclusions, not working memory.** Financial
+Engine's full internal working set (income, budgets, goals,
+transactions, the whole calculation) is not what gets copied — only
+`financialSummary`, the conclusion. The same discipline applies to
+every engine's output, not just Financial's.
+
+### Historical Principle, frozen
+
+For every candidate field, ask exactly one question: **if this
+disappeared from Firestore tomorrow, would history lose meaning?** If
+yes, keep it. If no — it's reconstructable elsewhere, and copying it
+would only be duplication wearing the shape of a feature.
+
+### Rule 8 — Snapshots do not compete with Ground Truth, frozen
+
+**Related to Rule 7, not identical to it.** Rule 7 says don't store raw
+data (transactions, budgets, goals — things that were never a
+conclusion to begin with). Rule 8 is narrower and was only visible
+after resolving the milestone question above: **if a Ground Truth
+already exists permanently elsewhere, the snapshot references that
+history indirectly, by time — it never copies it.**
+
+```
+✅ Snapshot stores Behavior Summary
+   — tomorrow's summary may differ, and today's disappears the moment
+     it's superseded; the snapshot is the only place today's version
+     survives.
+
+❌ Snapshot stores behaviorHistory.milestones
+   — already append-only, permanent history; copying it wouldn't
+     preserve anything that would otherwise be lost.
+```
+
+This is the rule the milestone resolution (Option C) was actually
+applying, made explicit as its own principle now that Step 9.1 has
+surfaced it: a snapshot's job is to be the *only* record of things that
+would otherwise vanish (today's Behavior Summary, today's streak
+counters) — never a second copy of something that already has a
+permanent home of its own.
+
+### The milestone question, resolved — not Option A, not Option B
+
+Applying the Historical Principle directly to the candidate milestone
+field settles this more precisely than either original option did.
+`behaviorHistory.milestones[]` (frozen since Step 7) is already a
+permanent, immutable, timestamped Ground Truth — filtering it by
+`unlockedAt <= date` reconstructs "how many/which milestones existed as
+of day X" *exactly*, with no drift, unlike Financial or Health data
+(whose live recomputation can legitimately disagree with history once
+formulas change — the rebuild policy's whole justification). A
+milestone count or latest-code field in the snapshot would therefore
+fail Rule 7: reconstructable from a source-of-truth collection that
+already exists, contributing nothing history would actually lose.
+
+**Decision, frozen: Option C.** The snapshot's `behavior` field carries
+no milestone data at all. The Diff Generator, when detecting
+`MILESTONE_UNLOCKED`, reads `behaviorHistory.milestones[]` directly
+(filtered to the relevant date) as a **third input** alongside the two
+snapshots it already compares — not because Behavior Engine self-reports
+(that would reopen the exact mistake Phase 4.5A's original correction
+fixed), but because the permanent record the Diff Generator needs
+already exists, undiminished by never being copied. "One place detects
+change" survives completely intact; "don't duplicate a Ground Truth"
+also survives — neither Option A nor B, as originally framed, satisfied
+both at once.
+
+**The same reasoning technically extends to Recovery's
+`totalResolved`/`totalFailed`** (also reconstructable, in principle, by
+filtering `behaviorHistory.recoveryAttempts[]`), **noted but not
+reopened here** — those fields are already implemented, tested, and
+wired into a frozen Diff Rule (Step 6); revisiting them now would be
+scope creep beyond a schema design session, not a response to a
+demonstrated flaw. Worth a look during Step 14's Review & Freeze, not
+before.
+
+### What `behavior` actually is — the question requiring the most care, resolved
+
+Behavior Summary and Behavior State get opposite treatment, for a
+principled reason, not a preference:
+
+- **Behavior *State* (raw counters) — included.** `logging.currentStreak`/
+  `bestStreak`, `spending.currentHealthyStreak`/
+  `currentOverspendingStreak`, `saving.currentProtectionStreak`,
+  `recovery.currentStreak`/`totalResolved`/`totalFailed` — these have
+  **no independent historical record anywhere else**.
+  `streakTransitions[]` was deliberately removed from `behaviorHistory`
+  during Phase 4.5A's correction ("a streak extending or breaking *is*
+  an Event now"), so the Daily Snapshot is the *only* place a past
+  day's streak value survives. Passes the Historical Principle
+  trivially — if this disappeared, that day's streak value would be
+  gone forever.
+- **Behavior *Summary* (the computed interpretation) — included, same
+  tier as `overallHealth`.** `compute_behavior_summary()`'s status
+  depends on which `recoveryAttempts` entry was "most recent" *as of
+  that day* — recomputing it later from today's full history can
+  silently answer a different, wrong question for a past day, the same
+  "formulas and inputs can drift" problem Financial and Health already
+  have. Not reconstructable; belongs in the snapshot.
+- **`behaviorHistory`'s arrays (`milestones[]`, `recoveryAttempts[]`) —
+  excluded**, per the milestone resolution above; they're already their
+  own permanent record, read directly by whatever needs them, never
+  duplicated into a daily snapshot.
+
+### Owner Audit — every field, frozen
+
+| Field | Owner | Type | Keep? |
+|---|---|---|---|
+| `snapshotDate` | Snapshot infrastructure | B | ✓ |
+| `generatedAt` | Snapshot infrastructure | B | ✓ |
+| `snapshotVersion` | Snapshot infrastructure | B | ✓ |
+| `versions.financial/metrics/health/recommendation/behavior` | each respective engine | C | ✓ |
+| `financial.income/totalSpent/remainingBudget/savingsPool` | Financial Engine | A | ✓ |
+| `metrics.spendingPaceStatus/recommendedDailySpendValue` | Metrics Engine | A | ✓ |
+| `metrics.recoveryPlanPresent/recoveryPossible` | Metrics Engine | A | ✓ (needed for `RECOVERY_BECAME_IMPOSSIBLE`) |
+| `health.overallHealthStatus` | Health Engine | A | ✓ |
+| `health.categoryHealth[cat].status` | Health Engine | A | ✓ (needed for `CATEGORY_BECAME_EXHAUSTED`) |
+| `recommendation.primaryRecommendationCode` | Recommendation Engine | A | ✓ |
+| `behavior.state.logging/spending/saving/recovery` | Behavior Engine | A | ✓ |
+| `behavior.summary.status/primaryReason/confidence` | Behavior Engine | A | ✓ |
+| `behavior.milestones` / `behavior.milestoneCount` | *nobody — already owned by `behaviorHistory`* | — | ❌ dropped, see resolution above |
+| `currentMonth` (candidate, never actually proposed here but named as the audit's own worked example) | nobody — `snapshotDate` already answers it | — | ❌ (the audit's own test case) |
+
+### Complete snapshot schema, frozen
+
+```
+users/{uid}/dailySnapshots/{date}
+├── snapshotDate
+├── generatedAt
+├── snapshotVersion
+├── versions
+│   ├── financial
+│   ├── metrics
+│   ├── health
+│   ├── recommendation
+│   └── behavior
+├── financial
+│   ├── income
+│   ├── totalSpent
+│   ├── remainingBudget
+│   └── savingsPool
+├── metrics
+│   ├── spendingPaceStatus
+│   ├── recommendedDailySpendValue
+│   ├── recoveryPlanPresent
+│   └── recoveryPossible        (only meaningful if recoveryPlanPresent)
+├── health
+│   ├── overallHealthStatus
+│   └── categoryHealth[cat].status
+├── recommendation
+│   └── primaryRecommendationCode
+└── behavior
+    ├── state
+    │   ├── logging     { currentStreak, bestStreak }
+    │   ├── spending    { currentHealthyStreak, currentOverspendingStreak }
+    │   ├── saving       { currentProtectionStreak }
+    │   └── recovery     { currentStreak, totalResolved, totalFailed }
+    └── summary
+        ├── status
+        ├── primaryReason
+        └── confidence
+```
+
+### Step 9.1 — FROZEN
+
+Rule 6, Rule 7, Rule 8, the Compression Principle, the Historical
+Principle, the complete field-by-field Owner Audit, and the milestone
+decision (Option C, not A or B) are all frozen above. Nothing
+implemented — Step 9.2 asks how one snapshot is actually created
+(`create_daily_snapshot(date)`, per the engine-owns-logic/
+caller-owns-timing separation already agreed), still without mentioning
+a scheduler.
+
+## Step 9.2 — How a Snapshot Comes Into Existence
+
+**One question**: *how does a complete snapshot come into existence?*
+Not when, not how often, not by whom — `create_daily_snapshot(db, uid,
+date)` is a plain function, callable by a scheduler, a manual admin
+rebuild, or an integration test equally, none of them privileged. Its
+responsibilities, guarantees, failure behavior, atomicity, and output —
+nothing else.
+
+### Responsibilities, frozen
+
+In order, and only these:
+
+1. **Gather** — call each domain engine's existing public read
+   function once: Financial's `get_summary`, Metrics' `get_metrics`,
+   Health's `compute_overall_health`, Recommendation's
+   `compute_recommendations`, Behavior's `compute_behavior_summary` (plus
+   `behavior_state_repository.load_state` for the raw counters, per
+   Step 9.1's schema). **No new computation** — every value comes from a
+   function that already exists and is already called elsewhere; the
+   snapshot creator reuses them exactly as a route would.
+2. **Stamp** — attach each engine's current version constant plus
+   `SNAPSHOT_VERSION`, `snapshotDate`, `generatedAt`.
+3. **Verify completeness** — the Snapshot Invariant, checked explicitly
+   against the gathered dict, not assumed from "nothing raised an
+   exception" (see below).
+4. **Write** — exactly once, atomically, or not at all.
+
+### Guarantees, frozen
+
+- **Idempotent per date, per Rule 5.** If `dailySnapshots/{date}`
+  already exists, `create_daily_snapshot()` is a no-op — it never
+  overwrites, merges, or patches an existing snapshot. This is the same
+  "check existence, skip if present" idempotency every
+  `record_*_activity()` function already relies on, applied here to a
+  document instead of a per-day streak field.
+- **All-or-nothing.** Either the fully assembled, fully verified
+  snapshot is written, or nothing is written for that date at all.
+  There is no code path that produces a partial document.
+
+### Failure behavior, frozen — a principle this step surfaced on its own
+
+**"No exception was raised" is not the same claim as "the data is
+complete," and treating them as equivalent would be the exact gap this
+step exists to close.** A domain engine's read function can return
+`None` or an empty result for a legitimate reason — no exception,
+technically a successful call, but not something the Snapshot Invariant
+can accept. Concretely: `create_daily_snapshot()` must check the
+*gathered dict itself* for every required field being present and
+non-`None`, never infer completeness from the absence of a thrown
+error. If any required piece is missing — whether because a call
+raised, or because it quietly returned nothing — the function raises
+or returns a clear failure signal, and **writes nothing**. Per the Era 2
+principle "failures must degrade gracefully rather than corrupt state,"
+an absent snapshot is a visible, honest gap; a snapshot silently missing
+one engine's data would be corruption wearing a valid-looking shape.
+
+### Atomicity, frozen — the second thing this step surfaced
+
+**Atomicity applies to the write, not the five reads that feed it, and
+that distinction is deliberate, not an oversight.** Because the entire
+snapshot is *one Firestore document*, the final `.set()` call is atomic
+by Firestore's own single-document guarantee — there is no
+partially-written document possible, no transaction needed to make the
+write itself safe. But the five gather calls (Financial, Metrics,
+Health, Recommendation, Behavior) are independent, sequential reads,
+not wrapped in a cross-collection transaction — so in principle, a
+transaction could land on the user's data in the few hundred
+milliseconds between reading Financial's summary and reading Behavior's
+state, and the snapshot would reflect two slightly different instants,
+not one perfectly frozen moment. **This is accepted, not engineered
+away**: a Daily Snapshot's granularity is a calendar day, not a
+microsecond, and paying for cross-engine read consistency (wrapping five
+independent service modules' reads in one Firestore transaction) would
+be real complexity spent on a precision this system never actually
+needs at daily granularity. Named explicitly so a future reader doesn't
+mistake "the write is atomic" for "the whole snapshot was captured at
+one exact instant" — it wasn't, and doesn't need to have been.
+
+### Output, frozen
+
+`create_daily_snapshot(db, uid, date)` returns the exact snapshot dict
+it wrote (or `None`/raises on the no-op/failure paths above) — useful
+for the caller to log, assert against in a test, or hand to whatever
+invokes it next, without a second read back from Firestore.
+
+### Rule 9 — Snapshot creation is deterministic, frozen
+
+**Given the same engine outputs and the same date, `create_daily_snapshot()`
+must produce the exact same document.** No randomness, no UUIDs, no
+iteration-order dependence, and no timestamp inside the payload except
+`generatedAt` itself. This is what makes the builder trivially
+unit-testable (same inputs always assert to the same output), makes a
+rerun before the real write harmless, and is a prerequisite for any
+future replay tooling — none of which would be possible if two runs of
+the same day, against the same underlying data, could produce two
+different documents.
+
+### Step 9.2 — FROZEN
+
+Responsibilities, guarantees, failure behavior (the
+exception-vs-completeness distinction), atomicity (the
+write-vs-read distinction), and determinism (Rule 9) are all frozen
+above. Design has reached diminishing returns — everything remaining is
+implementation detail, not an open conceptual question. Moving straight
+to Step 9.3 — Snapshot Builder (Implementation) — no further design
+step first.
+
+## Step 9.3 — Snapshot Builder — FROZEN
+
+Implemented in `services/snapshot_service.py`,
+`create_daily_snapshot(db, uid, date, generated_at=None)`, exactly
+against the five acceptance criteria: gathers only the five domain
+engines' existing public functions (`_gather`), validates completeness
+against the data itself, not exception absence (`_is_complete`), builds
+the snapshot as pure assembly with no calculation (`_build_snapshot`),
+writes with a single `.set()` call, and returns the exact snapshot
+written. `dailySnapshots/{date}` lives at
+`users/{uid}/dailySnapshots/{date}`, per the path already frozen in
+Phase 4.5A.
+
+All 20 unit test scenarios pass (`tests/test_snapshot_service.py`,
+synthetic gathered data — no Firestore needed for `_is_complete`/
+`_build_snapshot`, since neither touches it): every required key's
+absence fails completeness even with no exception involved,
+`categoryHealth` having no categories yet doesn't falsely fail
+completeness, the built schema matches Step 9.1's shape field-for-field,
+determinism (Rule 9) holds across two builds from identical inputs, and
+no milestone data appears anywhere (Option C, honored in the actual
+code, not just the spec). The full end-to-end path — actually calling
+all five engines against real data — was verified against
+`botbachat@gmail.com`: a first call gathered and wrote a real snapshot
+reflecting that account's actual financial/health/behavior state, a
+second call for the same date returned the identical existing document
+unchanged (idempotency, Rule 5), and the test snapshot document was
+deleted afterward since it was verification pollution, not a real
+historical fact worth keeping.
+
+**Nothing beyond `create_daily_snapshot()` exists yet** — no scheduler,
+no Diff Generator, no caller at all in production. Per the
+engine-owns-logic/caller-owns-timing separation agreed before this
+step, that's by design: this function is now a stable, independently
+callable, independently tested artifact, ready for whatever invokes it
+next (Step 10's Diff Generator needs two of its outputs; a future
+scheduler needs to call it once daily; a future admin rebuild tool needs
+to call it on demand) — none of which required touching this file to
+enable.
+
+## Step 10.0 — Diff Generator Philosophy
+
+**One question, frozen**: *"What meaningful changes occurred between
+two historical snapshots?"* Not what notifications should be sent, not
+what changed in the database, not what the UI should display, not what
+action the user should take — those are all consumers, downstream of
+this component, and belong to Phase 5 or later. The Diff Generator only
+identifies historical transitions.
+
+### Five rules, frozen
+
+1. **Compare history, never recompute.** The Diff Generator never
+   calls Financial, Metrics, Health, Recommendation, or Behavior Engine
+   directly. Its only inputs are historical records already written:
+   yesterday's snapshot, today's snapshot, and (per Step 9.1's Option C
+   resolution) `behaviorHistory.milestones[]`. Every event comes from
+   comparing records that already exist — never a fresh computation.
+2. **Events represent transitions, not states.** `HEALTH_CHANGED` is a
+   valid event; `HEALTH_IS_RED` is not an event at all — it's a
+   snapshot field. If a candidate event describes what something *is*
+   rather than what just *changed*, it belongs in the snapshot schema,
+   not the event stream.
+3. **No transition, no event.** If yesterday's and today's relevant
+   fields are identical, zero events are produced for that field. The
+   Diff Generator never emits a "heartbeat" or "still healthy" event —
+   silence is the correct output when nothing changed.
+4. **One transition produces exactly one event.** The same "one fact =
+   one event" discipline already learned the hard way twice — once
+   correcting `NEW_RECOMMENDATION_GENERATED`/
+   `PRIMARY_RECOMMENDATION_CHANGED` into a single event, once correcting
+   `*_STARTED`/`*_EXTENDED` into a single event (Milestone 5's review) —
+   is made an explicit rule here rather than something re-discovered a
+   third time.
+5. **The Diff Generator classifies; it never decides importance.** Its
+   output is a flat list of events — nothing more. It never asks "should
+   the user be notified," "is this urgent," or "should this wait until
+   morning." Event ordering, notification priority, batching,
+   suppression, and cooldowns all belong to the Notification Engine
+   (Phase 5) — if the Diff Generator starts reasoning about which event
+   matters most, it has already drifted into that layer's job.
+
+### Acceptance test, frozen, to be kept in mind throughout Step 10
+
+**If the Notification Engine didn't exist, would the Diff Generator
+still be valuable?** The answer must be yes — the same event stream
+could drive analytics, an achievement timeline, an activity history,
+monthly reports, exports, or debugging, with no notification system
+involved at all. That independence is the same architectural property
+every domain engine and Snapshot Builder have already maintained;
+Step 10 extends it one layer further.
+
+### Step 10.0 — FROZEN
+
+The one question, the five rules, and the acceptance test are frozen
+above. Nothing about comparison logic, event schemas, or field-by-field
+diff rules has been decided yet — those are Step 10.1's job.
+
+**Step 10's own sub-structure, frozen, mirroring Phase 4's
+Philosophy/Matrix separation**:
+
+```
+10.0 Philosophy         (done — the one question, five rules, acceptance test)
+10.1 Difference Rules    (what qualifies as a change, before which ones matter)
+10.2 Diff Matrix         (the frozen field -> transition -> event table)
+10.3 Generator Pipeline  (the actual comparison function)
+10.4 Review
+Implementation
+```
+
+The Diff Matrix (10.2) is this step's equivalent of the Recommendation
+Matrix (Phase 4) — a frozen source of truth implementation simply
+executes, never a place where philosophy and code get mixed together.
+
+## Step 10.1 — What is a Difference?
+
+**Deliberately not "Diff Rules" yet** — before deciding *which* changes
+matter, this step defines what qualifies as a change *at all*.
+
+### Rule 6 — Compare only owned fields, frozen
+
+The Diff Generator compares only the fields each engine actually owns:
+`financial`, `metrics`, `health`, `recommendation`, `behavior`. It never
+compares `generatedAt`, `snapshotVersion`, any engine version, or any
+other metadata field — those changing, by construction, every single
+day, must never produce an event.
+
+### Rule 7 — Equality is structural, frozen
+
+Two values are equal if they are structurally identical, regardless of
+Firestore's key ordering. `{"status": "green", "confidence": "high"}`
+equals `{"confidence": "high", "status": "green"}` — comparison is
+never sensitive to serialization order, only to actual content.
+
+### Rule 8 — Compare values, not documents, frozen
+
+The Diff Generator never says "the snapshot changed" — it says
+"`health.overallHealthStatus` changed." Comparison happens at the
+individual field level, never at the whole-document level, so adding
+an unrelated field to the snapshot in the future can never be mistaken
+for every field having changed.
+
+### Rule 9 — Every event maps to exactly one field transition, frozen
+
+Never many fields collapsing into one ambiguous event. Always:
+`field → transition → event` — for example,
+`health.overallHealthStatus: green → amber → HEALTH_WORSENED`. Fully
+traceable, in both directions: given an event, its triggering field and
+transition are always identifiable; given a field's transition, its
+resulting event (if any) is always identifiable.
+
+### Rule 10 — Unknown changes produce nothing, frozen
+
+**If a field changes and no Diff Rule owns it, the Diff Generator emits
+nothing — never guesses, never infers, never invents a plausible-sounding
+event.** This is what makes adding a new snapshot field completely safe:
+`financial.xyz` can be added tomorrow, and until a Diff Rule explicitly
+claims it, its changing produces silence, never a fabricated event.
+
+### Step 10.1 — FROZEN
+
+Rules 6-10 are frozen above — what qualifies as a comparable field, what
+counts as equal, what granularity comparison happens at, the one-field-
+one-event mapping, and the "unknown means silence" safety net. No
+specific field has been assigned an event yet; that's Step 10.2's job,
+and per Rule 10, it now has a genuine safety net to fall back on if it
+misses one.
+
+## Step 10.2 — Diff Matrix
+
+**This step's equivalent of the Recommendation Matrix (Phase 4) — the
+frozen source of truth implementation simply executes.** Every row
+answers five questions: which engine owns the field, which field,
+which transition, which event, and which input actually detects it
+(`Producer`) — so "why isn't this event firing" always has an immediate,
+traceable answer.
+
+### Financial — zero rows, on principle, not by omission
+
+Financial's events already exist through a completely different
+mechanism — the `RecomputeReason` vocabulary (Financial Events, Event
+Catalog), triggered live by user actions the instant they happen, never
+detected by comparing two snapshots. There is nothing left for the Diff
+Matrix to add here; a row would be a second detector for a fact that
+already has one.
+
+### Metrics — two rows, deliberately few
+
+Metrics are measurements, not milestones — a `recommendedDailySpend`
+value moving from 82 to 83 is not an event, and `spendingPaceStatus`
+changing isn't diffed here either, since Health's own status transition
+already reflects its meaningfulness downstream; a separate Metrics-level
+event would be a second detector for the same underlying signal.
+
+| Owner | Field | Transition | Event | Producer |
+|---|---|---|---|---|
+| Metrics | `recoveryPlanPresent` | `false → true` | `RECOVERY_STARTED` | Snapshot |
+| Metrics | `recoveryPossible` | `true → false` | `RECOVERY_BECAME_IMPOSSIBLE` | Snapshot |
+
+### Health — the largest source of genuine transitions
+
+| Owner | Field | Transition | Event | Producer |
+|---|---|---|---|---|
+| Health | `overallHealthStatus` | moves to a worse status (`green→amber`, `green→red`, `amber→red`) | `HEALTH_WORSENED` | Snapshot |
+| Health | `overallHealthStatus` | moves to a better status (`amber→green`, `red→green`, `red→amber`) | `HEALTH_IMPROVED` | Snapshot |
+| Health | `categoryHealth[cat]` | `→ red` | `CATEGORY_BECAME_EXHAUSTED` | Snapshot |
+
+### Recommendation — one field matters
+
+| Owner | Field | Transition | Event | Producer |
+|---|---|---|---|---|
+| Recommendation | `primaryRecommendationCode` | any change | `PRIMARY_RECOMMENDATION_CHANGED` | Snapshot |
+
+### Behavior — the richest section
+
+| Owner | Field | Transition | Event | Producer |
+|---|---|---|---|---|
+| Behavior | `logging.currentStreak` | `N → N+1` (covers `0→1`, no separate `STARTED`) | `LOGGING_STREAK_EXTENDED` | Snapshot |
+| Behavior | `logging.currentStreak` | `N>0 → 0` | `LOGGING_STREAK_BROKEN` | Snapshot |
+| Behavior | `spending.currentHealthyStreak` | `N → N+1` | `HEALTHY_STREAK_EXTENDED` | Snapshot |
+| Behavior | `spending.currentHealthyStreak` | `N>0 → 0` | `HEALTHY_STREAK_BROKEN` | Snapshot |
+| Behavior | `saving.currentProtectionStreak` | `N → N+1` | `SAVING_STREAK_EXTENDED` | Snapshot |
+| Behavior | `saving.currentProtectionStreak` | `N>0 → 0` | `SAVING_STREAK_BROKEN` | Snapshot |
+| Behavior | `recovery.totalResolved` | `N → N+1` | `RECOVERY_COMPLETED` | Snapshot |
+| Behavior | `recovery.totalFailed` | `N → N+1` | `RECOVERY_FAILED` | Snapshot |
+
+**`SAVING_STREAK_EXTENDED`/`BROKEN` are new, found while building this
+table** — Saving Behavior (Step 5) never had a diff-detectable event at
+all before now, an oversight in the original Phase 4.5A sketch, not a
+deliberate omission; added here for the same reason Logging and
+Spending already have theirs.
+
+### Milestones — the one row with a non-snapshot producer
+
+| Owner | Field | Transition | Event | Producer |
+|---|---|---|---|---|
+| *(none — `behaviorHistory`, not a snapshot field)* | `milestones[]` | a new entry appears since yesterday | `MILESTONE_UNLOCKED` | Milestone History |
+
+This is the one place Option C (Step 9.1) actually shows up in the
+matrix: the Producer column, not the Owner column, is where "milestone
+history is a third input" becomes concrete.
+
+**Resolved explicitly, since it's easy to get backwards**: a healthy
+streak crossing from 6 to 7 fires `HEALTHY_STREAK_EXTENDED` (Snapshot,
+same as every other extension) *and*, independently, `FIRST_HEALTHY_WEEK`
+may unlock the same day (Milestone History) — these are not duplicates
+of one another. They answer different questions (a routine extension
+vs. a permanent one-time achievement) that happen to share a threshold;
+neither suppresses the other.
+
+### Rule 11 — Every event has exactly one row, frozen
+
+Never `Green→Amber` mapped to both `HEALTH_CHANGED` and
+`HEALTH_DEGRADED` in two separate rows. One transition, one row, one
+event — the same discipline as Rule 4/Rule 9, restated here as a
+structural property of the table itself: every row above is checked to
+have a transition no other row also claims.
+
+### Step 10.2 — FROZEN
+
+The complete Diff Matrix — 0 Financial rows, 2 Metrics rows, 3 Health
+rows, 1 Recommendation row, 8 Behavior rows, 1 Milestone row — is frozen
+above, each row traceable to exactly one owner, one field, one
+transition, and one producer. Step 10.3 — Generator Pipeline — builds
+the actual comparison function that executes this table; nothing about
+*how* the comparison runs has been decided yet.
+
+## Step 10.3 — Generator Pipeline
+
+**One question**: *given two snapshots and the frozen Diff Matrix,
+which events should be produced?* Not "which events should exist" —
+Step 10.2 already answered that. The generator only evaluates the
+matrix; it never decides what belongs in it.
+
+### Rule 12 — The generator iterates over the Diff Matrix, not over the snapshots, frozen
+
+**Bad**: for every snapshot field, figure out what event it implies.
+**Good**: for every Diff Matrix row, ask whether its transition
+occurred; if yes, emit its event. This makes adding a new event a
+one-row addition to the matrix, never a rewrite of comparison logic —
+the same property that made the Recommendation Matrix maintainable.
+
+### No ordering inside the generator, frozen
+
+Events are returned in Diff Matrix row order, exactly as frozen — no
+sorting, no severity, no priority, no timestamp beyond what an event
+already carries. Whether event C matters more than event A is
+Notification Engine's decision (Phase 5), never the generator's.
+
+### Pipeline, frozen — seven stages, mirroring Overall Health's architecture
+
+```
+generate_events(uid, yesterday_snapshot, today_snapshot, milestones_today)
+        |
+        v
+_load_inputs()        -- exactly three things: yesterday snapshot,
+                          today snapshot, behaviorHistory.milestones
+                          (already filtered to today by the caller)
+        |
+        v
+_validate_inputs()     -- infrastructure concerns only: both snapshots
+                          exist, today's date is strictly after
+                          yesterday's, snapshotVersion is supported
+        |
+        v
+_compare_fields()      -- (field, yesterday_value, today_value) tuples
+                          for every Diff Matrix row -- differences only,
+                          no events yet
+        |
+        v
+_match_matrix_rows()   -- keep only the tuples whose row's transition
+                          condition is actually met; Rule 10 discards
+                          the rest silently
+        |
+        v
+_build_events()        -- structured events only: diffRuleId, event
+                          code, payload -- no wording, no priority,
+                          no cooldowns
+        |
+        v
+_assign_ids()          -- deterministic eventId per Phase 4.5A's
+                          idempotency guarantee: (uid, snapshotDate,
+                          diffRuleId), same every run
+        |
+        v
+return events          -- persistence is someone else's job
+```
+
+**One refinement to the idempotency guarantee's original wording,
+found while implementing**: `(uid, snapshotDate, diffRuleId)` alone
+collides for the two rows that can fire more than once per day —
+`CATEGORY_BECAME_EXHAUSTED` (one per category) and `MILESTONE_UNLOCKED`
+(one per milestone). Both need a fourth component (the category name,
+or the milestone code) appended to stay unique. Every other row is a
+single scalar field, so `diffRuleId` alone is already sufficient there.
+
+### Validation scope, frozen — narrower than "consecutive dates"
+
+**"Consecutive dates" was named as a validation concern, but strict
+adjacency is not actually enforced** — only strict *ordering*
+(`today.snapshotDate > yesterday.snapshotDate`) is. A multi-day gap
+(a missed snapshot) is not a caller error; it's the same accepted,
+bounded imprecision already frozen for Step 9.2's read-consistency
+decision. The generator still produces whatever the matrix matches
+across that gap — an increase-based transition like
+`LOGGING_STREAK_EXTENDED` still fires correctly even if it silently
+undercounts how many days passed, which is consistent with "coarse
+historical observation, not audit log." Rejecting *equal or reversed*
+dates catches a genuine caller bug (the same snapshot passed twice, or
+passed in the wrong order); rejecting a *gap* would be inventing a
+business judgment the generator has no business making.
+
+**"Same user" cannot actually be independently verified from the
+inputs given** — both snapshot dicts carry no `uid` field of their own
+(per the frozen schema, the user is implicit in the Firestore path they
+were read from). This is satisfied by construction: whoever fetches
+both snapshots is responsible for fetching them from one user's
+subcollection. Named honestly rather than pretending to validate
+something the function's actual inputs make unvalidatable.
+
+### Step 10.3 — FROZEN
+
+The seven-stage pipeline, Rule 12, the no-ordering rule, the eventId
+refinement, and the narrowed validation scope are frozen above. Nothing
+about persistence, storage collection, or a caller has been decided —
+per the caller-owns-storage separation, `generate_events()` returns its
+list and stops.
+
+**Implemented** in `services/diff_generator.py`,
+`generate_events(uid, yesterday_snapshot, today_snapshot,
+milestones_today=None)` — the Diff Matrix encoded as data (a list of
+row dicts with `id`/`field`/`transition`/`event`), with the generator
+iterating over that table exactly per Rule 12, never over the
+snapshots' own fields. All 21 unit test scenarios pass
+(`tests/test_diff_generator.py`, synthetic snapshots — every matrix
+row's transition fires correctly and only on its own condition, the
+6→7 healthy-streak-vs-milestone coexistence case, two milestones
+unlocking the same day producing two distinct events with distinct
+`eventId`s, determinism across two identical calls, an unmapped field
+producing silence per Rule 10, and validation correctly rejecting equal
+or reversed dates while explicitly *not* rejecting a multi-day gap).
+
+Verified end-to-end against the real account: two real snapshots were
+created via `create_daily_snapshot()` a day apart, with one genuine
+logging activity in between causing `logging.currentStreak` to move
+0→1, and `generate_events()` correctly detected exactly one
+`LOGGING_STREAK_EXTENDED` event from the real data — both test
+snapshots and the modified `behaviorState` were cleaned up afterward.
+
+Nothing calls `generate_events()` in production yet — no scheduler, no
+persistence of its output to an `events` collection. Both remain
+Step 11's job.
+
+## Step 11.0 — Scheduler Philosophy
+
+**One question, frozen**: *"When and how should the historical
+infrastructure run safely?"* Not "what changed" (Step 10 already
+answered that), not "which notification should be sent" (Phase 5's
+question), not "how healthy is the user" (Health's question, answered
+long ago). The scheduler owns orchestration only —
+**engines answer questions; infrastructure moves information**, and
+this is the purest expression of that rule in the whole project: the
+scheduler itself answers nothing.
+
+### Responsibilities, frozen
+
+```
+Start
+  |
+  v
+Find users needing today's snapshot
+  |
+  v
+create_daily_snapshot()      -- already built, Step 9.3
+  |
+  v
+Load yesterday's snapshot
+  |
+  v
+generate_events()            -- already built, Step 10.3
+  |
+  v
+Persist events
+  |
+  v
+Done
+```
+
+Every box above is a function that already exists. The scheduler adds
+exactly one new capability: persisting the Diff Generator's returned
+list to the `events` collection — everything else is a call to
+already-frozen code.
+
+**It must never**: calculate Health, Metrics, Recommendations, or
+Behavior; compare snapshots itself; classify events itself; decide
+which events matter or send a notification. Any of those would mean
+the scheduler quietly became a sixth engine.
+
+### Inputs and outputs, frozen
+
+**Inputs**: a date, and a database handle. Nothing else — no business
+objects, no engine outputs passed in directly.
+
+**Outputs**: none, as a return value. Its only effect on the world is
+writing to `dailySnapshots/` and `events/` — the same two collections
+Steps 9 and 10 already own.
+
+### Six rules, frozen
+
+1. **Scheduler owns timing, not logic.** Swapping APScheduler for Cloud
+   Scheduler, Firebase Scheduled Functions, cron, or a Kubernetes
+   CronJob changes only the caller — nothing inside the pipeline
+   changes, because the pipeline never depended on *how* it was
+   invoked to begin with.
+2. **One user failing never stops everyone else.** Each user is
+   processed inside its own isolation boundary; a failure for user 417
+   is logged and skipped, never allowed to prevent user 418 from being
+   processed.
+3. **Idempotent.** Running the job twice for the same date produces
+   the same result as running it once — `create_daily_snapshot()`
+   already returns the existing document on a repeat call (Rule 5), and
+   `generate_events()`'s deterministic `eventId`s make persisting them
+   twice an upsert, never a duplicate.
+4. **No partial completion treated as done.** A snapshot existing does
+   not, by itself, mean that day's job is complete — events for that
+   day's transition may still be missing (a crash between the two
+   steps). "Snapshot exists" and "events exist for this transition" are
+   two independent facts, both checked, never one inferred from the
+   other.
+5. **Observable.** Every run logs a summary: users found, successes,
+   failures, events generated, start and finish. Infrastructure must
+   always be able to explain itself after the fact, the same
+   traceability principle already frozen for every domain engine's
+   decision trace, applied here to orchestration runs instead of
+   business decisions.
+6. **No assumption about midnight.** The job doesn't run "at exactly
+   00:00" — it processes "yesterday" (calendar day, per whichever
+   timezone the day boundary already uses — see Step 11.2). Whether the
+   actual invocation happens at 00:05, 00:20, or 01:00, it produces the
+   same result for the same calendar day.
+
+### Step 11.0 — FROZEN
+
+The one question, the responsibilities diagram, the inputs/outputs, and
+the six rules are frozen above. Nothing about the actual orchestration
+flow's code shape, failure recovery, or catch-up behavior has been
+decided yet — Step 11.1 and 11.2 are next.
+
+## Step 11.1 — Scheduler Pipeline
+
+```
+run_daily_snapshot_job(db, date)
+        |
+        v
+get_active_users(db)                     -- who to process
+        |
+        v
+for each user, isolated:
+        |
+        v
+    determine_catch_up_range(db, uid, date)   -- Step 11.2's job
+        |
+        v
+    for each date in that range, isolated:
+        |
+        v
+        create_daily_snapshot(db, uid, that_date)
+        |
+        v
+        load snapshot for (that_date - 1)
+        |
+        v
+        if it exists:
+            generate_events(uid, yesterday, today)
+                |
+                v
+            persist_events(db, uid, events)   -- upsert by eventId
+        |
+        v
+    log per-user outcome
+        |
+        v
+log run summary (Rule 5)
+```
+
+**Isolation happens at two levels, not one**: per-user (Rule 2) and,
+within a single user's catch-up range, per-day — a transient failure on
+one historical day must not block that same user from attempting the
+next day, since every step is independently idempotent and safe to
+retry on the following run.
+
+### Step 11.1 — FROZEN
+
+The orchestration flow above is frozen — every box is either an
+already-built function (Steps 9 and 10) or a new, narrowly-scoped
+orchestration helper (`get_active_users`, `determine_catch_up_range`,
+`persist_events`). Failure and catch-up semantics are Step 11.2's job,
+referenced here but not yet defined.
+
+## Step 11.2 — Failure & Recovery Policy
+
+### The central decision: Option A or Option B?
+
+**Given a multi-day outage (scheduler offline July 1-4, returns July
+5), should the job process only July 5 (Option A), or replay every
+missed day in order until history is complete (Option B)?**
+
+**Decision, frozen: Option B, bounded.** Given everything already built
+around immutable, versioned snapshots and the Historical Principle
+("if this disappeared, would history lose meaning"), leaving permanent
+gaps after an ordinary outage would contradict the whole premise of
+Era 2 — a snapshot system that silently tolerates missing days isn't
+preserving history, it's preserving *most* of it. Each user catches up
+independently, from wherever their own history actually left off.
+
+### How catch-up range is determined — no separate progress tracker needed
+
+**Refinement found while designing this policy, not requiring new
+state**: Rule 4 already means "snapshot exists" can't be trusted alone
+as "day complete" — but rather than building a separate job-progress
+record to track this, the same idempotency already guaranteed by
+`create_daily_snapshot()` and `generate_events()` makes tracking
+unnecessary. For every day in a user's catch-up range: attempt the
+snapshot (a no-op if it already exists); attempt the events for that
+day's transition (a no-op upsert if already persisted, and a genuine
+fill-in if the previous run crashed between the two steps). Redoing a
+completed step is cheap and harmless, so there is nothing to separately
+remember — the range itself is simply **`last existing snapshot's date`
+through `date` (today, inclusive)**; if a user has never had a snapshot
+at all, the range collapses to just `date` itself — no attempt to
+reconstruct arbitrarily deep history for a brand-new user, since there
+is no established baseline to catch up *to*.
+
+**Corrected from an earlier draft of this range, found while designing
+Step 11.3**: starting from `(last existing snapshot's date) + 1` would
+silently skip re-verifying the last existing day itself — if that day's
+snapshot was written but its events were lost (a crash between the two
+steps), starting *after* it would mean that day's missing events are
+never regenerated by any future run. Starting the range from the last
+snapshot's own date, not the day after it, gives that day exactly one
+more chance each run to have its events filled in, at the cost of
+re-attempting one already-complete day (a safe, cheap no-op) every
+time the job runs.
+
+### Bounded, not unbounded
+
+**A maximum catch-up window, frozen as a first cut, same tuning caveat
+every threshold in this spec carries**: `MAX_CATCHUP_DAYS = 30`. An
+outage longer than that is treated as an operational incident requiring
+manual attention, not something the scheduler silently absorbs one user
+at a time — an unbounded catch-up risks one very-stale account making a
+single run arbitrarily slow or expensive, at the cost of one very rare
+scenario (month-plus downtime) versus the common one (an outage of
+hours to a few weeks) this bound already handles correctly.
+
+### Which timezone decides "what day is it"
+
+**Not previously decided — resolved here, reusing an existing
+constant rather than inventing a new one.** `LOGGING_TIMEZONE`
+(`behavior_engine.py`, Asia/Kathmandu, UTC+5:45, frozen in Phase 4.5.1)
+is reused as the day-boundary reference for "what is yesterday" from
+the scheduler's perspective — not server UTC. This keeps the Daily
+Snapshot's own notion of "which calendar day" aligned with the same
+clock Logging and Spending Behavior already use to decide the same
+question, rather than introducing a second, silently different
+definition of "today" alongside it.
+
+### Failure scenarios, frozen with explicit answers
+
+| Scenario | Expected behavior |
+|---|---|
+| Scheduler runs twice for the same date | No duplicate snapshots or events (Rule 3/idempotency) |
+| Crash after snapshot, before events | Events regenerated on the next run (Rule 4) |
+| Crash after events | Safe rerun — both steps are no-ops the second time |
+| One user fails | Logged, skipped; remaining users unaffected (Rule 2) |
+| One day fails mid-catch-up for a user | Logged, skipped; later days for that same user still attempted; that day retried on the next run |
+| No prior snapshot for a user | Catch-up range collapses to just today — no deep backfill attempted |
+| No active users | Successful no-op, logged as such |
+| Multi-day downtime (≤ `MAX_CATCHUP_DAYS`) | Full catch-up, oldest missing day first (Option B) |
+| Downtime exceeding `MAX_CATCHUP_DAYS` | **The entire user is skipped this run, with a logged warning naming the gap size** — never a partial catch-up of only the most recent `MAX_CATCHUP_DAYS`. Partial catch-up would itself be a silent truncation of history (exactly what this policy exists to avoid); an explicit skip-and-warn makes the gap visible and actionable instead. |
+
+### Step 11.2 — FROZEN
+
+Option B (bounded catch-up) is the frozen decision, along with the
+no-separate-tracker refinement, the `MAX_CATCHUP_DAYS` bound, the
+timezone reuse, and the complete failure-scenario table. Step 11.3 —
+Scheduler Implementation — builds the actual orchestration code against
+this policy; nothing about code shape has been written yet.
+
+## Step 11.3/11.4 — Scheduler Implementation, Testing & Real-Account Verification — FROZEN
+
+Implemented in `services/scheduler_service.py`: `run_daily_snapshot_job(db,
+today=None, dry_run=False)` as the sole public entry point, with
+`process_user()`/`process_day()`/`persist_events()`/`get_active_users()`
+as the internal orchestration helpers exactly per Step 11.1's pipeline —
+none of them compute a domain engine, compare a snapshot, or classify an
+event.
+
+**One correction made to the design during implementation, already
+folded into Step 11.2 above**: the catch-up range starts from the last
+existing snapshot's own date, not the day after it — otherwise a day
+whose events were lost to a crash would never get a second chance.
+
+**One correction to the `MAX_CATCHUP_DAYS` policy, also folded in
+above**: exceeding it skips the entire user with a logged warning,
+never a partial catch-up of only the most recent window — a partial
+catch-up would itself be the silent truncation this policy exists to
+prevent.
+
+`month_key_for()` was extracted from `snapshot_service.py` as a shared
+helper, used by both the real snapshot-creation path and the
+scheduler's dry-run preview path (which reuses `snapshot_service`'s own
+`_gather`/`_is_complete`/`_build_snapshot` to compute what a snapshot
+*would* contain without writing it) — one definition of "which month a
+date belongs to," not two.
+
+All 11 unit test scenarios pass (`tests/test_scheduler_service.py` —
+a fake Firestore supporting `order_by`/`limit`/`stream` for the
+catch-up-range query, with `process_day`/`process_user` monkeypatched
+where appropriate to isolate orchestration behavior from the full
+five-engine gather path): no-prior-snapshot collapsing to just today,
+the corrected catch-up start date, the gap-exceeds-bound skip (not
+truncate), per-day isolation within one user (a failing day doesn't
+block later days for that same user), per-user isolation within one run
+(one user's total failure doesn't stop another user), and
+`persist_events`'s upsert-not-duplicate behavior.
+
+**Verified end-to-end against the real account, scoped deliberately to
+`process_user()` rather than the full `run_daily_snapshot_job()`** —
+the full job iterates every user in the `users` collection, and running
+it against the live project risked touching real accounts beyond the
+one test account this whole spec has verified against throughout.
+`process_user()` exercises the identical pipeline for one uid: a
+single-day case (no prior snapshot, collapsing to just today) and a
+three-day catch-up case (a seeded snapshot two days prior, one genuine
+logging action causing a real streak extension *and* a real
+`FIRST_EXPENSE_LOGGED` milestone unlock the same day) both produced
+correct, correctly-persisted events with distinct `eventId`s. All
+created snapshots, events, and the modified `behaviorState`/
+`behaviorHistory` were cleaned up afterward.
+
+**Not yet done, named rather than silently skipped**: nothing calls
+`run_daily_snapshot_job()` in production — no APScheduler job
+registered in `main.py`. Wiring that in is a small, separate,
+deliberately deferred step — registering the actual cron trigger is a
+caller decision, not something this implementation needed to settle to
+be complete on its own terms.
+
+## Step 12 — Integration — FROZEN
+
+Every previously-named "not yet wired" gap from Steps 3-6, 9, and 11 is
+now connected. No new domain reasoning was introduced anywhere in this
+step — every change below is a call to a function that already existed
+and was already tested.
+
+**12.2 — Logging.** `record_logging_activity()` is now called from
+every route that already calls `engine_recompute()` with
+`TRANSACTION_CREATED` or `TRANSACTION_CONFIRMED`:
+`routes/transactions.py` (manual expense, generic transaction create),
+`routes/confirm.py` (single confirm and the bulk-confirm loop — one
+call per batch, not one per month, since Logging is a per-day, not
+per-transaction, fact), `routes/chat.py` (chat-created transaction, two
+chat-confirm paths). **`TRANSACTION_EDITED`/`TRANSACTION_DELETED` call
+sites were deliberately left untouched** — per 4.5.1's own frozen
+trigger table, neither reason counts as logging activity, so wiring
+them would only add a call that always no-ops. Each new call is wrapped
+in its own try/except, mirroring the existing pattern already used for
+`engine_recompute()` at every site — a Behavior Engine hiccup must
+never break the underlying transaction request.
+
+**12.3 — Saving.** `record_saving_activity()` is called at the end of
+`perform_month_rollover_for_user()` in `services/budget_service.py`,
+using that function's own already-computed `prev_month_key` and reading
+`income`/`totalSpent` from `financial_engine.get_summary()` for the
+month that just closed — never recomputed, exactly Actual Savings'
+frozen definition (spec 4.5.3).
+
+**12.5 — Spending & Recovery, plus a genuine ordering correction found
+while wiring it.** The original Step 12.5 sketch read "snapshot exists
+→ then evaluate behavior" — but since a snapshot is immutable once
+written (Rule 5), evaluating *after* creating the snapshot would mean
+today's own evaluation could never be reflected in today's own
+snapshot, only tomorrow's. `process_day()` now evaluates Spending and
+Recovery Behavior **before** creating the snapshot: it reads that
+day's Health status and Recovery Plan directly (`health_engine.compute_overall_health`,
+`metrics_engine.get_metrics`), calls `record_spending_activity()`/
+`record_recovery_activity()`, and only then calls
+`create_daily_snapshot()` — which re-reads Health/Metrics a second time
+internally. This duplicate read is accepted deliberately, the same
+"bounded imprecision" tradeoff already frozen in Step 9.2, in exchange
+for each day's snapshot being internally consistent with its own
+Behavior evaluation.
+
+**12.4 — Scheduler registration, with a second bug found before it ever
+ran.** `run_daily_snapshot_job()` originally defaulted its `today`
+argument to *today* in `LOGGING_TIMEZONE` when called with no explicit
+date — but a job firing shortly after midnight needs to process
+*yesterday*, the day that just fully elapsed, not the barely-started
+current day. Fixed to default to `yesterday`, which is what actually
+makes Rule 6 ("no assumption about midnight") true rather than merely
+stated. Registered in `main.py` as a third APScheduler job, at 00:30
+daily, alongside the existing monthly-rollover and pre-month-end-reminder
+jobs.
+
+**12.6 — Real-account, end-to-end walkthrough**, run once as a single
+continuous script against `botbachat@gmail.com`, not as separate
+per-component checks: a confirmed manual transaction correctly extended
+`behaviorState.logging`'s streak to 1; `process_user()` for that same
+day correctly created a snapshot showing Spending Behavior *already*
+evaluated (`currentHealthyStreak: 1`) before the snapshot was written,
+with `behaviorSummary.status: "building"`; a simulated month rollover
+for that user correctly updated `behaviorState.saving` to
+`currentProtectionStreak: 1` for the month that had just closed. One
+transient network error surfaced during the first attempt (a genuine
+`503`/connectivity failure from Firestore, not a code defect) —
+`process_day()`'s per-day error isolation caught it correctly and
+reported failure rather than crashing, confirming that isolation
+guarantee under a real, not simulated, failure. The walkthrough was
+re-run successfully afterward; every transaction, snapshot, budget
+document, and legacy rollover event created during it was deleted, and
+`financialSummary` was recomputed once more to clear the value the
+deleted test transaction had left behind.
+
+**Architecture status**: every box from Financial Engine through the
+Daily Snapshot Scheduler is now not only implemented but connected.
+Notification Engine (Phase 5) is the only remaining piece, and it
+starts as a pure consumer of an already-working, already-verified event
+stream — never having to infer a change itself.
+
+---
+
+## Backend Platform — FROZEN
+
+**The full pipeline now has real code behind every arrow, not just a
+design**:
+
+```
+Financial Engine → Metrics Engine → Health Engine → Recommendation Engine
+   → Behavior Engine → Daily Snapshot → Diff Generator → Events
+   → Eligibility Waterfall → Notification Generator → Notification Repository
+   → Delivery (FCM) → User
+```
+
+Five domain engines (Financial, Metrics, Health, Recommendation,
+Behavior), one historical-infrastructure layer (Snapshot Builder, Diff
+Generator, Scheduler), and one complete Notification Engine
+(Eligibility, Generator, Repository, Delivery) — every component
+implemented, unit-tested, integration-tested through the scheduler, and
+verified against a real Firestore account where applicable. That third
+layer of verification (real infrastructure, not just mocks) is what
+this freeze actually rests on — every phase since Era 1 has gone
+through the same three-layer discipline, not a rubber-stamped design
+sketch.
+
+**One named, deliberately unresolved exception**: `NEW_BEST_STREAK` has
+Eligibility (5.2A) and Priority (5.3) rows but no Frequency, Timing, or
+Template row, and no Diff Matrix producer at all — the same
+unreachable-event status already flagged for `BACK_ON_TRACK`,
+`CONSISTENT_LOGGER`, and `MONTH_FINISHED_UNDER_BUDGET` in the Event
+Catalog. A phantom event with partial downstream policy but no upstream
+producer can never actually violate any frozen rule in practice (it
+never fires), so it does not block this freeze — but it is a genuine,
+open design decision (give it a producer, or remove it), not something
+this freeze resolves by omission.
+
+**From here, backend work is maintenance, bug fixes, and feature
+additions — not core architectural development.** The next
+transformation for BachatBot is giving users a clear, engaging way to
+experience the intelligence already built: the Flutter frontend
+(Behavior Dashboard, Milestones, Notification Center, push
+registration, health/recommendation UI, navigation, and the UX work
+already discussed) is where effort goes next.

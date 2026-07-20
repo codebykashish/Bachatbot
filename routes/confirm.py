@@ -7,6 +7,10 @@ from typing import Optional, List
 from pydantic import BaseModel
 from services.budget_service import apply_pending_rebalance, reject_pending_rebalance
 from services.financial_engine import recompute as engine_recompute, RecomputeReason
+from services.behavior_engine import record_logging_activity
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -332,6 +336,11 @@ async def confirm_transaction(
     except Exception as _re:
         print(f"[CONFIRM] Engine recompute failed (non-fatal): {_re}")
 
+    try:
+        record_logging_activity(db, uid, RecomputeReason.TRANSACTION_CONFIRMED)
+    except Exception as _be:
+        logger.warning(f"[CONFIRM] Behavior logging update failed (non-fatal): {_be}")
+
     return {
         "success": True,
         "message": "Transaction confirmed.",
@@ -577,6 +586,16 @@ async def bulk_confirm_transactions(
             engine_recompute(db, uid, mk, reason=RecomputeReason.TRANSACTION_CONFIRMED)
         except Exception as _re:
             print(f"[BULK_CONFIRM] Engine recompute failed for month={mk} (non-fatal): {_re}")
+
+    # One logging-activity call for the whole batch, not one per month --
+    # it's a single day-level idempotent update ("today" is logged), never
+    # a per-transaction counter, so calling it more than once would just
+    # be a redundant no-op after the first (spec 4.5.1).
+    if total_confirmed > 0:
+        try:
+            record_logging_activity(db, uid, RecomputeReason.TRANSACTION_CONFIRMED)
+        except Exception as _be:
+            logger.warning(f"[BULK_CONFIRM] Behavior logging update failed (non-fatal): {_be}")
 
     return {
         "success": True,

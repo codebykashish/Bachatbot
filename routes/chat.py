@@ -18,6 +18,7 @@ from services.report_service import (
     get_spend_alerts
 )
 from services.financial_engine import recompute as engine_recompute, get_summary, RecomputeReason
+from services.behavior_engine import record_logging_activity
 import logging
 
 logger = logging.getLogger("bachatbot.chat")
@@ -237,6 +238,11 @@ def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_ke
         engine_recompute(db, uid, month_key, reason=RecomputeReason.TRANSACTION_CREATED)
     except Exception as _re:
         print(f"[CHAT] Engine recompute failed (non-fatal): {_re}")
+
+    try:
+        record_logging_activity(db, uid, RecomputeReason.TRANSACTION_CREATED)
+    except Exception as _be:
+        logger.warning(f"[CHAT] Behavior logging update failed (non-fatal): {_be}")
 
     return transaction_out, budget_update, alert_out, reply_part
 
@@ -611,6 +617,11 @@ async def chat(
             except Exception as _re:
                 print(f"[CHAT][CONFIRM] Engine recompute failed (non-fatal): {_re}")
 
+            try:
+                record_logging_activity(db, uid, RecomputeReason.TRANSACTION_CONFIRMED)
+            except Exception as _be:
+                logger.warning(f"[CHAT][CONFIRM] Behavior logging update failed (non-fatal): {_be}")
+
             # Save assistant message
             assistant_msg_ref = messages_ref.document()
             primary_intent = "confirm_expense"
@@ -678,6 +689,11 @@ async def chat(
                         engine_recompute(db, uid, exp_month_key, reason=RecomputeReason.TRANSACTION_CONFIRMED)
                     except Exception as _re:
                         print(f"[CHAT][SKIP-BUDGET] Engine recompute failed (non-fatal): {_re}")
+
+                    try:
+                        record_logging_activity(db, uid, RecomputeReason.TRANSACTION_CONFIRMED)
+                    except Exception as _be:
+                        logger.warning(f"[CHAT][SKIP-BUDGET] Behavior logging update failed (non-fatal): {_be}")
 
                 reply = (
                     f"Thik cha, {waiting_cat} ko budget ahile set gareina. "

@@ -37,6 +37,8 @@ from datetime import datetime, timezone
 
 from firebase_config import get_firestore
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
+from services.financial_engine import get_summary as get_financial_summary
+from services.behavior_engine import record_saving_activity
 
 logger = logging.getLogger("bachatbot.budget_service")
 
@@ -505,6 +507,16 @@ def perform_month_rollover_for_user(db, uid: str, new_month_key: str):
         set_budget_confirmed_for_month(db, uid, new_month_key, confirmed=False)
     except Exception as e:
         logger.error(f"[ROLLOVER] Failed to set budgetMonthMeta for uid={uid}: {e}")
+
+    # 5. Record Saving Behavior for the month that just closed (spec 4.5.3:
+    # Actual Savings = Income - confirmed Spending, read from that month's
+    # already-frozen financialSummary, never recomputed here).
+    try:
+        prev_summary = get_financial_summary(db, uid, prev_month_key)
+        actual_savings = prev_summary["income"] - prev_summary["totalSpent"]
+        record_saving_activity(db, uid, prev_month_key, actual_savings)
+    except Exception as e:
+        logger.error(f"[ROLLOVER] Failed to record Saving Behavior for uid={uid}: {e}")
 
 
 def run_month_rollover():

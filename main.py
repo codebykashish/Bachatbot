@@ -21,6 +21,8 @@ initialize_firebase()
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from services.budget_service import run_month_rollover, run_pre_month_end_reminder
+from services.scheduler_service import run_daily_snapshot_job
+from firebase_config import get_firestore
 
 scheduler = BackgroundScheduler()
 
@@ -43,8 +45,21 @@ scheduler.add_job(
     replace_existing=True
 )
 
+# 3. Daily Snapshot Job: Run at 00:30 every day. run_daily_snapshot_job()
+# defaults to yesterday (LOGGING_TIMEZONE) when called with no explicit
+# date, so this always processes the day that just fully elapsed,
+# regardless of the exact minute this actually fires (spec Step 11.0's
+# Rule 6 -- no assumption about midnight).
+scheduler.add_job(
+    lambda: run_daily_snapshot_job(get_firestore()),
+    CronTrigger(hour=0, minute=30),
+    id="daily_snapshot",
+    name="Create daily snapshots and generate behavior events",
+    replace_existing=True
+)
+
 scheduler.start()
-logger.info("[SCHEDULER] Started BackgroundScheduler with 2 jobs")
+logger.info("[SCHEDULER] Started BackgroundScheduler with 3 jobs")
 
 
 # Create FastAPI app
@@ -123,6 +138,7 @@ from routes.financial_summary import router as financial_summary_router
 from routes.financial_metrics import router as financial_metrics_router
 from routes.financial_health import router as financial_health_router
 from routes.financial_recommendations import router as financial_recommendations_router
+from routes.notifications import router as notifications_router
 
 app.include_router(signup_router)
 app.include_router(profile_router)
@@ -142,6 +158,7 @@ app.include_router(financial_summary_router)
 app.include_router(financial_metrics_router)
 app.include_router(financial_health_router)
 app.include_router(financial_recommendations_router)
+app.include_router(notifications_router)
 
 
 # Health check - test if server is running

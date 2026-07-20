@@ -6,6 +6,7 @@ from utils import serialize_doc, get_current_month_key
 from typing import Optional
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment
 from services.financial_engine import recompute as engine_recompute, RecomputeReason
+from services.behavior_engine import record_logging_activity
 import logging
 
 router = APIRouter()
@@ -127,6 +128,11 @@ async def add_manual_expense(
         engine_recompute(db, uid, month_key, reason=RecomputeReason.TRANSACTION_CREATED)
     except Exception as _re:
         logger.warning(f"[MANUAL] Engine recompute failed (non-fatal): {_re}")
+
+    try:
+        record_logging_activity(db, uid, RecomputeReason.TRANSACTION_CREATED)
+    except Exception as _be:
+        logger.warning(f"[MANUAL] Behavior logging update failed (non-fatal): {_be}")
 
     return {
         "success": True,
@@ -276,6 +282,11 @@ async def create_transaction(
         engine_recompute(db, uid, month_key, reason=RecomputeReason.TRANSACTION_CREATED)
     except Exception as _re:
         logger.warning(f"[TRANSACTIONS] Engine recompute failed (non-fatal): {_re}")
+
+    try:
+        record_logging_activity(db, uid, RecomputeReason.TRANSACTION_CREATED)
+    except Exception as _be:
+        logger.warning(f"[TRANSACTIONS] Behavior logging update failed (non-fatal): {_be}")
 
     return {
         "success": True,
