@@ -139,6 +139,7 @@ from routes.financial_metrics import router as financial_metrics_router
 from routes.financial_health import router as financial_health_router
 from routes.financial_recommendations import router as financial_recommendations_router
 from routes.notifications import router as notifications_router
+from routes.behavior import router as behavior_router
 
 app.include_router(signup_router)
 app.include_router(profile_router)
@@ -159,6 +160,7 @@ app.include_router(financial_metrics_router)
 app.include_router(financial_health_router)
 app.include_router(financial_recommendations_router)
 app.include_router(notifications_router)
+app.include_router(behavior_router)
 
 
 # Health check - test if server is running

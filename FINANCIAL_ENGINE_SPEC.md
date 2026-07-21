@@ -11103,3 +11103,339 @@ experience the intelligence already built: the Flutter frontend
 (Behavior Dashboard, Milestones, Notification Center, push
 registration, health/recommendation UI, navigation, and the UX work
 already discussed) is where effort goes next.
+
+---
+
+## Phase 13.1 — Notification Center (Frontend) — FROZEN
+
+**Scope, decided before code**: the list is read directly from
+Firestore (`users/{uid}/generatedNotifications`, a real-time listener —
+the same working pattern the legacy alert-popup system already used),
+since a read-only fan-out has no business logic to own. Mutating
+status, however, goes through two new thin REST endpoints —
+`POST /notifications/{eventId}/read` and `/dismiss` — rather than a
+direct client write, so the Repository's idempotency guarantees
+(`mark_read`/`mark_dismissed` never move status backward) stay the
+single, server-owned source of truth instead of being re-implemented
+in Flutter. The existing bell/badge was repointed from the legacy
+`/alerts`-backed `NotificationScreen` to the new
+`NotificationCenterScreen` and `NotificationCenterService.unreadCount`
+— found mid-implementation that `NotificationScreen` is *also* used
+directly (not via the bell) for pending-transaction review
+(`_checkPendingTransactionsAndNavigate`), which was left untouched;
+only the bell's target and badge source moved.
+
+**Built**:
+- Backend: `routes/notifications.py` gained `mark_notification_read`/
+  `dismiss_notification`, thin pass-throughs to
+  `notification_repository.mark_read()`/`mark_dismissed()`. Verified by
+  calling the route functions directly against real Firestore (status
+  transitions, idempotent re-dismiss, 404 on an unknown id) — cleaned
+  up afterward.
+- Frontend (first FCM integration in this codebase — `firebase_messaging`
+  did not exist here before this phase): `PushNotificationService`
+  (permission request, token fetch + registration, `onTokenRefresh`
+  re-registration, foreground/background/terminated message handling),
+  `NotificationCenterService` (the Firestore listener + unread-count
+  singleton, same pattern as the existing `AlertPopupService`/
+  `MonthEventService`), and `NotificationCenterScreen` (priority-colored
+  list, unread dot, swipe-to-dismiss, tap-to-read).
+- `flutter analyze` clean across every file touched.
+
+**Real, unprompted, full-stack verification** — better than anything
+staged: a real transaction on a real device produced a real
+`FIRST_EXPENSE_LOGGED` milestone, which the real pipeline (Behavior →
+Diff Generator → Eligibility → Generator → Repository) turned into a
+notification; `deliveredAt` confirms a real successful FCM hand-off
+(the device's `fcmToken` was registered by `PushNotificationService`
+exactly as designed); the user tapped it in the live Notification
+Center, which correctly called the new `/read` endpoint — `status:
+Read`, `readAt` stamped, confirmed by reading the real document
+afterward. This is the first time the full chain — user action through
+Financial/Behavior engines, Snapshot, Diff, Eligibility, Generator,
+Repository, Delivery, FCM, and back into rendered UI — was exercised
+by genuine use rather than a script.
+
+**One honest, named limitation surfaced by this same real test**:
+`MILESTONE_UNLOCKED`'s `cta` ("View milestone") currently has nowhere
+to send the user — `deepLink` is `null` by design (`notification_generator.py`'s
+own note: Flutter route names don't exist yet), and there is no
+Milestones screen at all yet. Tapping the notification correctly shows
+its title/body and marks it Read; the `cta` button currently just
+closes the dialog. Closing this gap is exactly the next planned phase
+(Behavior UI / Milestones), not a defect in the Notification Center
+itself.
+
+---
+
+## Phase 13.2 — Behavior UI — FROZEN
+
+**Scope, decided before code**: the Behavior Engine had no REST surface
+at all before this phase — `compute_behavior_summary()` and
+`behavior_state_repository`'s `load_state()`/`load_history()` existed
+only as internal calls from the scheduler. Added `GET /behavior`,
+matching `routes/financial_health.py`'s existing convention exactly
+(computed fresh on request, `{success, data}`), rather than reading a
+possibly-stale snapshot field from Firestore directly — consistent with
+how Health is already exposed, distinct from the Notification Center's
+list (which is read-only and has no business logic, so a direct
+Firestore listener was the right call there instead). Placement in the
+app: a "Your Progress" entry point on the Home screen (same "See All"
+card pattern already used for Categories/Reports), not a new bottom-nav
+tab — one dedicated `BehaviorScreen` holds the full summary/streaks/
+milestones view.
+
+**The milestone catalog (title/description per code) lives in
+`routes/behavior.py`, not `behavior_engine.py`** — presentation copy is
+kept out of the engine, the same separation `notification_generator.py`'s
+Template Matrix already draws between "what happened" and "how it's
+worded." The route merges `behaviorHistory.milestones[]` against this
+catalog so all 4 known milestones are always returned, locked or
+unlocked — an achievement-badge UX, not just a growing unlocked-only
+list.
+
+**Built**:
+- Backend: `routes/behavior.py` (`GET /behavior` →
+  `{summary, state, milestones}`), registered in `main.py`.
+- Frontend: `BehaviorScreen` (status card, streak rows for
+  Logging/Spending/Saving/Recovery, a 4-tile milestone grid with
+  locked/unlocked states), plus a compact preview card on `HomeScreen`
+  ("N-day logging streak" + "M/4 milestones").
+
+**Real-account verification**: called the route function directly
+against the same real device/account from the Notification Center's
+own real walkthrough (`uid=BDpx6it7MeSZSrUJEBu9Bbwfp8l1`) — returned the
+correct live state: `status: "building"`, `logging.currentStreak: 1`,
+and `FIRST_EXPENSE_LOGGED` correctly shown `unlocked: true` with its
+real `unlockedAt` date, the other three milestones correctly `unlocked:
+false`. `flutter analyze` clean across every file touched. This also
+closes the exact gap the Notification Center's own freeze named: a
+`MILESTONE_UNLOCKED` notification's "View milestone" cta now has a real
+screen to lead to, once Phase 13's deep-link wiring catches up.
+
+---
+
+## Phase 13.2b — Activity Feed — FROZEN
+
+**Reframed from real user feedback, not a pre-planned phase**: after
+using the app for real, the question came back "a notification came
+but nothing showed in the Notification Center" — the notification in
+question turned out to be the legacy alert system's own budget-threshold
+popup, a completely different mechanism than the new engine. Digging
+into *why* that felt wrong surfaced a genuinely reasonable ask: every
+transaction should be visibly logged somewhere the user can check. That
+ask was **not** implemented by making transactions "eligible" in the
+Notification Engine's own sense (a live per-transaction ping would
+directly violate 5.0's Rule 1 — "never notify because something
+changed, notify because the user should care" — and would flood the
+new engine with exactly the noise the Eligibility Waterfall exists to
+prevent). Instead it revealed that the legacy `alerts` collection
+*already* logs every transaction (`routes/chat.py`'s "Rs X `<cat>`
+expense saved" entries) — its old screen was even already titled
+"Activity." The real gap was that the bell only pointed at ONE of the
+two systems at a time, never both.
+
+**Decision: one unified `ActivityFeedScreen`, replacing the bell/badge
+target everywhere it appeared** (`MainScreen`'s AppBar,
+`CategoriesScreen`'s own separate AppBar bell, and the pending-transaction
+auto-navigate-on-launch check) — merging `users/{uid}/alerts` (legacy:
+transactions, budget alerts, pending-transaction confirmations) and
+`users/{uid}/generatedNotifications` (the new engine) by timestamp, with
+an All / Transactions & Alerts / Notifications filter. No new backend
+endpoint — both sources are read-only fan-outs with no business logic
+of their own, matching the same reasoning that already justified a
+direct Firestore listener for the Notification Center's own list.
+Mutating an item still goes through each system's own existing,
+already-tested write path (`PATCH /alerts/{id}/read`, `POST
+/notifications/{id}/read|dismiss`) — merging the display never merges
+the two systems' actual state.
+
+**A real bug caught before shipping, not after**: the first draft
+scoped both Firestore listeners to `ActivityFeedScreen`'s own
+`initState`/`dispose` — meaning the bell's unread badge would only
+stay accurate while that screen happened to be open, silently going
+stale the rest of the time. Fixed by extracting `ActivityFeedService`,
+a persistent app-lifetime singleton (the same pattern already used by
+`AlertPopupService`/`MonthEventService`), initialized once in
+`MainScreen.initState()` alongside the other singletons; the screen
+itself now only reads the service's `ValueNotifier`s, owning no
+subscription of its own.
+
+**Superseded and removed**: `NotificationCenterScreen` and
+`NotificationCenterService` (both introduced earlier this same phase,
+Phase 13.1) are now fully replaced by `ActivityFeedScreen`/
+`ActivityFeedService` and were deleted rather than left as dead code.
+The **pre-existing** `NotificationScreen` (the old filtered
+transaction-history browser used from Home/Categories/Income/Profile
+for "view all Food transactions," "view today's transactions," etc.)
+was deliberately left untouched — it serves a genuinely different,
+still-needed purpose from the bell/badge, and nothing about this phase
+required touching it.
+
+**Verification**: `flutter analyze` on the full project — zero errors,
+only 18 pre-existing lint infos in files this phase never touched.
+
+---
+
+## Phase 13.2c — Activity Feed Redesign — FROZEN
+
+**Driven entirely by real usage feedback, not a pre-planned pass**:
+after actually using the app, three things came back —
+(1) the "double notification" feeling (system push + an in-app banner,
+both firing for the same budget alert), (2) the feed's cards read as
+alarming (saturated red/orange full-card backgrounds) rather than
+routine, and (3) `Your Progress` sat at the very bottom of Home, easy
+to miss. All three were product/UX decisions, not bugs — confirmed
+first against real Firestore data that nothing was actually missing.
+
+**Decisions made, each confirmed before building**:
+- **Dropped the in-app popup banner** (`AlertPopupService._showBanner`)
+  entirely — the system push already reaches the user reliably, even
+  backgrounded; the banner was the actual redundant half of the
+  "double" feeling, not the push. `_showBanner`/`AlertBanner` left in
+  place, unused, rather than deleted — reversible if this needs
+  revisiting.
+- **Facebook-style redesign of `ActivityFeedScreen`**: plain white rows
+  by default; unread items get a light green tint (`0xFFEAF7F0`) plus a
+  small solid dot, both of which disappear the moment the item is read
+  — never a saturated full-row color. Icons are small, tinted circular
+  avatars per item kind (receipt for transactions, warning for budget
+  alerts, swap for rebalances, bell for engine notifications) instead of
+  color-coding the whole card.
+- **Type filter split three ways** (Transactions / Alerts / Notifications
+  / All) instead of one combined "Transactions & Alerts" bucket, plus
+  independent Category and Date Range filters — all three collapsed
+  into a single filter-icon-triggered bottom sheet (three dropdowns +
+  Apply/Reset) rather than an always-visible row of chips, to keep the
+  main view uncluttered. A small dot on the filter icon itself shows
+  when any filter is active.
+- **Added a search bar** (title/body/message/category substring match)
+  pinned under the AppBar.
+- **`Your Progress` moved from the bottom of Home to a slim, single-line
+  strip** directly under the Overall Health badge near the top —
+  deliberately neutral-toned (same background as the health badge, no
+  bright color) so it earns visibility without competing with the
+  balance numbers above it. Tapping it still opens the full
+  `BehaviorScreen`, unchanged.
+
+**Verification**: `flutter analyze` on the full project — zero errors;
+one expected, deliberately-left `unused_element` warning on
+`_showBanner` (documented in its own comment, not accidental dead
+code).
+
+---
+
+## Phase 13.3 — Streak Screen Redesign & Budget Pop-up — FROZEN
+
+**Two more real-usage findings, resolved the same way — verify first,
+then design, then confirm before building:**
+
+- **"The notification came but nothing showed"** turned out, again, to
+  be expected behavior, not a bug: the `alerts` collection's entries
+  were correctly present and correctly rendering in the Activity Feed —
+  the confusion was between the "Notifications" filter tab (new engine
+  only) and "Transactions & Alerts" (legacy system), same distinction
+  as Phase 13.2b, now doubly confirmed as a real, recurring UX question
+  rather than a defect.
+- **"Only a push notification, no in-app confirmation"** for budget
+  overspend, after Phase 13.2c dropped the banner — this one *was* a
+  real gap: a system push alone is too easy to dismiss without
+  registering. Fixed with a **center pop-up dialog requiring
+  acknowledgment** ("Got it"), queued so multiple near-simultaneous
+  alerts (a common case: an expense threshold + a rebalance transfer)
+  never stack dialogs — `AlertPopupService._enqueueCenterAlert()`/
+  `_processCenterAlertQueue()`. Scoped deliberately narrow: only the
+  budget alerts that already exist today, not the bigger, separately-
+  designed Pattern Spending Alerts feature (still paused, unchanged).
+
+**Streak screen, redesigned from a Duolingo reference, in our own
+colors**: `BehaviorScreen` now opens as a full "Streak" page (bottom
+sheet-style, sliding up from the bottom via the new `slideUpRoute()`
+helper) reached from a flame + streak-number badge that moved from a
+scrollable Home card into `MainScreen`'s AppBar itself — permanently
+visible, not scrollable away, per the direct ask to have it "above."
+Backed by a new tiny app-lifetime holder, `BehaviorPreviewService`
+(two `ValueNotifier`s, refreshed at app start and after every Home
+fetch), since the badge now needs to be readable from the AppBar,
+outside `HomeScreen`'s own widget tree.
+
+**A real streak calendar, not just a number**: the old design only
+showed the current streak count. The new one queries
+`users/{uid}/transactions` directly (read-only, monthKey-filtered, no
+business logic — the same reasoning already used for Activity Feed's
+list reads) to find which exact calendar days had a logged transaction,
+and renders a real month grid with those days highlighted — closer to
+what "streak" actually means to a user than an abstract counter.
+
+**Less permanent text, not more explanation removed**: every card
+(status, other streaks, milestones, the streak-goal bar) now shows only
+a short label/number by default. The fuller "what this means / how to
+grow it" explanation moved into `HoldTooltip` — a new, reusable
+press-and-hold-to-reveal widget (the mobile equivalent of the "hover to
+see a word's meaning" pattern asked for), rather than sitting on-screen
+permanently. Nothing was deleted — the same information is still
+available, just on demand instead of as a wall of text.
+
+**Verification**: `flutter analyze` on the full project — zero errors,
+same one deliberate `_showBanner` warning as before.
+
+---
+
+## Phase 13.5 — Health Theme System, Foundation — FROZEN
+
+**The idea, precisely**: the Health Engine's status shouldn't just show
+a dot — it should become a consistent visual language ("financial
+mood") the whole app reflects: accent color, card tint, progress color,
+ambient background wash. Scoped deliberately into a foundation pass
+first (this phase) before spreading to Categories/Reports/Chatbot
+tone/Notifications (separate, later phases, chatbot tone explicitly
+deferred since it's backend wording work, not Flutter theming).
+
+**A real duplicate-signal problem found before building on top of it,
+not after**: the app already had a working "financial mood" mechanism
+— `FinancialStatusService` + `AmbientStatusOverlay`, wrapped around the
+entire app in `main.dart`'s `MaterialApp.builder`. But it computed its
+own crude client-side proxy (`spent > budget limit?` in
+`home_screen.dart`), completely independent of the real, multi-factor
+Health Engine status (category pressure, projected deficit, recovery
+state) already computed server-side and already driving the Home badge
+and `HealthScreen`. Two "health" signals could disagree. Building a new
+theme system on top of *either* signal without reconciling this first
+would have made the disagreement worse, not better.
+
+**Fixed by retiring `FinancialStatusService` entirely** — deleted, not
+deprecated-in-place. `AmbientStatusOverlay` now reads
+`HealthThemeService.status` instead.
+
+**Built**:
+- `lib/theme/health_theme.dart` — the frozen 3-row lookup (green/amber/
+  red → accent/statusColor/progressColor/cardTint/backgroundTint),
+  reusing the exact brand colors already used elsewhere (Streak's
+  flame, Notification priority colors) rather than inventing a new
+  palette. `iconStyle`/`animationStyle` from the original design are
+  named in the class's own doc comment as deliberately not built yet —
+  a later phase, not faked with a placeholder now.
+- `lib/services/health_theme_service.dart` — a plain `ValueNotifier`
+  holder, deliberately **not** a self-fetching singleton like
+  `ActivityFeedService`/`BehaviorPreviewService`: `HomeScreen` already
+  calls `GET /financial-health` every refresh for its own badge, so
+  `_fetchOverallHealth()` just pushes the real result here instead of
+  firing a second, redundant fetch of the same endpoint.
+- `AmbientStatusOverlay` rebuilt on the new service/theme. Green now
+  means *no overlay at all* (calm reads better as the absence of a mood
+  layer than as a green wash — matches the design's own caution against
+  overdoing it); amber/red keep the exact same smoky, desaturated haze
+  treatment that already existed, just correctly sourced now.
+- Home's Health badge now themed: card tint, border, and status-text
+  color all come from `HealthTheme.forStatus()` instead of a fixed grey
+  background and black text.
+
+**Deliberately out of scope for this pass**: `BalanceCard`'s own
+`spendingPaceStatus` gradient was left untouched — that's a different
+Metrics Engine signal (pace vs. overall Health), and conflating the two
+without being asked risked exactly the kind of signal confusion this
+phase just finished untangling. Categories, Reports, Chatbot tone, and
+Notifications are unchanged, per the agreed phasing.
+
+**Verification**: `flutter analyze` on the full project — zero errors,
+same pre-existing infos, same one deliberate `_showBanner` warning.
