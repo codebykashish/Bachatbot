@@ -11537,3 +11537,79 @@ per feedback that it was "barely noticeable."
 
 **Verification**: `flutter analyze` on the full project — zero errors,
 same pre-existing infos.
+
+**Follow-up, same phase**: Goals summary and Projected Savings cards
+redesigned to be more visually prominent (bigger icons/numbers,
+circular icon badges matching the rest of the app) and their copy
+simplified (shorter sentences, no em dashes). Projected Savings also
+became sign-aware — a negative projection now shows in red via
+`HealthTheme`, rather than always rendering in the same green
+regardless of whether the forecast was actually good news.
+
+---
+
+## Phase 13.8 — Health Theme, Reports — FROZEN
+
+**The third occurrence of the same duplicate-signal problem**, found
+before implementing rather than after: Reports' "Overall Status" card
+had its own local `low`/`ok`/`high`/`overspent` proxy, read from
+`/monthly-report`'s `insights.overallStatus` — a third, independent
+status signal alongside the real Health Engine status, after the same
+class of bug was already found and fixed for the ambient overlay
+(Phase 13.5) and Categories cards (Phase 13.7).
+
+**Fixed the same way, a third time**: `_buildOverallStatusCard()` now
+reads `_overallHealthStatus` (from `/financial-health`, fetched
+alongside the existing `/monthly-report`/`/goals`/`/financial-metrics`
+calls) through `HealthTheme.forStatus()` — the local proxy field and
+its 4-way switch were removed entirely, not left dormant.
+
+**Today chart's category bars now colored by real Category Health**
+(`AdaptiveReportChart` gained a `categoryHealth` map parameter) instead
+of uniform green — directly surfacing "the categories driving the
+problem" per the original design idea, reusing the same
+`HealthTheme.forStatus()` lookup rather than inventing new color logic.
+
+**Week/Month day-bars deliberately left unchanged** — Category Health
+is per-category or overall, not per-day; recoloring individual days
+would mean fabricating a "risky day" concept the backend doesn't
+produce. Named as a boundary, confirmed with the user before
+implementing, not silently skipped.
+
+**Verification**: real-account call to `compute_overall_health()`
+confirms `amber` status flows correctly end-to-end. `flutter analyze`
+on the full project — zero errors, same pre-existing infos.
+
+---
+
+## Phase 13.9 — Reports UI Cleanup — FROZEN
+
+**Real usage feedback, UI-only — no backend logic touched, per explicit
+instruction.**
+
+**Found and fixed a genuine duplicate-header bug**: `ReportsScreen`
+always rendered its own `AppBar` saying "Reports," with no
+context-awareness — but it's used as a `MainScreen` tab too, which
+already has its own AppBar showing "Reports." `CategoriesScreen` had
+already solved exactly this with a `showAppBar` flag (`false` when
+embedded as a tab, `true` when pushed standalone); `ReportsScreen`
+never got the same treatment. Fixed identically: `showAppBar` added,
+defaulting to `false`; the two standalone pushes from `HomeScreen` now
+pass `showAppBar: true`.
+
+**Filter redesign**: Today/Week/Month tabs kept visible as asked
+(default view changed from `week` to `today`); the category filter (9
+always-visible chips) moved behind a filter icon opening a clean
+bottom sheet, the same interaction pattern the Activity Feed already
+established — an active category filter now shows as a small dismissible
+chip instead of a permanently-visible row.
+
+**One new insight, deliberately minimal**: "X is your biggest spend
+this period — Rs Y," a plain client-side `max()` over
+`_categoryBreakdown`, already fetched — no new backend call, no new
+logic invented, hidden entirely once a specific category is already
+selected (a "top category" fact is meaningless once you're already
+looking at just one).
+
+**Verification**: `flutter analyze` on the full project — zero errors,
+same pre-existing infos.
