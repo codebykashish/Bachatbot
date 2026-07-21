@@ -11439,3 +11439,101 @@ Notifications are unchanged, per the agreed phasing.
 
 **Verification**: `flutter analyze` on the full project — zero errors,
 same pre-existing infos, same one deliberate `_showBanner` warning.
+
+---
+
+## Phase 13.6 — Deep Linking — FROZEN
+
+**Closes the one real gap the Notification Center's own freeze named**:
+`deepLink` was reserved in the frozen 5.6B shape since Phase 5, but
+always `None` — its own comment said the reason was "Flutter's actual
+route names don't exist yet." They do now.
+
+**Backend — a Deep Link Matrix**, the same shape as the existing
+Priority/Frequency/Timing/Template matrices: event code -> a semantic
+destination key (`"health"`, `"category_detail"`, `"streak"`,
+`"activity"`), never a Flutter class name — `notification_generator.py`
+has no business knowing Flutter internals, the frontend owns the
+key -> screen mapping. `CATEGORY_BECAME_EXHAUSTED` deliberately gets
+its own `"category_detail"` key rather than the generic `"health"`
+bucket, since its payload already carries the specific category —
+routing straight to `CategoryDetailPage(category)` is more useful than
+dropping the user on a generic Health screen. `TRANSACTION_CREATED`/
+`TRANSACTION_CONFIRMED` (still phantom — no Diff Matrix producer,
+per the 5.9 audit) got a row anyway, the same "complete the matrix even
+for unreachable codes" discipline already applied to `NEW_BEST_STREAK`.
+Rule 8 (fail fast) now includes the Deep Link Matrix in its missing-
+policy check, same as the other three tables.
+
+**Frontend — resolution only, no new navigation logic invented**: a
+plain `deepLink -> Widget` switch in `ActivityFeedScreen`. Tap behavior
+unchanged (mark read, show the detail dialog) — the dialog's CTA button
+now actually navigates instead of just closing, closing the dialog
+first so there's never a screen stacked behind the destination.
+
+**Verification**: `test_notification_generator.py` extended with 2 new
+scenarios (`MILESTONE_UNLOCKED` resolves to `"streak"` regardless of
+milestone code; `CATEGORY_BECAME_EXHAUSTED` resolves to
+`"category_detail"`, not the generic bucket) — all 19 scenarios in that
+file pass, full backend suite (14 files) has zero regressions. Manually
+re-verified 5 event codes end-to-end (`HEALTH_WORSENED` ->
+`"health"`, `RECOVERY_STARTED` -> `"health"`,
+`CATEGORY_BECAME_EXHAUSTED` -> `"category_detail"`,
+`MILESTONE_UNLOCKED` -> `"streak"`, `LOGGING_STREAK_EXTENDED` ->
+`"streak"`). `flutter analyze` on the full project — zero errors, same
+pre-existing infos.
+
+---
+
+## Phase 13.7 — Health Theme, Categories — FROZEN
+
+**Triggered by real usage feedback, same shape as before**: every
+category card was rendering nearly identical saturated red — real
+complaint was "too much red," "why not amber at 80%," and the cards
+felt visually heavy. Root-caused before touching any styling: the
+card's dominant coloring came from a local, client-only check
+(`percent >= 100%?`), completely separate from the real backend
+Category Health signal (`healthStatus`) that was *already being
+fetched* — it just only powered a small secondary chip, never the
+card's own background/border/badge. Two signals for the same fact,
+exactly the same class of problem Phase 13.5 found and fixed for the
+ambient overlay, now found a second time in the same screen family.
+
+**Fixed the same way**: retired the local percent-only coloring
+entirely; the whole card (background tint, border, percent badge,
+category-name color, status label, progress bar color) now comes from
+`HealthTheme.forStatus(healthStatus)` — the identical lookup table
+built for Phase 13.5, reused rather than re-invented.
+
+**Real-account verification confirmed the fix does what was asked**:
+called `compute_category_health()` directly against the real account —
+of five categories all sitting at/near 100% of raw budget, only one
+(`Food`, `CATEGORY_RECOVERABLE`) is genuinely `amber`; the other four
+are `green`, because Category Pressure is time-adjusted (spending pace
+vs. how far into the month it actually is), not a flat percent-of-
+budget check. The "wall of red" was entirely an artifact of the old
+logic, not a true reflection of the account's real state — confirms
+the fix addresses the actual complaint, not just its symptom.
+
+**A second, independent bug found and fixed in the same pass** (not
+part of the original ask, surfaced while investigating): the "2-column
+grid" of category cards was never a real grid — a manual `Row` per
+pair with no `crossAxisAlignment: CrossAxisAlignment.stretch`, so two
+cards in the same row rendered at their own intrinsic height. A
+flagged category (extra status-label row) was visibly taller than an
+unflagged pair-partner. Fixed by stretching the row.
+
+**A third, related hardening**: `CategoryDetailPage`'s budget-fetch had
+an empty `catch (_) {}` — a transient failure there would silently and
+permanently strand the screen on "no budget set," even with a real
+budget existing server-side (confirmed via direct Firestore/API checks
+against the real account during this investigation — the account's own
+budget data was correct throughout). Now logged rather than swallowed;
+pull-to-refresh already gives a retry path once noticed.
+
+**Also addressed**: the ambient overlay's amber/red opacity was bumped
+up slightly (0.16/0.22 → 0.22/0.30 top, 0.22/0.30 → 0.30/0.40 bottom)
+per feedback that it was "barely noticeable."
+
+**Verification**: `flutter analyze` on the full project — zero errors,
+same pre-existing infos.

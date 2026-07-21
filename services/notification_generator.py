@@ -105,6 +105,37 @@ _TEMPLATES = {
     "SAVING_STREAK_BROKEN": ("TITLE_SAVING_BROKEN", "This month's savings goal was missed", "Here's what changed this month", "View monthly report"),
 }
 
+# ─── Deep Link Matrix (Step 13's own completion of spec 5.6B's
+# reserved-but-empty deepLink slot) ──────────────────────────────────────────
+# A semantic destination key, never a Flutter class name — this module
+# has no business knowing Flutter route/widget names. The frontend owns
+# the key -> screen mapping. MILESTONE_UNLOCKED and the streak events
+# share "streak" regardless of milestone code, since they all belong on
+# the same Behavior/Streak screen.
+_DEEP_LINKS = {
+    "HEALTH_WORSENED": "health",
+    "HEALTH_IMPROVED": "health",
+    "PRIMARY_RECOMMENDATION_CHANGED": "health",
+    "RECOVERY_STARTED": "health",
+    "RECOVERY_BECAME_IMPOSSIBLE": "health",
+    "RECOVERY_COMPLETED": "health",
+    "RECOVERY_FAILED": "health",
+    "CATEGORY_BECAME_EXHAUSTED": "category_detail",
+    "MILESTONE_UNLOCKED": "streak",
+    "LOGGING_STREAK_EXTENDED": "streak",
+    "LOGGING_STREAK_BROKEN": "streak",
+    "HEALTHY_STREAK_EXTENDED": "streak",
+    "HEALTHY_STREAK_BROKEN": "streak",
+    "SAVING_STREAK_EXTENDED": "streak",
+    "SAVING_STREAK_BROKEN": "streak",
+    # Phantom today (spec 5.9's own audit: no Diff Matrix producer exists
+    # for either code) — completed here anyway, per Rule 3's "every
+    # matrix stays consistent even for codes that can't fire yet" already
+    # applied to NEW_BEST_STREAK elsewhere.
+    "TRANSACTION_CREATED": "activity",
+    "TRANSACTION_CONFIRMED": "activity",
+}
+
 # MILESTONE_UNLOCKED is keyed by its payload's milestone code, not a
 # single fixed template — one row per milestone (spec 5.6A: `TITLE_
 # MILESTONE_{code}`), kept separate from _TEMPLATES since it needs a
@@ -157,6 +188,7 @@ def generate_notification(event: dict) -> dict:
             name for name, table in (
                 ("Priority", _PRIORITY), ("Frequency", _FREQUENCY),
                 ("Timing", _TIMING), ("Template", _TEMPLATES),
+                ("Deep Link", _DEEP_LINKS),
             )
             if code not in table
         ]
@@ -190,14 +222,16 @@ def generate_notification(event: dict) -> dict:
         "priority": priority,
         "frequency": frequency,
         "timing": timing,
-        # Not yet computable, named honestly rather than fabricated:
-        # interruptionLevel needs the 5.2 Context gate (live app state),
-        # which isn't implemented; deepLink needs Flutter's actual route
-        # names (Step 13), which don't exist yet. Both slots are always
-        # present on the object (spec 5.6B's frozen shape), populated
-        # with real values once their dependency exists.
+        # interruptionLevel: still not computable — needs the 5.2 Context
+        # gate (live app state), which isn't implemented. Named honestly
+        # as None rather than fabricated; the slot stays on the object
+        # (spec 5.6B's frozen shape) for when that dependency exists.
         "interruptionLevel": None,
-        "deepLink": None,
+        # deepLink: now real (Step 13's completion) — a semantic
+        # destination key, looked up the same way Priority/Frequency/
+        # Timing already are, per event code (MILESTONE_UNLOCKED
+        # included, regardless of which milestone code it carries).
+        "deepLink": _DEEP_LINKS[code],
         "templateId": template_id,
         "title": title,
         "body": body,

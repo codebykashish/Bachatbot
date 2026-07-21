@@ -155,9 +155,24 @@ def run():
         f"got {list(n1.keys())}",
     )
     check(
-        "interruptionLevel and deepLink are present but honestly None -- not fabricated",
-        n1["interruptionLevel"] is None and n1["deepLink"] is None,
+        "interruptionLevel is present but honestly None (Context gate not implemented) -- deepLink is now real",
+        n1["interruptionLevel"] is None and n1["deepLink"] == "health",
         f"got {n1['interruptionLevel']}, {n1['deepLink']}",
+    )
+
+    # 12. Deep Link Matrix -- every real event code resolves to one of
+    # the three known frontend destinations, never None/missing
+    n12 = gen.generate_notification({"eventId": "x", "event": "MILESTONE_UNLOCKED", "payload": {"code": "FIRST_EXPENSE_LOGGED"}})
+    check(
+        "MILESTONE_UNLOCKED resolves to the 'streak' deep link regardless of milestone code",
+        n12["deepLink"] == "streak",
+        f"got {n12['deepLink']}",
+    )
+    n13 = gen.generate_notification({"eventId": "y", "event": "CATEGORY_BECAME_EXHAUSTED", "payload": {"category": "Food"}})
+    check(
+        "CATEGORY_BECAME_EXHAUSTED resolves to 'category_detail', not the generic 'health' bucket",
+        n13["deepLink"] == "category_detail",
+        f"got {n13['deepLink']}",
     )
 
     print()
