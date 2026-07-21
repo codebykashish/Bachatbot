@@ -1,14 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import '../theme/health_theme.dart';
 
 /// One chart that adapts to the Reports screen's Today/Week/Month tabs and
 /// optional category filter, instead of stacking a separate chart per mode.
 ///
 /// - Today: bars = categories (no time axis to show for a single day).
+///   Phase 13.8 -- each bar is now colored by that category's real
+///   Category Health status, not a uniform green, so the categories
+///   actually driving pressure are visually prominent rather than
+///   every bar looking identically fine.
 /// - Week: 7 bars, Sun-Sat. "All" shows daily totals; a selected category
 ///   shows just that category's daily amounts.
 /// - Month: one bar per day. Axis labels are sparse (0/5/10/.../30) so a
 ///   ~30-bar chart doesn't look cluttered, but every day still has a bar.
+///
+/// Week/Month bars deliberately stay green/faded-green (today vs. past),
+/// unchanged by Category Health -- health status is per-category or
+/// overall, not per-day, so recoloring individual days would mean
+/// inventing a "risky day" concept nothing in the backend actually
+/// produces.
 class AdaptiveReportChart extends StatelessWidget {
   static const Color _primary = Color(0xFF2DBE7F);
 
@@ -16,6 +27,7 @@ class AdaptiveReportChart extends StatelessWidget {
   final Map<String, double> categoryBreakdown; // used when mode == 'today'
   final List<dynamic> dailyBreakdown; // used when mode == 'week' | 'month'
   final String? selectedCategory; // null = "All"
+  final Map<String, String> categoryHealth; // category -> green/amber/red, used when mode == 'today'
 
   const AdaptiveReportChart({
     super.key,
@@ -23,6 +35,7 @@ class AdaptiveReportChart extends StatelessWidget {
     this.categoryBreakdown = const {},
     this.dailyBreakdown = const [],
     this.selectedCategory,
+    this.categoryHealth = const {},
   });
 
   @override
@@ -102,12 +115,16 @@ class AdaptiveReportChart extends StatelessWidget {
           ),
           borderData: FlBorderData(show: false),
           barGroups: List.generate(entries.length, (i) {
+            final entry = entries[i];
+            final barColor = mode == 'today'
+                ? HealthTheme.forStatus(entry.healthStatus).progressColor
+                : (entry.isToday ? _primary : _primary.withValues(alpha: 0.55));
             return BarChartGroupData(
               x: i,
               barRods: [
                 BarChartRodData(
-                  toY: entries[i].value,
-                  color: entries[i].isToday ? _primary : _primary.withValues(alpha: 0.55),
+                  toY: entry.value,
+                  color: barColor,
                   width: mode == 'month' ? 6 : 18,
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
                 ),
@@ -127,7 +144,13 @@ class AdaptiveReportChart extends StatelessWidget {
         : {selectedCategory!: categoryBreakdown[selectedCategory] ?? 0.0};
     final sorted = filtered.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
     return sorted
-        .map((e) => _ChartEntry(label: e.key, value: e.value, isToday: false, isSparseLabel: true))
+        .map((e) => _ChartEntry(
+              label: e.key,
+              value: e.value,
+              isToday: false,
+              isSparseLabel: true,
+              healthStatus: categoryHealth[e.key],
+            ))
         .toList();
   }
 
@@ -174,6 +197,13 @@ class _ChartEntry {
   final double value;
   final bool isToday;
   final bool isSparseLabel;
+  final String? healthStatus; // Today mode only -- green/amber/red/null
 
-  _ChartEntry({required this.label, required this.value, required this.isToday, required this.isSparseLabel});
+  _ChartEntry({
+    required this.label,
+    required this.value,
+    required this.isToday,
+    required this.isSparseLabel,
+    this.healthStatus,
+  });
 }

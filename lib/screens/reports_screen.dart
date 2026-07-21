@@ -2,10 +2,18 @@ import 'package:flutter/material.dart';
 import '../api_service.dart';
 import '../widgets/adaptive_report_chart.dart';
 import '../models/goal.dart';
+import '../theme/health_theme.dart';
 import 'goals_screen.dart';
 
 class ReportsScreen extends StatefulWidget {
-  const ReportsScreen({super.key});
+  // Same pattern as CategoriesScreen -- false when embedded as a
+  // MainScreen tab (which already has its own AppBar showing
+  // "Reports"), true when pushed standalone from Home. Previously
+  // always true regardless of context, which is exactly why the
+  // "Reports" header showed twice.
+  final bool showAppBar;
+
+  const ReportsScreen({super.key, this.showAppBar = false});
 
   @override
   State<ReportsScreen> createState() => ReportsScreenState();
@@ -20,7 +28,7 @@ class ReportsScreenState extends State<ReportsScreen>
   ];
 
   bool _isLoading = true;
-  String _selectedView = 'week'; // 'today' | 'week' | 'month'
+  String _selectedView = 'today'; // 'today' | 'week' | 'month'
   String? _selectedCategory; // null = "All"
   String _selectedMonthKey = '';
   late DateTime _currentMonth;
@@ -29,7 +37,11 @@ class ReportsScreenState extends State<ReportsScreen>
   double _totalExpense = 0;
   Map<String, double> _categoryBreakdown = {};
   List<dynamic> _dailyBreakdown = [];
-  String _overallStatus = 'ok';
+  // Real Health Engine status (green/amber/red), not a local proxy --
+  // Phase 13.8's own reconciliation, the same duplicate-signal problem
+  // already found and fixed for the ambient overlay and Categories.
+  String? _overallHealthStatus;
+  Map<String, String> _categoryHealth = {}; // category -> green/amber/red
   List<Goal> _goals = [];
   Map<String, dynamic>? _projectedSavings; // Metrics Engine (Phase 2.7, Predictive) — null when no budgets exist
   // Recommendation, Recovery Plan, and Risk Flags moved to HealthScreen
@@ -113,10 +125,12 @@ class ReportsScreenState extends State<ReportsScreen>
         ApiService.get('/monthly-report?monthKey=$_selectedMonthKey&view=$_selectedView'),
         ApiService.get('/goals'),
         ApiService.get('/financial-metrics?monthKey=$_selectedMonthKey'),
+        ApiService.get('/financial-health?monthKey=$_selectedMonthKey'),
       ]);
       final res = futures[0];
       final goalsRes = futures[1];
       final metricsRes = futures[2];
+      final healthRes = futures[3];
 
       if (!mounted) return;
 
@@ -138,11 +152,27 @@ class ReportsScreenState extends State<ReportsScreen>
             ? (metricsRes['data']?['projectedSavings'] as Map<String, dynamic>?)
             : null;
 
+        // Health Engine (Phase 3.1/3.2) — the real overall/category
+        // status, read directly, never recomputed. Replaces the old
+        // local overallStatus proxy (Phase 13.8's reconciliation).
+        String? overallHealthStatus;
+        Map<String, String> categoryHealth = {};
+        if (healthRes['success'] == true) {
+          overallHealthStatus = healthRes['data']?['overallHealth']?['status'] as String?;
+          final rawCategoryHealth = healthRes['data']?['categoryHealth'] as Map?;
+          if (rawCategoryHealth != null) {
+            categoryHealth = rawCategoryHealth.map(
+              (k, v) => MapEntry(k.toString(), (v as Map)['status'] as String? ?? 'green'),
+            );
+          }
+        }
+
         setState(() {
           _totalExpense = (report?['totalExpense'] ?? 0).toDouble();
           _categoryBreakdown = _mapToDouble(report?['categoryBreakdown'] ?? {});
           _dailyBreakdown = report?['dailyBreakdown'] as List? ?? [];
-          _overallStatus = report?['insights']?['overallStatus'] ?? 'ok';
+          _overallHealthStatus = overallHealthStatus;
+          _categoryHealth = categoryHealth;
           _goals = goals;
           _projectedSavings = projectedSavings;
           _isLoading = false;
@@ -185,16 +215,73 @@ class ReportsScreenState extends State<ReportsScreen>
     }
   }
 
+  void _openCategoryFilterSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetContext) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Filter by Category', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _CategoryChip(
+                    label: 'All',
+                    selected: _selectedCategory == null,
+                    onTap: () {
+                      _setCategory(null);
+                      Navigator.pop(sheetContext);
+                    },
+                  ),
+                  ..._categories.map((c) => _CategoryChip(
+                        label: c,
+                        selected: _selectedCategory == c,
+                        onTap: () {
+                          _setCategory(c);
+                          Navigator.pop(sheetContext);
+                        },
+                      )),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // Top spending category this period -- the "good insight" asked for,
+  // purely a client-side max() over data already fetched (no new
+  // backend call, no new logic beyond finding the largest existing number).
+  MapEntry<String, double>? get _topCategory {
+    if (_categoryBreakdown.isEmpty) return null;
+    final entries = _categoryBreakdown.entries.where((e) => e.value > 0).toList();
+    if (entries.isEmpty) return null;
+    entries.sort((a, b) => b.value.compareTo(a.value));
+    return entries.first;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F7F9),
-      appBar: AppBar(
-        title: const Text('Reports', style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-        elevation: 0.5,
-      ),
+      appBar: widget.showAppBar
+          ? AppBar(
+              title: const Text('Reports', style: TextStyle(fontWeight: FontWeight.bold)),
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black87,
+              elevation: 0.5,
+            )
+          : null,
       body: RefreshIndicator(
         color: _primary,
         onRefresh: _loadReport,
@@ -206,7 +293,7 @@ class ReportsScreenState extends State<ReportsScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Time range tabs ───────────────────────────────────
+                    // ── Time range tabs + category filter icon ────────────
                     Row(
                       children: [
                         Expanded(child: _TabChip(label: 'Today', selected: _selectedView == 'today', onTap: () => _setView('today'))),
@@ -214,6 +301,34 @@ class ReportsScreenState extends State<ReportsScreen>
                         Expanded(child: _TabChip(label: 'Week', selected: _selectedView == 'week', onTap: () => _setView('week'))),
                         const SizedBox(width: 8),
                         Expanded(child: _TabChip(label: 'Month', selected: _selectedView == 'month', onTap: () => _setView('month'))),
+                        const SizedBox(width: 8),
+                        Stack(
+                          children: [
+                            Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.grey.shade300),
+                              ),
+                              child: IconButton(
+                                icon: const Icon(Icons.tune_rounded, size: 20),
+                                color: _selectedCategory != null ? _primary : Colors.grey.shade700,
+                                tooltip: 'Filter by category',
+                                onPressed: _openCategoryFilterSheet,
+                              ),
+                            ),
+                            if (_selectedCategory != null)
+                              Positioned(
+                                right: 8,
+                                top: 8,
+                                child: Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(color: _primary, shape: BoxShape.circle),
+                                ),
+                              ),
+                          ],
+                        ),
                       ],
                     ),
 
@@ -245,22 +360,17 @@ class ReportsScreenState extends State<ReportsScreen>
                       ),
                     ],
 
-                    const SizedBox(height: 16),
-
-                    // ── Category filter chips ─────────────────────────────
-                    SizedBox(
-                      height: 34,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: [
-                          _CategoryChip(label: 'All', selected: _selectedCategory == null, onTap: () => _setCategory(null)),
-                          ..._categories.map((c) => Padding(
-                                padding: const EdgeInsets.only(left: 8),
-                                child: _CategoryChip(label: c, selected: _selectedCategory == c, onTap: () => _setCategory(c)),
-                              )),
-                        ],
+                    if (_selectedCategory != null) ...[
+                      const SizedBox(height: 10),
+                      Chip(
+                        label: Text(_selectedCategory!, style: const TextStyle(fontSize: 12, color: _primary, fontWeight: FontWeight.w600)),
+                        backgroundColor: _primary.withValues(alpha: 0.1),
+                        deleteIcon: const Icon(Icons.close, size: 16, color: _primary),
+                        onDeleted: () => _setCategory(null),
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                    ),
+                    ],
 
                     const SizedBox(height: 16),
 
@@ -270,6 +380,7 @@ class ReportsScreenState extends State<ReportsScreen>
                       categoryBreakdown: _categoryBreakdown,
                       dailyBreakdown: _dailyBreakdown,
                       selectedCategory: _selectedCategory,
+                      categoryHealth: _categoryHealth,
                     ),
 
                     const SizedBox(height: 14),
@@ -281,6 +392,35 @@ class ReportsScreenState extends State<ReportsScreen>
                           : 'Rs ${_headlineAmount.toInt()} on $_selectedCategory $_headlinePeriodLabel',
                       style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.black87),
                     ),
+
+                    // ── Top category insight -- a plain max() over data
+                    // already on screen, no new fetch, no new logic.
+                    // Only shown unfiltered; picking one category out as
+                    // "top" is meaningless once you're already looking at
+                    // just that one category.
+                    if (_selectedCategory == null && _topCategory != null) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.insights_outlined, size: 18, color: Colors.grey.shade500),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'You spent the most on ${_topCategory!.key}: Rs ${_topCategory!.value.toInt()}',
+                                style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
 
                     const SizedBox(height: 20),
 
@@ -311,47 +451,43 @@ class ReportsScreenState extends State<ReportsScreen>
     );
   }
 
+  // Phase 13.8 -- driven by the real Health Engine status
+  // (_overallHealthStatus, from /financial-health) instead of the old
+  // local "low/ok/high/overspent" proxy derived from /monthly-report's
+  // insights.overallStatus. Same reconciliation already applied to the
+  // ambient overlay and Categories cards.
   Widget _buildOverallStatusCard() {
+    final theme = HealthTheme.forStatus(_overallHealthStatus);
     String statusText;
-    Color statusColor;
     IconData statusIcon;
 
-    switch (_overallStatus.toLowerCase()) {
-      case 'low':
-      case 'ok':
-        statusText = 'Low spending — on budget';
-        statusColor = _primary;
-        statusIcon = Icons.check_circle;
-        break;
-      case 'high':
-        statusText = 'High — close to budget limit';
-        statusColor = Colors.orange.shade700;
+    switch (_overallHealthStatus) {
+      case 'amber':
+        statusText = 'Stable but needs attention';
         statusIcon = Icons.warning_amber;
         break;
-      case 'overspent':
-        statusText = 'Overspent this month';
-        statusColor = Colors.red;
+      case 'red':
+        statusText = 'Needs attention now';
         statusIcon = Icons.warning_amber;
         break;
       default:
-        statusText = 'On track';
-        statusColor = _primary;
+        statusText = 'Looking good';
         statusIcon = Icons.check_circle;
     }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: statusColor.withValues(alpha: 0.08),
+        color: theme.cardTint,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: statusColor.withValues(alpha: 0.25)),
+        border: Border.all(color: theme.accent.withValues(alpha: 0.25)),
       ),
       child: Row(
         children: [
-          Icon(statusIcon, color: statusColor, size: 20),
+          Icon(statusIcon, color: theme.statusColor, size: 20),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(statusText, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: statusColor)),
+            child: Text(statusText, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: theme.statusColor)),
           ),
         ],
       ),
@@ -361,42 +497,43 @@ class ReportsScreenState extends State<ReportsScreen>
   // Recommendation, Recovery Plan, and Risk Flags wording/cards moved to
   // HealthScreen (Phase 13.4).
 
-  // Projected Savings (Phase 2.7) — one simple card, not flashy. The ≈
-  // symbol is the visual cue that this is a forecast, never a fact — the
-  // same honesty-about-uncertainty principle the wording carries too.
+  // Projected Savings (Phase 2.7) — a forecast, never a fact, still
+  // named honestly with "≈". Made bigger and bolder per feedback that
+  // the old plain card was easy to miss; sign-aware color (a negative
+  // projection is a warning, not more good news in green) using the
+  // same HealthTheme lookup the rest of the app already uses.
   Widget _buildProjectedSavingsCard() {
     final projection = _projectedSavings!;
     final value = (projection['value'] as num?)?.round() ?? 0;
+    final theme = value < 0 ? HealthTheme.forStatus('red') : HealthTheme.forStatus('green');
 
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _primary.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _primary.withValues(alpha: 0.25)),
+        color: theme.cardTint,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.accent.withValues(alpha: 0.25)),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.insights_outlined, color: _primary, size: 20),
-          const SizedBox(width: 10),
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(color: theme.accent.withValues(alpha: 0.15), shape: BoxShape.circle),
+            child: Icon(Icons.savings_outlined, color: theme.accent, size: 22),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Projected End-of-Month Savings',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _primary),
+                  'Projected savings',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
                 ),
-                const SizedBox(height: 4),
                 Text(
                   '≈ Rs $value',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Based on your current spending pace',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: theme.statusColor),
                 ),
               ],
             ),
@@ -420,7 +557,18 @@ class ReportsScreenState extends State<ReportsScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Savings Goals', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
+              Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(color: _primary.withValues(alpha: 0.12), shape: BoxShape.circle),
+                    child: const Icon(Icons.flag_outlined, color: _primary, size: 16),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text('Goals', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
+                ],
+              ),
               TextButton(
                 onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GoalsScreen())),
                 style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0)),
@@ -428,11 +576,11 @@ class ReportsScreenState extends State<ReportsScreen>
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           ...(_goals.take(3).map((g) {
             final progress = (g.percentComplete / 100).clamp(0.0, 1.0);
             return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.only(bottom: 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -442,13 +590,21 @@ class ReportsScreenState extends State<ReportsScreen>
                       Expanded(
                         child: Text(g.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
                       ),
-                      Text('Rs ${g.savedSoFar.toInt()} / Rs ${g.targetAmount.toInt()}', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                      Text(
+                        '${(progress * 100).toInt()}%',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _primary),
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(value: progress, minHeight: 6, backgroundColor: Colors.grey.shade200, color: _primary),
+                    child: LinearProgressIndicator(value: progress, minHeight: 7, backgroundColor: Colors.grey.shade200, color: _primary),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Rs ${g.savedSoFar.toInt()} of Rs ${g.targetAmount.toInt()}',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
                   ),
                 ],
               ),

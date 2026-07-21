@@ -817,7 +817,7 @@ class HomeScreenState extends State<HomeScreen> {
                     } else {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const ReportsScreen()),
+                        MaterialPageRoute(builder: (_) => const ReportsScreen(showAppBar: true)),
                       );
                     }
                   },
@@ -835,7 +835,7 @@ class HomeScreenState extends State<HomeScreen> {
                         } else {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (_) => const ReportsScreen()),
+                            MaterialPageRoute(builder: (_) => const ReportsScreen(showAppBar: true)),
                           );
                         }
                       },
