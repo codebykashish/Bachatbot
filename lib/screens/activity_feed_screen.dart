@@ -7,6 +7,8 @@ import '../widgets/chat_fab.dart';
 import '../widgets/categorize_transaction_dialog.dart';
 import 'category_detail_page.dart';
 import 'income_page.dart';
+import 'health_screen.dart';
+import 'behavior_screen.dart';
 
 /// Phase 13.2b (redesigned per real usage feedback) — the single unified
 /// "everything the system told you" feed, merging two collections that
@@ -219,19 +221,48 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
     }
   }
 
+  // Deep Link Matrix's frontend half (backend owns the eventCode ->
+  // semantic key mapping in notification_generator.py's _DEEP_LINKS;
+  // this is purely "given a key, which screen" — no business logic).
+  Widget? _screenForDeepLink(Map<String, dynamic> n) {
+    final deepLink = n['deepLink'] as String?;
+    final payload = n['payload'] as Map<String, dynamic>? ?? {};
+    switch (deepLink) {
+      case 'health':
+        return const HealthScreen();
+      case 'streak':
+        return const BehaviorScreen();
+      case 'category_detail':
+        final category = payload['category'] as String?;
+        return category != null ? CategoryDetailPage(category: category) : null;
+      case 'activity':
+        return const ActivityFeedScreen();
+      default:
+        return null;
+    }
+  }
+
   void _showNotificationDetail(Map<String, dynamic> n) {
+    final destination = _screenForDeepLink(n);
+
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text(n['title'] as String? ?? ''),
         content: Text(n['body'] as String? ?? ''),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text((n['cta'] as String?)?.isNotEmpty == true
-                ? n['cta'] as String
-                : 'Close'),
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
           ),
+          if (destination != null)
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => destination));
+              },
+              child: Text((n['cta'] as String?)?.isNotEmpty == true ? n['cta'] as String : 'View'),
+            ),
         ],
       ),
     );

@@ -34,8 +34,10 @@ class AmbientStatusOverlay extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    theme.backgroundTintTop!.withValues(alpha: isDanger ? 0.22 : 0.16),
-                    theme.backgroundTintBottom!.withValues(alpha: isDanger ? 0.30 : 0.22),
+                    // Bumped up slightly from the original values -- real
+                    // feedback was that it was "barely noticeable."
+                    theme.backgroundTintTop!.withValues(alpha: isDanger ? 0.30 : 0.22),
+                    theme.backgroundTintBottom!.withValues(alpha: isDanger ? 0.40 : 0.30),
                   ],
                 ),
               ),

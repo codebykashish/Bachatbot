@@ -109,7 +109,15 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
           }
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      // Previously silent -- a failed fetch here used to leave the
+      // screen permanently stuck showing "no budget set" even when a
+      // real budget exists, with no visible error and no retry. Now at
+      // least logged so a recurrence is diagnosable; pull-to-refresh
+      // (_fetchAlerts + _fetchBudgetMeta together, line ~276) already
+      // gives the user a retry path once they notice.
+      debugPrint('[CategoryDetailPage] budget meta fetch failed: $e');
+    }
   }
 
   @override

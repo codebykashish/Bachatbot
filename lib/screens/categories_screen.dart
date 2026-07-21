@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../api_service.dart';
 import '../services/activity_feed_service.dart';
+import '../theme/health_theme.dart';
 import 'category_detail_page.dart';
 import 'income_page.dart';
 import 'activity_feed_screen.dart';
@@ -718,14 +719,25 @@ class CategoriesScreenState extends State<CategoriesScreen>
                     // ── 2-column grid ────────────────────────────────────────
                     ...pairs.map((pair) => Padding(
                           padding: const EdgeInsets.only(bottom: 14),
-                          child: Row(
-                            children: [
-                              Expanded(child: _buildBucketCard(pair[0])),
-                              const SizedBox(width: 14),
-                              pair.length > 1
-                                  ? Expanded(child: _buildBucketCard(pair[1]))
-                                  : const Expanded(child: SizedBox()),
-                            ],
+                          // IntrinsicHeight, not CrossAxisAlignment.stretch --
+                          // this Row sits inside an unbounded-height
+                          // scroll view, where stretch has no finite
+                          // height to stretch TO and throws a real layout
+                          // exception ("RenderBox was not laid out"),
+                          // which is what caused the blank screen. Intrinsic
+                          // sizes both children to the taller one's actual
+                          // height instead, which works in an unbounded context.
+                          child: IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(child: _buildBucketCard(pair[0])),
+                                const SizedBox(width: 14),
+                                pair.length > 1
+                                    ? Expanded(child: _buildBucketCard(pair[1]))
+                                    : const Expanded(child: SizedBox()),
+                              ],
+                            ),
                           ),
                         )),
 
@@ -778,12 +790,16 @@ class CategoriesScreenState extends State<CategoriesScreen>
     );
   }
 
-  // Category Health (Phase 3.2) — status label only, never a reason code
-  // or raw pressure value shown to the user. "green" shows no chip, to
-  // avoid labeling every unremarkable category (same restraint Category
-  // Pressure's chip already used in Phase 2.6 — this replaces it, since
-  // Category Health is the more authoritative judgment layer built
-  // directly on top of Category Pressure + Recovery Plan).
+  // Category Health (Phase 3.2), the real backend signal — status label
+  // only, never a reason code or raw pressure value shown to the user.
+  // "green" shows no label, to avoid flagging every unremarkable
+  // category. This is now the ONLY signal driving this card's coloring
+  // (Phase 13.5's own reconciliation lesson applied here too): the
+  // card used to also compute its own local "percent >= 100%?" check
+  // for its background/border/badge, a second signal that could (and
+  // did, per real feedback) disagree with this one and make every
+  // near-100%-of-budget category look identically alarming regardless
+  // of what the real, time-adjusted Category Health verdict was.
   String? _healthChipLabel(String? status) {
     switch (status) {
       case 'red':
@@ -795,33 +811,6 @@ class CategoriesScreenState extends State<CategoriesScreen>
     }
   }
 
-  Color _healthChipColor(String? status) {
-    switch (status) {
-      case 'red':
-        return const Color(0xFFE0223B);
-      case 'amber':
-        return Colors.orange.shade700;
-      default:
-        return _primary;
-    }
-  }
-
-  Widget _buildHealthChip(String? status) {
-    final label = _healthChipLabel(status)!;
-    final color = _healthChipColor(status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: color),
-      ),
-    );
-  }
-
   Widget _buildBucketCard(Map<String, dynamic> item) {
     final category = item['category'] ?? 'Unknown';
     final spent = (item['spent'] ?? 0).toDouble();
@@ -830,21 +819,17 @@ class CategoriesScreenState extends State<CategoriesScreen>
     // utilization comes from the Metrics Engine's budgetUtilization (Phase
     // 2.2) — already spent/limit*100, unclamped. /100 here is a unit
     // conversion for the progress-bar widget, not a re-derivation of the
-    // ratio itself; the 0.0-2.0 and 0.0-1.0 clamps below are this screen's
-    // own display thresholds (badge/bar bounds), same as before.
+    // ratio itself.
     final utilization = (item['utilization'] ?? 0).toDouble();
-    final percent = isNotSet ? 0.0 : (utilization / 100).clamp(0.0, 2.0);
-    final isOver = !isNotSet && percent > 1.0;
-    // Fully used (100%+) — this is the "spending too much" state, whole
-    // card turns red so it's impossible to miss while scrolling categories.
-    final isCritical = !isNotSet && percent >= 1.0;
     final displayPercent = isNotSet ? 0.0 : (utilization / 100).clamp(0.0, 1.0);
+
+    final healthStatus = isNotSet ? null : item['healthStatus'] as String?;
+    final theme = HealthTheme.forStatus(healthStatus);
+    final isFlagged = healthStatus == 'amber' || healthStatus == 'red';
+    final label = _healthChipLabel(healthStatus);
 
     final color = _catColor(category);
     final icon = _catIcon(category);
-    final barColor = isCritical || isOver
-        ? const Color(0xFFE0223B)
-        : (percent > 0.7 ? Colors.orange : _primary);
 
     return Stack(
       children: [
@@ -863,15 +848,15 @@ class CategoriesScreenState extends State<CategoriesScreen>
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: isCritical ? const Color(0xFFE0223B).withValues(alpha: 0.07) : Colors.white,
+              color: isFlagged ? theme.cardTint : Colors.white,
               borderRadius: BorderRadius.circular(16),
-              border: isCritical
-                  ? Border.all(color: const Color(0xFFE0223B).withValues(alpha: 0.4), width: 1.3)
+              border: isFlagged
+                  ? Border.all(color: theme.accent.withValues(alpha: 0.35), width: 1.2)
                   : null,
               boxShadow: [
                 BoxShadow(
-                  color: isCritical
-                      ? const Color(0xFFE0223B).withValues(alpha: 0.15)
+                  color: isFlagged
+                      ? theme.accent.withValues(alpha: 0.12)
                       : Colors.black.withValues(alpha: 0.05),
                   blurRadius: 8,
                   offset: const Offset(0, 3),
@@ -893,15 +878,15 @@ class CategoriesScreenState extends State<CategoriesScreen>
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: isCritical ? const Color(0xFFE0223B) : (isOver ? Colors.red : Colors.grey.shade100),
+                          color: isFlagged ? theme.accent : Colors.grey.shade100,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
-                          '${(percent * 100).toInt()}%',
+                          '${(utilization).toInt()}%',
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
-                            color: isCritical || isOver ? Colors.white : Colors.black54,
+                            color: isFlagged ? Colors.white : Colors.black54,
                           ),
                         ),
                       ),
@@ -915,20 +900,20 @@ class CategoriesScreenState extends State<CategoriesScreen>
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: isCritical ? const Color(0xFFE0223B) : Colors.black87,
+                        color: isFlagged ? theme.statusColor : Colors.black87,
                       ),
                     ),
-                    if (isCritical) ...[
+                    if (label != null) ...[
                       const SizedBox(width: 5),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFE0223B),
+                          color: theme.accent,
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: const Text(
-                          'OVER',
-                          style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 0.3),
+                        child: Text(
+                          label,
+                          style: const TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 0.3),
                         ),
                       ),
                     ],
@@ -939,7 +924,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
                   isNotSet ? 'Tap to set budget' : 'Rs ${spent.toInt()} / Rs ${limit.toInt()}',
                   style: TextStyle(
                     fontSize: 11,
-                    color: isCritical ? const Color(0xFFE0223B) : (isOver ? Colors.red : Colors.grey),
+                    color: isFlagged ? theme.statusColor : Colors.grey,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -948,14 +933,10 @@ class CategoriesScreenState extends State<CategoriesScreen>
                   child: LinearProgressIndicator(
                     value: displayPercent,
                     minHeight: 5,
-                    backgroundColor: isCritical ? const Color(0xFFE0223B).withValues(alpha: 0.15) : Colors.grey.shade200,
-                    color: barColor,
+                    backgroundColor: isFlagged ? theme.accent.withValues(alpha: 0.15) : Colors.grey.shade200,
+                    color: isFlagged ? theme.progressColor : _primary,
                   ),
                 ),
-                if (_healthChipLabel(item['healthStatus'] as String?) != null) ...[
-                  const SizedBox(height: 6),
-                  _buildHealthChip(item['healthStatus'] as String?),
-                ],
               ],
             ),
           ),
