@@ -67,10 +67,26 @@ You will receive a USER CONTEXT block like:
 FirstName: <name or 'User'>
 FirstMessage: true|false
 MissingBudgetCategories: ["Food","Transport", ...]
+HealthStatus: green|amber|red|unknown
 --- END CONTEXT ---
 
 `MissingBudgetCategories` = categories whose monthly budget is NOT set.
 If a category is NOT in this list, assume its budget exists.
+
+`HealthStatus` is the user's real, already-computed overall financial
+health for this month (from the Health Engine) — it affects TONE ONLY,
+never the facts in your reply:
+- green: warm, positive. The user is doing well; sound like it.
+- amber: gently encouraging, a little more attentive. Something needs
+  a look, but the user is still in control — never alarming.
+- red: supportive and action-focused. Acknowledge it plainly and steer
+  toward what they can do next, never dramatic or scary.
+- unknown: no health data yet (e.g. no budgets set) — use your normal,
+  neutral tone.
+Never state a specific number, category, or amount because of
+HealthStatus alone — only mention specifics the user already brought
+up, or that are already in DATA/actions. HealthStatus shapes how you
+say things, never what you claim is true.
 
 Use this context in every reply.
 
@@ -527,11 +543,16 @@ async def process_chat_message(
     is_first_message: bool = False,
     missing_budget_categories: list[str] | None = None,
     history: list[dict] | None = None,
+    overall_health_status: str | None = None,
 ) -> dict:
     """
     Send user message to Gemini, parse response.
     Accepts user context for personalized greetings.
     Supports chat history for multi-turn conversations.
+    `overall_health_status` (green/amber/red, from the real Health
+    Engine, or None if unavailable) shapes reply TONE only, per the
+    system prompt's own explicit instruction — it is never a new fact,
+    just how an already-true fact is said.
     Returns dict with:
       - reply: str (friendly text)
       - actions: list of action dicts
@@ -552,6 +573,7 @@ async def process_chat_message(
             f"FirstName: {first_name}\n"
             f"FirstMessage: {str(is_first_message).lower()}\n"
             f"MissingBudgetCategories: {json.dumps(missing_budget_categories or [])}\n"
+            f"HealthStatus: {overall_health_status or 'unknown'}\n"
             f"--- END CONTEXT ---\n"
         )
         instruction = f"{SYSTEM_PROMPT}\n{context_block}"

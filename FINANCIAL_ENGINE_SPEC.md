@@ -11538,6 +11538,8 @@ per feedback that it was "barely noticeable."
 **Verification**: `flutter analyze` on the full project — zero errors,
 same pre-existing infos.
 
+---
+
 **Follow-up, same phase**: Goals summary and Projected Savings cards
 redesigned to be more visually prominent (bigger icons/numbers,
 circular icon badges matching the rest of the app) and their copy
@@ -11610,6 +11612,124 @@ this period — Rs Y," a plain client-side `max()` over
 logic invented, hidden entirely once a specific category is already
 selected (a "top category" fact is meaningless once you're already
 looking at just one).
+
+**Verification**: `flutter analyze` on the full project — zero errors,
+same pre-existing infos.
+
+---
+
+## Phase 13.10 — Health Theme, Chatbot Tone — FROZEN
+
+**A different kind of "theme" than the others** — backend prompt
+wording, not Flutter colors, since chat replies come from
+`gemini.py`/`routes/chat.py`, not the frontend. Scoped to general
+conversation only (Gemini's own natural reply), not the deterministic
+one-line transaction confirmations ("Rs 250 Food ma kharcha gareko"),
+per explicit confirmation — those stay factual acknowledgments,
+unaffected.
+
+**Reused an existing extension point rather than inventing a new
+mechanism**: `process_chat_message()` already injected a "USER
+CONTEXT" block into Gemini's system instruction (FirstName,
+FirstMessage, MissingBudgetCategories). Added `HealthStatus`
+(green/amber/red/unknown, the real Health Engine status) to that same
+block, plus an explicit instruction in `SYSTEM_PROMPT`: tone only,
+never a new fact — "never state a specific number, category, or amount
+because of HealthStatus alone."
+
+**Wired into both chat entry points** (`chat()` and `chat_sync()` in
+`routes/chat.py`), each fetching `compute_overall_health()` the same
+best-effort way the existing `missing_budget_categories` lookup already
+does — a failure falls back to Gemini's normal neutral tone, never
+blocks the chat response itself.
+
+**Verification, against real Gemini, not simulated**: called
+`process_chat_message()` three times with identical input, varying only
+`overall_health_status` — green produced a warm, positive reply, amber
+a gently attentive one ("something to check"), red a measured,
+action-focused one ("let's take a look"). Confirms the tone genuinely
+shifts, not just that the prompt text changed. Full backend suite (14
+files): zero regressions.
+
+---
+
+## Phase 13.11 — Health Screen Refinement — FROZEN
+
+**Closes the last gap in the Health Theme sequence**: `HealthScreen`
+predates `HealthTheme` (built in Phase 13.4, before 13.5 created the
+shared class) and still had its own separate, duplicate color
+functions — the same "one signal, one place" issue already found and
+fixed three times elsewhere. Removed entirely; every color on this
+screen now comes from `HealthTheme.forStatus()`.
+
+**A real accessibility gap found and fixed, not just a redesign**: the
+category breakdown previously showed color only, with the plain-English
+status hidden behind a press-and-hold tooltip — violating the project's
+own frozen principle that "color is never the only signal." Now a real
+list: category name, an always-visible status label ("Over budget" /
+"Near limit" / "On track"), color, *and* the fuller explanation still
+available on hold — all four together, not color alone.
+
+**The hero card now explains, not just labels**: added a plain-English
+"why" sentence under the status label, mapped from
+`overallHealth.primaryReason` (the Health Engine's own single most
+important true fact, by its existing priority order) — e.g. "You're
+behind pace, but a recovery plan is already helping" for
+`RECOVERY_NEEDED`. Previously the hero only showed an emoji and a
+3-word label with no explanation at all.
+
+**Recommendation card gained a scannable headline** above its detail
+sentence (e.g. "Ease up on Shopping" / "Try keeping it around Rs
+X/day..."), rather than one plain paragraph.
+
+**Section order changed to match the intended reading flow**: What's
+affecting it → What to do next → How to recover → Risks to watch,
+mirroring "why am I here, what's causing it, what should I do, how do
+I recover" rather than the original Recommendation-first ordering.
+
+**Verification**: real-account call to `compute_overall_health()`/
+`compute_category_health()` confirms the account's real current
+state (`amber`, `RECOVERY_NEEDED`; Shopping `red`, three categories
+`amber`, one `green`) flows correctly into the new hero explanation and
+category list. `flutter analyze` on the full project — zero errors,
+same pre-existing infos.
+
+---
+
+**Home follow-up, same phase**: found via real feedback ("badge is red
+but the greeting still says steady") — the Home greeting's subtitle
+("Your financial health looks steady.") was a hardcoded, never-computed
+literal string, not even a stale duplicate signal this time, just plain
+dead text sitting under a real, correctly-themed badge right above it.
+Replaced with `_greetingSubtitle`, driven by the same
+`_overallHealthStatus` the badge already uses. Also switched Home's
+own chart from `view=week` to `view=today` (renamed "Weekly Report" to
+"Today's Spending") per direct request — `ReportChart` itself needed no
+changes, since it was always a category-breakdown chart regardless of
+which time window fed it.
+
+---
+
+## Phase 13.12 — Home/Reports Chart Consistency — FROZEN
+
+**Real feedback: "the Today chart in Reports and the Dashboard are
+different."** Correct — they were two genuinely separate widgets.
+`ReportsScreen` used `AdaptiveReportChart` (health-colored bars, sorted
+by value, tooltips); `HomeScreen` used an older, separate `ReportChart`
+widget (`widgets/report_chart.dart`) — always plain green bars, no
+Category Health coloring, no sorting, different styling entirely. Both
+fed from the same `/monthly-report` category breakdown, but rendered
+by two independent implementations that had quietly drifted apart —
+the same "one signal, one place" lesson from Phases 13.5/13.7/13.8/13.11,
+this time as a duplicated widget rather than a duplicated color
+function.
+
+**Fixed by deleting the duplicate, not patching it to look similar**:
+`HomeScreen` now uses the exact same `AdaptiveReportChart` widget
+Reports does (`mode: 'today'`), fed the same `categoryHealth` map
+(fetched alongside the existing `/financial-health` call, the same
+approach already used in Reports). `widgets/report_chart.dart` deleted
+— confirmed unused anywhere else first.
 
 **Verification**: `flutter analyze` on the full project — zero errors,
 same pre-existing infos.

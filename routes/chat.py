@@ -19,6 +19,7 @@ from services.report_service import (
 )
 from services.financial_engine import recompute as engine_recompute, get_summary, RecomputeReason
 from services.behavior_engine import record_logging_activity
+from services.health_engine import compute_overall_health
 import logging
 
 logger = logging.getLogger("bachatbot.chat")
@@ -1000,6 +1001,16 @@ async def chat(
         print(f"[CHAT] Context lookup failed (non-critical): {ctx_err}")
         missing_budget_categories = []
 
+    # Real Health Engine status (Phase 13.10) — shapes Gemini's reply
+    # tone only (see gemini.py's own instruction to that effect), never
+    # a new fact. Best-effort like the context lookup above: a failure
+    # here falls back to Gemini's normal neutral tone, never blocks chat.
+    overall_health_status = None
+    try:
+        overall_health_status = compute_overall_health(db, uid, curr_month)["overallHealth"]["status"]
+    except Exception as health_err:
+        print(f"[CHAT] Health status lookup failed (non-critical): {health_err}")
+
     # ── Call Gemini ──────────────────────────────────────────────────────
     try:
         gemini_result = await process_chat_message(
@@ -1008,6 +1019,7 @@ async def chat(
             is_first_message=is_first_message,
             missing_budget_categories=missing_budget_categories,
             history=history,
+            overall_health_status=overall_health_status,
         )
         gemini_reply = gemini_result["reply"]
         actions = gemini_result["actions"]
@@ -2190,9 +2202,18 @@ async def chat_sync(
             # Compute missing budget categories for the derived month
             missing_budget_categories = get_missing_budget_categories(db, uid, derived_month_key)
 
+            # Real Health Engine status (Phase 13.10) -- same best-effort,
+            # tone-only treatment as the main chat() route.
+            overall_health_status = None
+            try:
+                overall_health_status = compute_overall_health(db, uid, derived_month_key)["overallHealth"]["status"]
+            except Exception as health_err:
+                print(f"[SYNC] Health status lookup failed (non-critical): {health_err}")
+
             gemini_result = await process_chat_message(
                 user_message,
-                missing_budget_categories=missing_budget_categories
+                missing_budget_categories=missing_budget_categories,
+                overall_health_status=overall_health_status,
             )
             gemini_reply = gemini_result["reply"]
             actions = gemini_result["actions"]
