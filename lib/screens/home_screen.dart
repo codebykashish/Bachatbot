@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../api_service.dart';
-import '../widgets/report_chart.dart';
+import '../widgets/adaptive_report_chart.dart';
 import '../widgets/balance_card.dart';
 import '../services/health_theme_service.dart';
 import '../theme/health_theme.dart';
@@ -52,6 +52,7 @@ class HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _summary; // financialSummary — the only source of calculated values
   Map<String, dynamic>? _metrics; // financialMetrics — the Metrics Engine's read-only interpretations (Phase 2)
   Map<String, dynamic>? _overallHealth; // Health Engine's judgment (Phase 3.1) — status/confidence/reasons, never computed here
+  Map<String, String> _categoryHealth = {}; // category -> green/amber/red, for the Today chart
   Map<String, dynamic>? _report;
   Map<String, double> _categoryBreakdown = {};
 
@@ -206,8 +207,22 @@ class HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       if (res['success'] == true) {
         final overallHealth = res['data']?['overallHealth'] as Map<String, dynamic>?;
+        // Category Health (Phase 13.12) -- same map Reports already
+        // uses to color its Today chart. Fetched here too so Home's
+        // own Today chart can use the identical AdaptiveReportChart
+        // widget Reports does, instead of the separate, plain-green
+        // ReportChart widget it used before -- two different widgets
+        // rendering "today's categories" had quietly drifted apart
+        // (no health coloring, different sort order, different style).
+        final rawCategoryHealth = res['data']?['categoryHealth'] as Map?;
+        final categoryHealth = rawCategoryHealth == null
+            ? <String, String>{}
+            : rawCategoryHealth.map(
+                (k, v) => MapEntry(k.toString(), (v as Map)['status'] as String? ?? 'green'),
+              );
         setState(() {
           _overallHealth = overallHealth;
+          _categoryHealth = categoryHealth;
         });
         // Phase 13.5 — the one real signal the app-wide Health Theme
         // hangs off. Pushed here rather than fetched again by a separate
@@ -228,11 +243,11 @@ class HomeScreenState extends State<HomeScreen> {
 
   Future<void> _fetchReport() async {
     try {
-      // Home screen shows the recent-week view — quicker to scan than the
-      // full month. Budgets (Unused Budget / Savings card) are unaffected;
-      // they come from /budgets separately and stay monthly, as budgets are
-      // inherently a monthly allocation.
-      final res = await ApiService.get('/monthly-report?monthKey=$_selectedMonth&view=week');
+      // Home screen shows today's view -- the most immediately relevant
+      // slice, per real feedback. Budgets (Unused Budget / Savings card)
+      // are unaffected; they come from /budgets separately and stay
+      // monthly, as budgets are inherently a monthly allocation.
+      final res = await ApiService.get('/monthly-report?monthKey=$_selectedMonth&view=today');
       if (!mounted) return;
       if (res['success'] == true) {
         setState(() {
@@ -326,6 +341,24 @@ class HomeScreenState extends State<HomeScreen> {
   // Only the status is surfaced; reasons/decisionTrace stay backend-only
   // until Phase 6's Explainer exists to word them for the user.
   String? get _overallHealthStatus => (_overallHealth?['status'] as String?);
+
+  // Previously a hardcoded "Your financial health looks steady." string
+  // that never actually reflected the real Health Engine status --
+  // found from real feedback ("dashboard badge is red but the greeting
+  // still says steady"). Now driven by the same _overallHealthStatus
+  // the badge below already uses.
+  String get _greetingSubtitle {
+    switch (_overallHealthStatus) {
+      case 'red':
+        return 'Your financial health needs attention.';
+      case 'amber':
+        return 'Your financial health needs a little care.';
+      case 'green':
+        return 'Your financial health looks good.';
+      default:
+        return "Let's take a look at your finances.";
+    }
+  }
 
   bool get _isOverAllocatedBudget => _totalBudgetSpent > _totalBudgetLimit;
 
@@ -717,9 +750,9 @@ class HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       const SizedBox(height: 2),
-                      const Text(
-                        'Your financial health looks steady.',
-                        style: TextStyle(fontSize: 13, color: Colors.grey),
+                      Text(
+                        _greetingSubtitle,
+                        style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
                       ),
                     ],
                   ),
@@ -805,11 +838,11 @@ class HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 28),
 
-            // ── Weekly Report Chart ──────────────────────────────────────
+            // ── Today's Spending Chart ────────────────────────────────────
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Weekly Report', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text("Today's Spending", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 TextButton(
                   onPressed: () {
                     if (widget.onViewFullReports != null) {
@@ -839,10 +872,10 @@ class HomeScreenState extends State<HomeScreen> {
                           );
                         }
                       },
-                    child: ReportChart(
+                    child: AdaptiveReportChart(
+                      mode: 'today',
                       categoryBreakdown: _categoryBreakdown,
-                      isCompact: false,
-                      useLineChart: false,
+                      categoryHealth: _categoryHealth,
                     ),
                   ),
 

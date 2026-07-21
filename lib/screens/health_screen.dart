@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import '../api_service.dart';
+import '../theme/health_theme.dart';
 import '../widgets/hold_tooltip.dart';
 
-/// Phase 13.4 — the dedicated Health screen, opened from Home's Health
-/// badge (previously just a static, non-tappable line). Owns
-/// everything Health/Recommendation/Recovery/Risk-related — moved out
-/// of ReportsScreen so that screen stays focused on income/spending/
-/// savings, and this one answers "am I okay, and what should I do."
+/// Phase 13.11 — refined onto the shared HealthTheme (this screen
+/// predates that class, from Phase 13.4, and had its own separate
+/// color logic until now — the same "one signal, one place" fix
+/// already applied to the ambient overlay, Categories, and Reports).
+///
+/// The screen that answers, in order: what's my health, why am I here,
+/// what's causing it, what should I do, how do I recover. Owns
+/// everything Health/Recommendation/Recovery/Risk-related.
 ///
 /// Reads GET /financial-health, /financial-recommendations, and
 /// /financial-metrics (for recoveryPlan only) — all three already
@@ -20,8 +24,6 @@ class HealthScreen extends StatefulWidget {
 
 class _HealthScreenState extends State<HealthScreen> {
   static const Color _primary = Color(0xFF2DBE7F);
-  static const Color _amber = Color(0xFFE67E22);
-  static const Color _red = Color(0xFFE0223B);
 
   bool _isLoading = true;
   Map<String, dynamic>? _overallHealth;
@@ -73,27 +75,53 @@ class _HealthScreenState extends State<HealthScreen> {
     }
   }
 
-  // ── Color/copy helpers ────────────────────────────────────────────────
-
-  Color _statusColor(String? status) {
-    switch (status) {
-      case 'red':
-        return _red;
-      case 'amber':
-        return _amber;
-      default:
-        return _primary;
-    }
-  }
+  // ── Copy helpers — plain-English mappings over already-computed codes,
+  // never a new judgment. Color always comes from HealthTheme now, never
+  // a locally-redefined value. ─────────────────────────────────────────
 
   ({String emoji, String label}) _statusMeta(String? status) {
     switch (status) {
       case 'red':
-        return (emoji: '🔴', label: 'Needs attention now');
+        return (emoji: '🔴', label: 'Needs your attention');
       case 'amber':
-        return (emoji: '🟡', label: 'Stable but needs attention');
+        return (emoji: '🟡', label: 'Stable, but worth a look');
       default:
-        return (emoji: '🟢', label: 'Looking good');
+        return (emoji: '🟢', label: "You're in good shape");
+    }
+  }
+
+  // The hero's "why am I here" line -- primaryReason is already the
+  // single most important true fact (Health Engine's own priority
+  // order), just given a plain sentence instead of a raw code.
+  String _overallReasonSentence(String? status, String? code) {
+    switch (code) {
+      case 'PROJECTED_DEFICIT':
+        return "You're on track to spend more than you earn this month.";
+      case 'RECOVERY_IMPOSSIBLE':
+        return "This month's overspending can no longer be fully fixed.";
+      case 'RECOVERY_NEEDED':
+        return "You're behind pace, but a recovery plan is already helping.";
+      case 'MULTIPLE_CATEGORIES_PRESSURED':
+        return "A few categories are close to their limit at once.";
+      case 'CATEGORY_HIGH_PRESSURE':
+        return "One category is close to its limit.";
+      case 'SPENDING_TOO_FAST':
+        return "You're spending faster than planned this month.";
+      default:
+        return status == 'red' || status == 'amber'
+            ? "Something needs a closer look this month."
+            : "Nothing needs your attention right now.";
+    }
+  }
+
+  String _categoryStatusLabel(String? status) {
+    switch (status) {
+      case 'red':
+        return 'Over budget';
+      case 'amber':
+        return 'Near limit';
+      default:
+        return 'On track';
     }
   }
 
@@ -112,7 +140,7 @@ class _HealthScreenState extends State<HealthScreen> {
     }
   }
 
-  String _recommendationMessage(Map<String, dynamic> rec) {
+  ({String headline, String detail}) _recommendationCopy(Map<String, dynamic> rec) {
     final code = rec['code'] as String?;
     final category = rec['category'] as String?;
     final actionValue = rec['actionValue'];
@@ -122,57 +150,35 @@ class _HealthScreenState extends State<HealthScreen> {
 
     switch (code) {
       case 'STOP_CATEGORY_SPENDING':
-        return 'Your $category budget is used up — try to avoid more $category spending this month.';
+        return (
+          headline: 'Your $category budget is used up',
+          detail: 'Try to avoid more $category spending this month.',
+        );
       case 'REDUCE_CATEGORY_SPENDING':
-        return perDay != null
-            ? 'Try keeping $category spending around $perDay for the rest of the month.'
-            : 'Try reducing $category spending for the rest of the month.';
+        return (
+          headline: 'Ease up on $category',
+          detail: perDay != null
+              ? 'Try keeping it around $perDay for the rest of the month.'
+              : 'Try spending less on it for the rest of the month.',
+        );
       case 'MONITOR_CATEGORY_SPENDING':
-        return 'Keep an eye on $category spending — it\'s trending toward pressure.';
+        return (headline: 'Keep an eye on $category', detail: "It's trending toward pressure.");
       case 'LIMIT_DAILY_SPENDING':
-        return perDay != null
-            ? 'Try to spend no more than $perDay for the rest of the month.'
-            : 'Try to limit your daily spending for the rest of the month.';
+        return (
+          headline: 'Slow your daily spending',
+          detail: perDay != null ? 'Try to stay under $perDay a day.' : 'Try to spend a bit less each day.',
+        );
       case 'START_RECOVERY_PLAN':
-        return 'Your savings are trending negative — worth reviewing your spending this week.';
+        return (headline: 'Your savings need a boost', detail: 'Worth reviewing your spending this week.');
       case 'ACCEPT_REDUCED_SAVINGS':
-        return "Full recovery isn't possible this month — reducing spending now still helps.";
+        return (headline: "Full recovery isn't possible", detail: 'Spending less now still helps.');
       case 'REVIEW_MULTIPLE_CATEGORIES':
-        return "Several categories are under pressure — worth a full review.";
+        return (headline: 'A few categories need attention', detail: 'Worth a full review.');
       case 'SLOW_SPENDING_PACE':
-        return "You're spending faster than planned — slowing down this week will help.";
+        return (headline: "You're spending faster than planned", detail: 'Slowing down this week will help.');
       case 'KEEP_CURRENT_HABITS':
       default:
-        return "You're on track. Keep your current pace.";
-    }
-  }
-
-  Color _recommendationColor(String? type) {
-    switch (type) {
-      case 'stop':
-      case 'recover':
-        return _red;
-      case 'reduce':
-        return _amber;
-      case 'monitor':
-        return Colors.amber.shade700;
-      default:
-        return _primary;
-    }
-  }
-
-  Color _riskSeverityColor(String? severity) {
-    switch (severity) {
-      case 'critical':
-        return const Color(0xFFB00020);
-      case 'high':
-        return _red;
-      case 'medium':
-        return _amber;
-      case 'low':
-        return Colors.amber.shade700;
-      default:
-        return Colors.grey.shade600;
+        return (headline: "You're on track", detail: 'Keep your current pace.');
     }
   }
 
@@ -196,8 +202,9 @@ class _HealthScreenState extends State<HealthScreen> {
   @override
   Widget build(BuildContext context) {
     final status = _overallHealth?['status'] as String?;
+    final theme = HealthTheme.forStatus(status);
     final meta = _statusMeta(status);
-    final color = _statusColor(status);
+    final primaryReason = _overallHealth?['primaryReason'] as Map<String, dynamic>?;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -215,28 +222,28 @@ class _HealthScreenState extends State<HealthScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(20),
                 children: [
-                  _buildHero(meta, color),
+                  _buildHero(meta, theme, _overallReasonSentence(status, primaryReason?['code'] as String?)),
                   const SizedBox(height: 24),
+                  if (_categoryHealth.isNotEmpty) ...[
+                    const Text("What's affecting it", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 10),
+                    _buildCategoryBreakdown(),
+                    const SizedBox(height: 24),
+                  ],
                   if (_primaryRecommendation != null) ...[
-                    const Text('What To Do Next', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const Text('What to do next', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 10),
                     _buildRecommendationCard(),
                     const SizedBox(height: 24),
                   ],
                   if (_recoveryPlan != null) ...[
-                    const Text('Recovery Plan', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const Text('How to recover', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 10),
                     _buildRecoveryPlanCard(),
                     const SizedBox(height: 24),
                   ],
-                  if (_categoryHealth.isNotEmpty) ...[
-                    const Text('By Category', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 10),
-                    _buildCategoryBreakdown(),
-                    const SizedBox(height: 24),
-                  ],
                   if (_riskFlags.isNotEmpty) ...[
-                    const Text('Risks to Watch', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const Text('Risks to watch', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 10),
                     _buildRiskFlags(),
                   ],
@@ -246,18 +253,25 @@ class _HealthScreenState extends State<HealthScreen> {
     );
   }
 
-  Widget _buildHero(({String emoji, String label}) meta, Color color) {
+  Widget _buildHero(({String emoji, String label}) meta, HealthTheme theme, String reason) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 24),
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
+        color: theme.cardTint,
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: theme.accent.withValues(alpha: 0.25)),
       ),
       child: Column(
         children: [
           Text(meta.emoji, style: const TextStyle(fontSize: 48)),
           const SizedBox(height: 10),
-          Text(meta.label, style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: color)),
+          Text(meta.label, style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: theme.statusColor)),
+          const SizedBox(height: 6),
+          Text(
+            reason,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade700, height: 1.4),
+          ),
         ],
       ),
     );
@@ -265,21 +279,29 @@ class _HealthScreenState extends State<HealthScreen> {
 
   Widget _buildRecommendationCard() {
     final rec = _primaryRecommendation!;
-    final color = _recommendationColor(rec['type'] as String?);
+    final theme = HealthTheme.forStatus(_overallHealth?['status'] as String?);
+    final copy = _recommendationCopy(rec);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.06),
+        color: theme.cardTint,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
+        border: Border.all(color: theme.accent.withValues(alpha: 0.25)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.arrow_circle_right_outlined, color: color, size: 22),
+          Icon(Icons.arrow_circle_right_outlined, color: theme.accent, size: 22),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(_recommendationMessage(rec), style: const TextStyle(fontSize: 13.5, color: Colors.black87, height: 1.4)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(copy.headline, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: theme.statusColor)),
+                const SizedBox(height: 3),
+                Text(copy.detail, style: const TextStyle(fontSize: 13, color: Colors.black87, height: 1.4)),
+              ],
+            ),
           ),
         ],
       ),
@@ -292,6 +314,7 @@ class _HealthScreenState extends State<HealthScreen> {
     final durationDays = (plan['durationDays'] as num?)?.toInt() ?? 0;
     final recoveryPossible = plan['recoveryPossible'] as bool? ?? true;
     final affected = (plan['affectedCategories'] as List?)?.cast<String>() ?? [];
+    final theme = HealthTheme.forStatus('amber');
 
     final message = recoveryPossible
         ? 'Try Rs $dailyTarget/day for the next $durationDays days to finish the month comfortably.'
@@ -300,14 +323,14 @@ class _HealthScreenState extends State<HealthScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _amber.withValues(alpha: 0.08),
+        color: theme.cardTint,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _amber.withValues(alpha: 0.3)),
+        border: Border.all(color: theme.accent.withValues(alpha: 0.3)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.lightbulb_outline, color: _amber, size: 22),
+          Icon(Icons.lightbulb_outline, color: theme.accent, size: 22),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -326,38 +349,49 @@ class _HealthScreenState extends State<HealthScreen> {
     );
   }
 
+  // Real list with an always-visible status label (not color-only,
+  // not hidden behind a hold), plus a hold-tooltip for the fuller
+  // "why" -- color/label/tooltip together, per the frozen "color is
+  // never the only signal" principle.
   Widget _buildCategoryBreakdown() {
     final entries = _categoryHealth.entries.toList();
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: entries.map((entry) {
-        final health = entry.value as Map<String, dynamic>;
-        final status = health['status'] as String?;
-        final reasons = health['reasons'] as List? ?? [];
-        final reasonCode = reasons.isNotEmpty ? (reasons[0] as Map)['code'] as String? : null;
-        final color = _statusColor(status);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        children: [
+          for (int i = 0; i < entries.length; i++) ...[
+            if (i > 0) Divider(height: 1, indent: 16, endIndent: 16, color: Colors.grey.shade100),
+            Builder(builder: (context) {
+              final entry = entries[i];
+              final health = entry.value as Map<String, dynamic>;
+              final status = health['status'] as String?;
+              final reasons = health['reasons'] as List? ?? [];
+              final reasonCode = reasons.isNotEmpty ? (reasons[0] as Map)['code'] as String? : null;
+              final theme = HealthTheme.forStatus(status);
 
-        return HoldTooltip(
-          message: _categoryTooltip(reasonCode),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: color.withValues(alpha: 0.3)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-                const SizedBox(width: 8),
-                Text(entry.key, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: color)),
-              ],
-            ),
-          ),
-        );
-      }).toList(),
+              return HoldTooltip(
+                message: _categoryTooltip(reasonCode),
+                child: ListTile(
+                  leading: Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(color: theme.accent, shape: BoxShape.circle),
+                  ),
+                  title: Text(entry.key, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  trailing: Text(
+                    _categoryStatusLabel(status),
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: theme.statusColor),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ],
+      ),
     );
   }
 
@@ -379,7 +413,11 @@ class _HealthScreenState extends State<HealthScreen> {
                 margin: const EdgeInsets.only(top: 4),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: _riskSeverityColor((_riskFlags[i] as Map)['severity'] as String?),
+                  color: HealthTheme.forStatus(
+                    (_riskFlags[i] as Map)['severity'] == 'critical' || (_riskFlags[i] as Map)['severity'] == 'high'
+                        ? 'red'
+                        : 'amber',
+                  ).accent,
                 ),
               ),
               title: Text(_riskLabel(_riskFlags[i] as Map<String, dynamic>), style: const TextStyle(fontSize: 13)),
