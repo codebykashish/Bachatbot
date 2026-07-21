@@ -4,11 +4,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api_service.dart';
 import '../widgets/report_chart.dart';
 import '../widgets/balance_card.dart';
-import '../services/financial_status_service.dart';
+import '../services/health_theme_service.dart';
+import '../theme/health_theme.dart';
+import '../services/behavior_preview_service.dart';
+import '../widgets/slide_up_route.dart';
 import 'categories_screen.dart';
-import 'notification_screen.dart';
+import 'activity_feed_screen.dart';
 import 'reports_screen.dart';
 import 'income_page.dart';
+import 'health_screen.dart';
 
 // State is public so MainScreen can call refresh() via GlobalKey
 class HomeScreen extends StatefulWidget {
@@ -94,7 +98,7 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _fetchAll() async {
     setState(() => _isLoading = true);
     try {
-      await Future.wait([_fetchFinancialSummary(), _fetchFinancialMetrics(), _fetchOverallHealth(), _fetchReport(), _fetchTrend(), _fetchLatestActivity(), _fetchProfileName()]);
+      await Future.wait([_fetchFinancialSummary(), _fetchFinancialMetrics(), _fetchOverallHealth(), _fetchReport(), _fetchTrend(), _fetchLatestActivity(), _fetchProfileName(), _fetchBehaviorPreview()]);
       _maybeShowYesterdayInsight();
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -145,7 +149,7 @@ class HomeScreenState extends State<HomeScreen> {
 
   Future<void> _refreshData() async {
     try {
-      await Future.wait([_fetchFinancialSummary(), _fetchFinancialMetrics(), _fetchOverallHealth(), _fetchReport(), _fetchTrend(), _fetchLatestActivity(), _fetchProfileName()]);
+      await Future.wait([_fetchFinancialSummary(), _fetchFinancialMetrics(), _fetchOverallHealth(), _fetchReport(), _fetchTrend(), _fetchLatestActivity(), _fetchProfileName(), _fetchBehaviorPreview()]);
     } catch (_) {}
   }
 
@@ -171,10 +175,6 @@ class HomeScreenState extends State<HomeScreen> {
         setState(() {
           _summary = res['data'] as Map<String, dynamic>?;
         });
-        // Drives the app-wide ambient background — uses true month-scoped
-        // totals (not the home screen's week-scoped report), so it reflects
-        // actual overall overspend, not just a quiet week within a bad month.
-        _updateFinancialStatus();
       }
     } catch (e) {
       debugPrint('[HomeScreen] /financial-summary error: $e');
@@ -205,30 +205,26 @@ class HomeScreenState extends State<HomeScreen> {
       final res = await ApiService.get('/financial-health?monthKey=$_selectedMonth');
       if (!mounted) return;
       if (res['success'] == true) {
+        final overallHealth = res['data']?['overallHealth'] as Map<String, dynamic>?;
         setState(() {
-          _overallHealth = res['data']?['overallHealth'] as Map<String, dynamic>?;
+          _overallHealth = overallHealth;
         });
+        // Phase 13.5 — the one real signal the app-wide Health Theme
+        // hangs off. Pushed here rather than fetched again by a separate
+        // service, since this call already has it.
+        HealthThemeService.updateFromStatus(overallHealth?['status'] as String?);
       }
     } catch (e) {
       debugPrint('[HomeScreen] /financial-health error: $e');
     }
   }
 
-  void _updateFinancialStatus() {
-    final limit = _totalBudgetLimit;
-    final spent = _totalBudgetSpent;
-    String overallStatus;
-    if (limit <= 0) {
-      overallStatus = 'ok';
-    } else if (spent > limit) {
-      overallStatus = 'overspent';
-    } else if (spent >= limit * 0.8) {
-      overallStatus = 'high';
-    } else {
-      overallStatus = 'ok';
-    }
-    FinancialStatusService().updateFromOverallStatus(overallStatus);
-  }
+  // The streak badge itself now lives in MainScreen's AppBar (Phase
+  // 13.3 — "I want it above," per real feedback), backed by
+  // BehaviorPreviewService rather than local state here. Still
+  // refreshed on every Home fetch so logging a transaction updates the
+  // badge promptly rather than waiting for its own next refresh.
+  Future<void> _fetchBehaviorPreview() => BehaviorPreviewService.refresh();
 
   Future<void> _fetchReport() async {
     try {
@@ -367,7 +363,7 @@ class HomeScreenState extends State<HomeScreen> {
       hideAmounts: _hideAmounts,
       onExpenseTap: () => Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => const NotificationScreen(initialType: 'expense')),
+        MaterialPageRoute(builder: (_) => const ActivityFeedScreen(initialFilter: 'transactions')),
       ),
       onIncomeTap: () => Navigator.push(
         context,
@@ -399,33 +395,40 @@ class HomeScreenState extends State<HomeScreen> {
         label = 'Stable but needs attention';
     }
 
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF6F7F9),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Text(emoji, style: const TextStyle(fontSize: 16)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Overall Financial Health',
-                  style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500),
-                ),
-                Text(
-                  label,
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87),
-                ),
-              ],
+    final theme = HealthTheme.forStatus(status);
+
+    return GestureDetector(
+      onTap: () => Navigator.push(context, slideUpRoute(const HealthScreen())),
+      child: Container(
+        margin: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: theme.cardTint,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: theme.accent.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 16)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Overall Financial Health',
+                    style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500),
+                  ),
+                  Text(
+                    label,
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: theme.statusColor),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 18),
+          ],
+        ),
       ),
     );
   }
@@ -603,7 +606,7 @@ class HomeScreenState extends State<HomeScreen> {
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => const NotificationScreen(initialDateRange: 'today'),
+          builder: (_) => const ActivityFeedScreen(initialDateFilter: 'today'),
         ),
       ),
       child: Container(
@@ -849,6 +852,7 @@ class HomeScreenState extends State<HomeScreen> {
             const Text("Today's Snapshot", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             _buildSnapshot(),
+
           ],
         ),
       ),

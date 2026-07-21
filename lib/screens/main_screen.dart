@@ -5,11 +5,16 @@ import '../services/notification_sync_service.dart';
 import '../services/sms_sync_service.dart';
 import '../services/month_event_service.dart';
 import '../services/alert_popup_service.dart';
+import '../services/activity_feed_service.dart';
+import '../services/push_notification_service.dart';
+import '../services/behavior_preview_service.dart';
+import '../widgets/slide_up_route.dart';
 import '../api_service.dart';
 import 'home_screen.dart';
 import 'categories_screen.dart';
 import 'chatbot_page.dart';
-import 'notification_screen.dart';
+import 'activity_feed_screen.dart';
+import 'behavior_screen.dart';
 import 'profile_screen.dart';
 import 'reports_screen.dart';
 import 'goals_screen.dart';
@@ -107,7 +112,12 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     MonthEventService().init();
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) AlertPopupService().init(uid);
+    if (uid != null) {
+      AlertPopupService().init(uid);
+      ActivityFeedService().init(uid);
+      PushNotificationService().init();
+      BehaviorPreviewService.refresh();
+    }
 
     _checkPendingTransactionsAndNavigate();
 
@@ -144,7 +154,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         if (!mounted) return;
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const NotificationScreen()),
+          MaterialPageRoute(builder: (_) => const ActivityFeedScreen()),
         );
       });
     } catch (e) {
@@ -293,6 +303,35 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             ),
             iconTheme: const IconThemeData(color: Colors.black87),
             actions: [
+              GestureDetector(
+                onTap: () => Navigator.push(context, slideUpRoute(const BehaviorScreen())),
+                child: ValueListenableBuilder<int>(
+                  valueListenable: BehaviorPreviewService.loggingStreak,
+                  builder: (context, streak, child) => Container(
+                    margin: const EdgeInsets.only(right: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF3E8),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.local_fire_department, color: Color(0xFFE67E22), size: 18),
+                        const SizedBox(width: 3),
+                        Text(
+                          '$streak',
+                          style: const TextStyle(
+                            color: Color(0xFFE67E22),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
               IconButton(
                 icon: Container(
                   padding: const EdgeInsets.all(6),
@@ -310,7 +349,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
               ),
               IconButton(
                 icon: ValueListenableBuilder<int>(
-                  valueListenable: NotificationScreen.unreadCount,
+                  valueListenable: ActivityFeedService.unreadCount,
                   builder: (context, count, child) => Badge(
                     isLabelVisible: count > 0,
                     label: Text(count > 99 ? '99+' : count.toString()),
@@ -320,7 +359,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                 tooltip: 'Notifications',
                 onPressed: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const NotificationScreen()),
+                  MaterialPageRoute(builder: (_) => const ActivityFeedScreen()),
                 ),
               ),
             ],

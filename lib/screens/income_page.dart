@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../api_service.dart';
 import '../widgets/shared_widgets.dart';
-import 'notification_screen.dart';
+import 'activity_feed_screen.dart';
 
 class IncomePage extends StatefulWidget {
   const IncomePage({super.key});
@@ -378,7 +378,7 @@ class _IncomePageState extends State<IncomePage> {
             icon: const Icon(Icons.notifications_none),
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => const NotificationScreen(initialType: 'income')),
+              MaterialPageRoute(builder: (_) => const ActivityFeedScreen(initialFilter: 'transactions')),
             ),
           ),
         ],

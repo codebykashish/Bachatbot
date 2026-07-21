@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../api_service.dart';
+import '../services/activity_feed_service.dart';
 import 'category_detail_page.dart';
 import 'income_page.dart';
-import 'notification_screen.dart';
+import 'activity_feed_screen.dart';
 
 class CategoriesScreen extends StatefulWidget {
   final bool showAppBar;
@@ -429,7 +430,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
               actions: [
                 IconButton(
                   icon: ValueListenableBuilder<int>(
-                    valueListenable: NotificationScreen.unreadCount,
+                    valueListenable: ActivityFeedService.unreadCount,
                     builder: (context, count, child) {
                       return Badge(
                         isLabelVisible: count > 0,
@@ -440,7 +441,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
                   ),
                   onPressed: () => Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => const NotificationScreen()),
+                    MaterialPageRoute(builder: (_) => const ActivityFeedScreen()),
                   ),
                 ),
               ],

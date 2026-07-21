@@ -1,32 +1,28 @@
 import 'package:flutter/material.dart';
-import '../services/financial_status_service.dart';
+import '../services/health_theme_service.dart';
+import '../theme/health_theme.dart';
 
 /// A subtle, smoky vignette painted above every screen (via MaterialApp's
-/// `builder`), signaling overall spending health without touching any
+/// `builder`), signaling overall financial health without touching any
 /// individual screen's Scaffold. Ignores touches — purely atmospheric.
 ///
-/// Deliberately muted/desaturated ("smoky"), not a flat saturated color
-/// block — a soft radial haze that thickens toward the edges and stays
-/// mostly transparent at the center where content is read.
+/// Phase 13.5 — now driven by the real Health Engine status
+/// (HealthThemeService), not the old budget-percentage proxy. Green has
+/// no overlay at all (calm reads better as the absence of a mood layer
+/// than as a green wash); amber/red keep the same smoky, desaturated
+/// haze this widget already had — never a flat saturated color block.
 class AmbientStatusOverlay extends StatelessWidget {
   const AmbientStatusOverlay({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<FinancialStatus>(
-      valueListenable: FinancialStatusService().status,
+    return ValueListenableBuilder<String>(
+      valueListenable: HealthThemeService.status,
       builder: (context, status, _) {
-        if (status == FinancialStatus.safe) return const SizedBox.shrink();
+        final theme = HealthTheme.forStatus(status);
+        if (theme.backgroundTintTop == null) return const SizedBox.shrink();
 
-        final bool isDanger = status == FinancialStatus.overspent;
-
-        // Smoky, desaturated hues — a muted maroon-charcoal haze for
-        // danger, a muted amber-charcoal haze for caution. Never a bright
-        // saturated red/yellow. Covers the full page (not just edges) so
-        // it's clearly noticeable, while staying translucent enough that
-        // text/cards underneath stay readable.
-        final Color top = isDanger ? const Color(0xFF6B3A3A) : const Color(0xFF7A6438);
-        final Color bottom = isDanger ? const Color(0xFF2A1D1E) : const Color(0xFF2A2318);
+        final bool isDanger = status == 'red';
 
         return IgnorePointer(
           child: AnimatedOpacity(
@@ -38,8 +34,8 @@ class AmbientStatusOverlay extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    top.withValues(alpha: isDanger ? 0.22 : 0.16),
-                    bottom.withValues(alpha: isDanger ? 0.30 : 0.22),
+                    theme.backgroundTintTop!.withValues(alpha: isDanger ? 0.22 : 0.16),
+                    theme.backgroundTintBottom!.withValues(alpha: isDanger ? 0.30 : 0.22),
                   ],
                 ),
               ),

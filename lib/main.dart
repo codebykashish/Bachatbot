@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart'; // Import Cloud Firestore
 import 'firebase_options.dart';
 import 'screens/login_screen.dart';
@@ -9,6 +10,7 @@ import 'screens/email_signup_page.dart';
 import 'screens/main_screen.dart';
 import 'screens/splash_screen.dart';
 import 'api_service.dart';
+import 'services/push_notification_service.dart';
 import 'widgets/ambient_status_overlay.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -16,6 +18,7 @@ final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
   // ENABLE FIRESTORE OFFLINE PERSISTENCE:q
   // Configure Firestore settings to enable offline local caching and unlimited cache size.

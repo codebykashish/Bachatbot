@@ -4,7 +4,6 @@ import '../api_service.dart';
 import '../models/pending_transaction.dart';
 import '../services/month_event_service.dart';
 import '../widgets/rebalance_confirm_dialog.dart';
-import 'notification_screen.dart';
 
 /// Callback signature for chat intent-based refresh.
 /// [refreshHome] and [refreshCategories] are flags indicating what to refresh.
@@ -313,7 +312,6 @@ class _ChatScreenState extends State<ChatScreen> {
         final reply =
             data?['reply'] ?? data?['text'] ?? 'Sorry, I could not understand that.';
         final intent = (data?['intent'] as String?) ?? 'general_chat';
-        final alerts = data?['alerts'] as List?;
         // needsConfirmation: backend stores this state; user types "ho"/"yes"
         // or "hudaina"/"no" to resolve. Never block the UI with a spinner.
         final needsConfirmation = data?['needsConfirmation'] == true;
@@ -352,10 +350,6 @@ class _ChatScreenState extends State<ChatScreen> {
               _budgetPromptCategories[assistantId] = waitingCat;
             });
           }
-        }
-
-        if (alerts != null && alerts.isNotEmpty) {
-          NotificationScreen.unreadCount.value += alerts.length;
         }
 
         // Overspend requiring budget from other categories — ask before

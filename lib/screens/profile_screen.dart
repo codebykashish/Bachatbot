@@ -7,7 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../api_service.dart';
 import 'edit_profile_screen.dart';
 import 'goals_screen.dart';
-import 'notification_screen.dart';
+import 'activity_feed_screen.dart';
 import 'income_page.dart';
 import 'login_screen.dart';
 import 'mock_notification_screen.dart';
@@ -330,7 +330,7 @@ class ProfileScreenState extends State<ProfileScreen> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const NotificationScreen(initialType: 'expense'),
+                        builder: (_) => const ActivityFeedScreen(initialFilter: 'transactions'),
                       ),
                     ),
                     child: _statCard(

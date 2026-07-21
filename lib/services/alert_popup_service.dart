@@ -201,14 +201,103 @@ class AlertPopupService {
     );
   }
 
+  // The in-app full-width banner (_showBanner) was deliberately dropped —
+  // real usage showed it as a redundant "double" of the system push
+  // below, which already reliably reaches the user (even backgrounded)
+  // without needing an on-screen overlay too. In its place: a center
+  // pop-up the user must actually acknowledge (tap "Got it") — real
+  // feedback was that a system push alone is too easy to swipe away
+  // without registering "I'm overspending." _showBanner/AlertBanner are
+  // left in place, unused, rather than deleted — reversible if this
+  // needs revisiting.
   void _emit({
     required String title,
     required String message,
     required Color color,
     required IconData icon,
   }) {
-    _showBanner(title: title, message: message, color: color, icon: icon);
     _showSystemNotification(title: title, message: message, color: color);
+    _enqueueCenterAlert(title: title, message: message, color: color, icon: icon);
+  }
+
+  final List<Map<String, dynamic>> _centerAlertQueue = [];
+  bool _isShowingCenterAlert = false;
+
+  // Queued, not fired immediately — two budget alerts landing within
+  // the same second (a common case: expense + rebalance) must show one
+  // at a time, never stacked dialogs fighting for the same screen.
+  void _enqueueCenterAlert({
+    required String title,
+    required String message,
+    required Color color,
+    required IconData icon,
+  }) {
+    _centerAlertQueue.add({'title': title, 'message': message, 'color': color, 'icon': icon});
+    _processCenterAlertQueue();
+  }
+
+  Future<void> _processCenterAlertQueue() async {
+    if (_isShowingCenterAlert || _centerAlertQueue.isEmpty) return;
+    final context = rootNavigatorKey.currentContext;
+    if (context == null) return;
+
+    _isShowingCenterAlert = true;
+    final next = _centerAlertQueue.removeAt(0);
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 12),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: (next['color'] as Color).withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(next['icon'] as IconData, color: next['color'] as Color, size: 28),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              next['title'] as String,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Colors.black87),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              next['message'] as String,
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade700, height: 1.4),
+            ),
+          ],
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actionsPadding: const EdgeInsets.only(bottom: 16),
+        actions: [
+          SizedBox(
+            width: 160,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: next['color'] as Color,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Got it', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    _isShowingCenterAlert = false;
+    _processCenterAlertQueue();
   }
 
   void _showBanner({
