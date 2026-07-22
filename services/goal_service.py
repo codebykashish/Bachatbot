@@ -56,25 +56,24 @@ def get_active_goals(db, uid: str) -> list[dict]:
     return goals
 
 
-def compute_goal_progress(db, uid: str, month_key: str) -> dict:
+def _distribute_pool_across_tiers(goals: list[dict], pool: float) -> dict:
     """
-    Returns {goal_id: saved_amount} — how much of the available pool each
-    active goal currently gets credited with, live. Never exceeds a goal's
-    own targetAmount, and the sum never exceeds the available pool.
+    Pure waterfall math, no Firestore — shared by compute_goal_progress()
+    (fed the CURRENT available pool) and compute_projected_goal_progress()
+    (fed the Metrics Engine's PROJECTED pool). Extracted so Goal Risk
+    (spec Phase 18) can ask "what would each goal get under a projected
+    pool" using the identical tier logic, rather than a second,
+    independently-maintained copy of the same waterfall.
 
     Goals are grouped into priority tiers (lower number = higher priority,
     default 1). Higher tiers are fully funded before a lower tier sees
     anything ("earphones first, then lots of food"). Goals sharing the same
     tier split that tier's share proportionally to their own target, so two
-    goals at the same priority grow side by side — this is also what makes
-    the old flat behavior (everyone at the default tier) unchanged.
+    goals at the same priority grow side by side.
     """
-    goals = get_active_goals(db, uid)
     if not goals:
         return {}
-
-    available = get_available_pool(db, uid, month_key)
-    if available <= 0:
+    if pool <= 0:
         return {g["_id"]: 0.0 for g in goals}
 
     tiers: dict[int, list[dict]] = {}
@@ -83,7 +82,7 @@ def compute_goal_progress(db, uid: str, month_key: str) -> dict:
         tiers.setdefault(tier, []).append(g)
 
     result: dict[str, float] = {}
-    remaining = available
+    remaining = pool
     for tier in sorted(tiers.keys()):
         tier_goals = tiers[tier]
         targets = {g["_id"]: float(g.get("targetAmount") or 0) for g in tier_goals}
@@ -104,6 +103,46 @@ def compute_goal_progress(db, uid: str, month_key: str) -> dict:
             remaining = 0.0
 
     return result
+
+
+def compute_goal_progress(db, uid: str, month_key: str) -> dict:
+    """
+    Returns {goal_id: saved_amount} — how much of the available pool each
+    active goal currently gets credited with, live. Never exceeds a goal's
+    own targetAmount, and the sum never exceeds the available pool.
+
+    Goals are grouped into priority tiers (lower number = higher priority,
+    default 1). Higher tiers are fully funded before a lower tier sees
+    anything ("earphones first, then lots of food"). Goals sharing the same
+    tier split that tier's share proportionally to their own target, so two
+    goals at the same priority grow side by side — this is also what makes
+    the old flat behavior (everyone at the default tier) unchanged.
+    """
+    goals = get_active_goals(db, uid)
+    if not goals:
+        return {}
+    available = get_available_pool(db, uid, month_key)
+    return _distribute_pool_across_tiers(goals, available)
+
+
+def compute_projected_goal_progress(db, uid: str, projected_pool: float) -> dict:
+    """
+    Goal Risk (spec Phase 18) — same tier waterfall as
+    compute_goal_progress(), fed the Metrics Engine's PROJECTED pool
+    (projectedSavings.value, an end-of-month forecast under current
+    spending pace) instead of the current available pool. Answers "if
+    my spending pace continues, what would each goal actually end up
+    getting this month" — a forward-looking counterpart to
+    compute_goal_progress()'s live, current-moment answer.
+
+    Takes `projected_pool` as a parameter rather than computing it —
+    that forecast is Metrics Engine territory (compute_projected_savings),
+    never re-derived here.
+    """
+    goals = get_active_goals(db, uid)
+    if not goals:
+        return {}
+    return _distribute_pool_across_tiers(goals, projected_pool)
 
 
 def get_active_goal_names(db, uid: str) -> list[str]:

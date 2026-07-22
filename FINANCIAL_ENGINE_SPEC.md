@@ -12265,3 +12265,234 @@ needed or made — every real-account check throughout this
 investigation confirmed the rebalance/budget-transfer math itself was
 correct the entire time; this was purely a client-side display race,
 never a money-movement bug.
+
+## Backend follow-up — Stale Cached Summary After Rebalance, Found via Real Usage
+
+The frontend race fix above turned out to only be a partial
+explanation. Real feedback continued with a precise, deterministic
+pattern: after a rebalance, exactly one category (the one *most
+recently* rebalanced) kept showing pre-rebalance numbers indefinitely
+— surviving a pull-to-refresh and even a full app restart — until a
+completely unrelated *later* transaction happened to "fix" it.
+
+Root cause: `financial_engine.get_summary()` (spec Section 0 — "the
+only way anything reads calculated values") does not recompute fresh
+from `budgets`/`transactions` on every call. It reads a cached
+`financialSummary/{monthKey}` document and only self-heals by calling
+`recompute()` if that document is missing entirely. `budget_service.
+apply_pending_rebalance()` — the function that actually applies a
+confirmed rebalance — writes directly to the raw `budgets` collection
+(the overspent category's new limit, each donor's reduced limit) but
+never called `recompute()` afterward. So the cached summary kept
+reflecting the pre-rebalance limit indefinitely, and the only thing
+that ever refreshed it was some unrelated *later* event that happened
+to call `recompute()` on its own (every transaction-creation path
+already does) — which is exactly the "always one category behind,
+fixed only by the next transaction" pattern real usage caught. This
+was never a frontend display race; the backend's own source of truth
+was stale.
+
+**Fixed**: added `RecomputeReason.REBALANCE_APPLIED` and a
+`financial_engine.recompute()` call at the end of
+`apply_pending_rebalance()`, right after the budget writes and alert
+creation, best-effort (a recompute failure here must never undo the
+rebalance that already succeeded).
+
+**Verification**: a real end-to-end test against the shared test
+account (`BvjbjFOGHQNmI1xcRm5xowKPpoB3`) — seeded a real overspend
+(Rs 210 spent against a Rs 200 limit), proposed and confirmed a real
+rebalance via `rebalance_on_overspend()`/`apply_pending_rebalance()`,
+then called `get_summary()` immediately afterward with **no other
+transaction in between** — `categoryRemaining.limit` correctly showed
+`210` (matching the new, post-rebalance limit) right away, where
+before this fix it would have stayed at the stale `200` until some
+unrelated later event triggered a recompute. Test budget and
+rebalance docs deleted afterward. Full backend suite (14 files): zero
+regressions.
+
+## Phase 18 — Goal Risk — Design, FROZEN
+
+Answers a different question than Overall Health: not "is my spending
+healthy" but "given my current spending pace, will I actually
+contribute enough to THIS goal to stay on its own timeframe." A goal
+can be at risk while spending is perfectly healthy (a lower-priority
+goal correctly starved by a higher-priority one), and spending can be
+unhealthy while every goal still happens to be on pace — two genuinely
+different concerns, deliberately kept as two signals, never merged.
+
+**Definition.** For each active goal:
+- `monthlyTarget = targetAmount / timeframeMonths` — already computed
+  today in `financial_engine._calculate_goal_impact`, reused as-is.
+- `projectedContribution` — this goal's share of `projectedSavings.value`
+  (Metrics Engine's already-existing Predictive forecast of end-of-month
+  savings pool under current spending pace), split across active goals
+  by the *exact same* priority-tier waterfall `goal_service.
+  compute_goal_progress()` already uses for the CURRENT pool — reused,
+  never reinvented, just fed a different pool value.
+- `GOAL_AT_RISK` if `projectedContribution < monthlyTarget`, carrying
+  `shortfall = monthlyTarget - projectedContribution`.
+- Confidence inherited from `projectedSavings.confidence` (never
+  "high" — same reason Projected Savings itself is never high-confidence:
+  it assumes future behavior, per its own frozen design).
+- Not computed (not flagged, not a false negative either) when
+  `projectedSavings` is `None` — no budgets exist yet, nothing to
+  project from; Health must always be able to explain itself, never
+  guess past missing inputs.
+
+**Ownership, keeping the existing calculation/judgment split intact**:
+- The *calculation* — splitting a pool across goals by priority tier —
+  already lives in `goal_service.py`. The tier-splitting logic inside
+  `compute_goal_progress()` gets extracted into a shared private
+  helper so a new `compute_projected_goal_progress(db, uid, month_key,
+  projected_pool)` can reuse it against the projected pool instead of
+  duplicating the waterfall. `compute_goal_progress()`'s own behavior
+  is unchanged.
+- The *judgment* — is that projected contribution enough, and how
+  urgently — belongs in `health_engine.py`, as a new
+  `compute_goal_risk()` alongside `compute_overall_health`/
+  `compute_category_health`/`compute_risk_flags`. It only compares
+  numbers goal_service/metrics_engine already computed (Rule 1: Health
+  never computes financial values, only classifies already-computed
+  ones).
+
+**Surfacing, confirmed before starting**: `GOAL_AT_RISK` is added to
+`_RISK_SEVERITY` (existing Risk Flags list) so it reaches the user
+through infrastructure that already exists, rather than inventing a
+new UI concept. It deliberately does NOT feed into
+`_evaluate_rules()`/Overall Health's own status color — the two
+questions ("is spending healthy" vs "is this specific goal on pace")
+stay genuinely separate signals, matching the reasoning above.
+
+## Phase 18 — Goal Risk — Implementation, FROZEN
+
+Built exactly as designed above. `goal_service.py`'s tier-splitting
+waterfall extracted from `compute_goal_progress()` into a pure
+`_distribute_pool_across_tiers(goals, pool)`, reused unchanged by both
+`compute_goal_progress()` (current pool, behavior unchanged) and the
+new `compute_projected_goal_progress(db, uid, projected_pool)`.
+`health_engine.py` gained `compute_goal_risk()` (reads `monthlyTarget`
+from `financial_engine.get_summary()`'s already-computed
+`goalProgress`, never re-derives it) and `_goal_risk_flags()` (pure,
+converts an already-computed `goalRisk` dict into flag entries —
+kept separate from `_build_risk_flags()` so that function's own
+"no Firestore needed to test" property stays intact for its existing
+callers). `GOAL_AT_RISK` added to `_RISK_SEVERITY` (medium, same tier
+as `RECOVERY_NEEDED`/`CATEGORY_HIGH_PRESSURE`) and merged into
+`compute_risk_flags()`'s output. `/financial-health` now returns
+`goalRisk` alongside `overallHealth`/`categoryHealth`/`riskFlags`.
+
+**A real invariant test caught the expected, honest gap between Goal
+Risk and Goal Protection**: `test_recommendation_engine.py` asserts
+every Risk Flag code has a Recommendation Matrix row (added earlier
+specifically to catch exactly this class of gap), and `GOAL_AT_RISK`
+correctly failed it — there's no recommendation for it yet, because
+that's Goal Protection, a separate, not-yet-built phase, per the
+user's own explicit ordering. Fixed by naming `GOAL_AT_RISK` as a
+deliberate, documented exception in that test (`_NOT_YET_RECOMMENDED`)
+rather than either silently weakening the invariant or rushing a
+placeholder recommendation ahead of its own design pass.
+
+**Verification**: `test_goal_service.py` (new, 8 scenarios) tests
+`_distribute_pool_across_tiers` directly against plain dicts (empty
+goals, zero pool, single-tier full/partial funding, proportional
+same-tier splitting, higher tier fully funded before lower tier sees
+anything) and `compute_projected_goal_progress()` via a minimal fake
+Firestore (completed goals correctly excluded). `test_health_engine.py`
+extended with 5 scenarios for `_goal_risk_flags()` (only at-risk goals
+produce flags, shortfall/confidence carried through, empty/`None`
+input never crashes). Full backend suite (15 files): zero regressions.
+
+Real-account verification against `BDpx6it7MeSZSrUJEBu9Bbwfp8l1`: the
+account's real `projectedSavings.value` is currently `-4541.36` (a
+genuine projected deficit — every category budget is exhausted this
+month), so `_distribute_pool_across_tiers` correctly gives every goal
+`0.0` projected contribution regardless of priority, and both real
+goals ("trip," `monthlyTarget: 10000`; "laptop," `monthlyTarget:
+50000`) correctly resolve to `GOAL_AT_RISK` with their full
+`monthlyTarget` as `shortfall`. Confirmed both flags appear correctly
+in `compute_risk_flags()`'s full output, sorted by severity alongside
+the account's existing `CATEGORY_EXHAUSTED`/`PROJECTED_DEFICIT`/etc.
+flags — not a synthetic test, the real account's real current
+financial state.
+
+## Phase 19 — Goal Protection — Design, FROZEN
+
+Answers "what can the user actually do" about a `GOAL_AT_RISK` flag
+(Phase 18) — closing the deliberate, named gap
+`test_recommendation_engine.py` caught when Goal Risk shipped.
+
+**Constrained by how this engine already works, not a new mechanism.**
+`recommendation_engine.py` is a pure Matrix lookup (Risk Flag code ->
+recommendation code/type/actionValue/expiresWhen) — no recommendation
+anywhere carries a human sentence; that's a separate, still-unbuilt
+"Explainer" phase named elsewhere in this spec. Goal Protection stays a
+structured fact, not worded coaching copy, to match every other row.
+
+**Explicit scope decision, confirmed before starting**: surfaces only
+the shortfall fact ("this goal is Rs X short of its monthly target
+this month"), not a suggested spending cut. A cut-suggestion would
+need a genuinely new metric — what "discretionary spending" even means
+in this app doesn't exist as a concept anywhere today — and inventing
+that arithmetic inside the Recommendation Engine would violate Rule 4
+("every actionValue is read directly from an existing field, never
+computed here"). Deferred as its own future decision, not built now.
+
+**New Matrix row**: `"GOAL_AT_RISK": {"code":
+"INCREASE_GOAL_CONTRIBUTION", "type": "protect", ...}`. `"protect"` is
+a genuinely new recommendation type — none of the existing five
+(recover/stop/reduce/monitor/maintain) fit "put more toward this
+specific goal," so the frozen type taxonomy grows by one rather than
+force-fitting an ill-matching label.
+
+**`actionValue` = the flag's own `shortfall`** — already computed by
+`compute_goal_risk()` (Phase 18), read directly off the flag, never
+recomputed here. Same precedent as `CATEGORY_EXHAUSTED`'s fixed `0`:
+a pre-resolved value, not a fresh Metrics Engine lookup.
+
+**`_build_recommendation()` generalized**, not special-cased: today it
+threads exactly one "which thing does this concern" field
+(`category`) from flag to recommendation object. Extended to also
+carry `goalId`/`goalName` when present on the flag, mirroring the
+existing `category` field exactly rather than inventing a
+goal-specific code path. `_goal_risk_flags()` (health_engine.py, Phase
+18) gains a `goalName` field on its flags for this — Health Engine
+already has the name via `financial_engine.get_summary()`'s
+`goalProgress`, so this is a pass-through, not a new lookup.
+
+## Phase 19 — Goal Protection — Implementation, FROZEN
+
+Built exactly as designed above. `_RECOMMENDATION_MATRIX` gained
+`"GOAL_AT_RISK" -> "INCREASE_GOAL_CONTRIBUTION"` (type `"protect"`,
+a genuinely new addition to the frozen taxonomy). `_lookup_action_value()`
+reads the flag's own `shortfall` directly for `GOAL_AT_RISK` — no new
+metric, no arithmetic, matching `CATEGORY_EXHAUSTED`'s precedent of a
+pre-resolved value rather than a fresh Metrics Engine lookup.
+`_build_recommendation()` generalized to thread `goalId`/`goalName`
+from flag to recommendation object exactly like the existing `category`
+field, rather than a goal-specific code path; `_build_healthy_
+recommendation()` and `_build_recommendation_trace()` updated to match.
+`health_engine.py`'s `compute_goal_risk()`/`_goal_risk_flags()` (Phase
+18) gained the `goalName` pass-through this phase needed.
+
+**Verification**: `test_recommendation_engine.py` — the Phase 18
+exception (`GOAL_AT_RISK` deliberately excluded from the "every Risk
+Flag has a Matrix row" invariant) removed now that it has one; the
+frozen type taxonomy extended with `INCREASE_GOAL_CONTRIBUTION ->
+protect`; the one exact-dict-equality test (`RECOVERY_NEEDED`) updated
+to include the two new always-present `goalId`/`goalName` keys; one
+new dedicated scenario confirms `GOAL_AT_RISK` produces
+`INCREASE_GOAL_CONTRIBUTION` with `actionValue` equal to the flag's
+own shortfall, correct `goalName`/`goalId` threading, and a
+goal-specific `expiresWhen`. `test_health_engine.py` extended to
+assert `goalName` is carried on `GOAL_AT_RISK` flags. Full backend
+suite (15 files): zero regressions.
+
+Real-account verification against `BDpx6it7MeSZSrUJEBu9Bbwfp8l1`:
+`compute_recommendations()` correctly produced two
+`INCREASE_GOAL_CONTRIBUTION` alternatives, one per real at-risk goal
+("trip," `actionValue: 10000`; "laptop," `actionValue: 50000`, each
+exactly matching that goal's real `monthlyTarget`/shortfall since
+`projectedContribution` is currently `0` for both, per Phase 18's
+already-verified negative-projected-savings state), each correctly
+named via `goalName`/`expiresWhen` — not synthetic data, the account's
+real current recommendations.

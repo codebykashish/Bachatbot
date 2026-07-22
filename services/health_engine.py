@@ -48,6 +48,7 @@ import time
 from datetime import datetime, timezone
 
 from services.metrics_engine import get_metrics, METRICS_ENGINE_VERSION
+from utils import get_current_month_key
 
 HEALTH_ENGINE_VERSION = "1.0.0"
 
@@ -398,6 +399,82 @@ def compute_category_health(db, uid: str, month_key: str = None) -> dict:
     }
 
 
+def compute_goal_risk(db, uid: str, month_key: str = None) -> dict:
+    """
+    Public API — Goal Risk (spec Phase 18). Answers a different
+    question than Overall Health: not "is my spending healthy" but
+    "given my current spending pace, will I actually contribute enough
+    to THIS goal to stay on its own timeframe." Deliberately never
+    feeds into compute_overall_health()'s status -- a goal can be at
+    risk while spending is perfectly healthy (a lower-priority goal
+    correctly starved by a higher-priority one), and the two questions
+    are kept as genuinely separate signals.
+
+    Pure judgment, no new arithmetic (Rule 1): `monthlyTarget` is read
+    from financial_engine.get_summary()'s already-computed
+    goalProgress, never re-derived here; the projected per-goal
+    contribution is goal_service.compute_projected_goal_progress()'s
+    job (reusing the same tier waterfall compute_goal_progress() already
+    uses, just fed the Metrics Engine's projected pool instead of the
+    current one).
+
+    Confidence is inherited from projectedSavings.confidence, never
+    "high" -- Goal Risk assumes future spending behavior continues,
+    same as Projected Savings itself.
+
+    A goal is skipped (not flagged either way) when projectedSavings is
+    None -- no budgets exist yet, nothing to project a shortfall from.
+    """
+    from services.financial_engine import get_summary
+    from services.goal_service import compute_projected_goal_progress
+
+    start = time.perf_counter()
+    month_key = month_key or get_current_month_key()
+
+    metrics = _load_metrics(db, uid, month_key)
+    metrics = _validate_metrics(metrics)
+    projected_savings = metrics.get("projectedSavings")
+
+    summary = get_summary(db, uid, month_key)
+    goal_progress = summary.get("goalProgress") or []
+
+    goal_risk = {}
+    if goal_progress and projected_savings is not None:
+        projected_pool = projected_savings["value"]
+        confidence = projected_savings["confidence"]
+        projected_contribution = compute_projected_goal_progress(db, uid, projected_pool)
+
+        for g in goal_progress:
+            gid = g["id"]
+            monthly_target = float(g.get("monthlyTarget") or 0)
+            contribution = projected_contribution.get(gid, 0.0)
+            at_risk = contribution < monthly_target
+
+            entry = {"atRisk": at_risk, "confidence": confidence}
+            if at_risk:
+                entry["shortfall"] = round(monthly_target - contribution, 2)
+                entry["monthlyTarget"] = monthly_target
+                entry["projectedContribution"] = round(contribution, 2)
+                # goalName, Phase 19's own need -- carried here since
+                # get_summary()'s goalProgress already has it; a
+                # pass-through, not a new lookup, so Goal Protection's
+                # recommendation can name the goal without a second fetch.
+                entry["goalName"] = g.get("name")
+            goal_risk[gid] = entry
+
+    generation_ms = round((time.perf_counter() - start) * 1000, 2)
+
+    return {
+        "goalRisk": goal_risk,
+        "metadata": {
+            "healthEngineVersion": HEALTH_ENGINE_VERSION,
+            "metricsEngineVersion": METRICS_ENGINE_VERSION,
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            "generationMs": generation_ms,
+        },
+    }
+
+
 # Frozen lookup (spec: Phase 3.3 Design) — an already-computed reason
 # code maps directly to a risk type + severity. Never a weighted score.
 # Codes not listed here (CATEGORY_NORMAL, LOW_ACTIVITY, LOW_MATERIALITY)
@@ -411,6 +488,11 @@ _RISK_SEVERITY = {
     "CATEGORY_HIGH_PRESSURE": ("budget_risk", "medium"),
     "SPENDING_TOO_FAST": ("spending_risk", "low"),
     "CATEGORY_RECOVERABLE": ("budget_risk", "info"),
+    # Phase 18 — same tier as RECOVERY_NEEDED/CATEGORY_HIGH_PRESSURE:
+    # worth surfacing, not yet the kind of emergency PROJECTED_DEFICIT/
+    # RECOVERY_IMPOSSIBLE are. First cut, tunable later like every other
+    # severity choice in this table.
+    "GOAL_AT_RISK": ("goal_risk", "medium"),
 }
 
 _SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -478,6 +560,30 @@ def _build_risk_flags(metrics: dict) -> list:
     return flags
 
 
+def _goal_risk_flags(goal_risk: dict) -> list:
+    """
+    Pure — takes an already-computed goalRisk dict (from
+    compute_goal_risk()) and returns its risk flags. Kept separate from
+    _build_risk_flags() since goalRisk needs Firestore (goal_service)
+    to produce, unlike every other input _build_risk_flags() takes
+    (plain Metrics Engine output) — this keeps that function's own
+    "no Firestore needed to test" property intact for its existing
+    callers/tests.
+    """
+    flags = []
+    for gid, entry in (goal_risk or {}).items():
+        if not entry.get("atRisk"):
+            continue
+        risk_type, severity = _RISK_SEVERITY["GOAL_AT_RISK"]
+        flags.append({
+            "code": "GOAL_AT_RISK", "type": risk_type, "severity": severity,
+            "confidence": entry.get("confidence", "low"), "source": "goalRisk",
+            "goalId": gid, "goalName": entry.get("goalName"),
+            "shortfall": entry.get("shortfall"),
+        })
+    return flags
+
+
 def compute_risk_flags(db, uid: str, month_key: str = None) -> dict:
     """
     Public API — "is there something worth noticing?" See
@@ -491,6 +597,10 @@ def compute_risk_flags(db, uid: str, month_key: str = None) -> dict:
     metrics = _validate_metrics(metrics)
 
     flags = _build_risk_flags(metrics)
+
+    goal_risk_result = compute_goal_risk(db, uid, month_key)
+    flags.extend(_goal_risk_flags(goal_risk_result["goalRisk"]))
+    flags.sort(key=lambda f: _SEVERITY_RANK.get(f["severity"], 5))
 
     generation_ms = round((time.perf_counter() - start) * 1000, 2)
 

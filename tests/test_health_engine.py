@@ -26,6 +26,7 @@ from services.health_engine import (
     _determine_confidence,
     _build_health,
     _build_risk_flags,
+    _goal_risk_flags,
 )
 
 FAILURES = []
@@ -474,13 +475,58 @@ def run():
     )
 
     print()
+    print("Goal Risk Flags — test matrix")
+
+    # 8. An at-risk goal produces a GOAL_AT_RISK flag with its shortfall
+    goal_risk_1 = {
+        "g1": {"atRisk": True, "confidence": "medium", "shortfall": 4000.0,
+               "monthlyTarget": 10000.0, "projectedContribution": 6000.0,
+               "goalName": "Laptop"},
+        "g2": {"atRisk": False, "confidence": "medium"},
+    }
+    goal_flags_1 = _goal_risk_flags(goal_risk_1)
+    check(
+        "Only the at-risk goal produces a flag, not the on-pace one",
+        len(goal_flags_1) == 1 and goal_flags_1[0]["goalId"] == "g1",
+        f"got {goal_flags_1}",
+    )
+    check(
+        "GOAL_AT_RISK flag carries the shortfall and never fabricates high confidence",
+        goal_flags_1[0]["shortfall"] == 4000.0 and goal_flags_1[0]["confidence"] == "medium",
+        f"got {goal_flags_1}",
+    )
+    check(
+        "GOAL_AT_RISK flag carries goalName (Phase 19 pass-through) for downstream recommendation naming",
+        goal_flags_1[0]["goalName"] == "Laptop",
+        f"got {goal_flags_1}",
+    )
+
+    # 9. No goals at risk -> no flags at all
+    goal_flags_2 = _goal_risk_flags({"g1": {"atRisk": False, "confidence": "low"}})
+    check(
+        "No goals at risk -> empty flags list",
+        goal_flags_2 == [],
+        f"got {goal_flags_2}",
+    )
+
+    # 10. Empty/None goalRisk -> no flags, never an error
+    check(
+        "Empty goalRisk dict -> empty flags list",
+        _goal_risk_flags({}) == [],
+    )
+    check(
+        "None goalRisk -> empty flags list, never a crash",
+        _goal_risk_flags(None) == [],
+    )
+
+    print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURE(S):")
         for f in FAILURES:
             print(f"  - {f}")
         sys.exit(1)
     else:
-        print("All Overall Health, Category Health, and Risk Flags scenarios passed.")
+        print("All Overall Health, Category Health, Risk Flags, and Goal Risk scenarios passed.")
 
 
 if __name__ == "__main__":

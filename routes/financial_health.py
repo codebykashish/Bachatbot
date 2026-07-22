@@ -16,6 +16,7 @@ from services.health_engine import (
     compute_overall_health,
     compute_category_health,
     compute_risk_flags,
+    compute_goal_risk,
 )
 
 router = APIRouter()
@@ -38,6 +39,7 @@ async def financial_health(
     overall = compute_overall_health(db, uid, month_key)
     by_category = compute_category_health(db, uid, month_key)
     risks = compute_risk_flags(db, uid, month_key)
+    goal_risk = compute_goal_risk(db, uid, month_key)
 
     return {
         "success": True,
@@ -46,6 +48,7 @@ async def financial_health(
             "decisionTrace": overall["decisionTrace"],
             "categoryHealth": by_category["categoryHealth"],
             "riskFlags": risks["riskFlags"],
+            "goalRisk": goal_risk["goalRisk"],
             "metadata": overall["metadata"],
         },
     }

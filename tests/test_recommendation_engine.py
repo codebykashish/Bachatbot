@@ -69,6 +69,7 @@ def run():
         primary == {
             "code": "LIMIT_DAILY_SPENDING", "type": "recover", "confidence": "medium",
             "actionValue": 150, "actionUnit": "per_day", "category": None,
+            "goalId": None, "goalName": None,
             "source": "recoveryPlan", "generatedFrom": "RECOVERY_NEEDED",
             "expiresWhen": "Recovery Plan is no longer needed", "priority": 1,
         },
@@ -95,6 +96,27 @@ def run():
     check(
         "Category high pressure -> REDUCE_CATEGORY_SPENDING for Transport, actionValue from categoryDailyTarget",
         primary["code"] == "REDUCE_CATEGORY_SPENDING" and primary["type"] == "reduce" and primary["actionValue"] == 40.0,
+        f"got {primary}",
+    )
+
+    # 3b. Goal at risk -> INCREASE_GOAL_CONTRIBUTION, actionValue is the
+    # flag's own shortfall (never recomputed), goalName threaded through
+    # exactly like category is for other codes (spec: Phase 19 Design).
+    flags = [{
+        "code": "GOAL_AT_RISK", "type": "goal_risk", "severity": "medium",
+        "confidence": "medium", "source": "goalRisk",
+        "goalId": "g1", "goalName": "Laptop", "shortfall": 12000.0,
+    }]
+    primary, alternatives = run_recommendations(flags, {})
+    check(
+        "Goal at risk -> INCREASE_GOAL_CONTRIBUTION, type protect, actionValue is the shortfall",
+        primary["code"] == "INCREASE_GOAL_CONTRIBUTION"
+        and primary["type"] == "protect"
+        and primary["actionValue"] == 12000.0
+        and primary["goalId"] == "g1"
+        and primary["goalName"] == "Laptop"
+        and primary["category"] is None
+        and primary["expiresWhen"] == "Laptop is no longer at risk",
         f"got {primary}",
     )
 
@@ -161,10 +183,12 @@ def run():
     )
 
     # 9. Every Risk Flag severity code has a Matrix row (the gap found before coding)
+    # GOAL_AT_RISK now has one too (Phase 19, Goal Protection) -- no
+    # exceptions remain.
     from services.health_engine import _RISK_SEVERITY
     missing = [code for code in _RISK_SEVERITY if code not in _RECOMMENDATION_MATRIX]
     check(
-        "Every Risk Flag code has a Recommendation Matrix row (MULTIPLE_CATEGORIES_PRESSURED, CATEGORY_RECOVERABLE included)",
+        "Every Risk Flag code has a Recommendation Matrix row (MULTIPLE_CATEGORIES_PRESSURED, CATEGORY_RECOVERABLE, GOAL_AT_RISK included)",
         missing == [],
         f"missing: {missing}",
     )
@@ -179,6 +203,7 @@ def run():
         "REVIEW_MULTIPLE_CATEGORIES": "reduce",
         "MONITOR_CATEGORY_SPENDING": "monitor",
         "SLOW_SPENDING_PACE": "reduce",
+        "INCREASE_GOAL_CONTRIBUTION": "protect",
         "KEEP_CURRENT_HABITS": "maintain",
     }
     actual_types = {v["code"]: v["type"] for v in _RECOMMENDATION_MATRIX.values()}

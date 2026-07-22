@@ -93,6 +93,17 @@ _RECOMMENDATION_MATRIX = {
         "source": "spendingPace",
         "expiresWhen": "Spending Pace is no longer too_fast",
     },
+    "GOAL_AT_RISK": {
+        "code": "INCREASE_GOAL_CONTRIBUTION",
+        # "protect" — a genuinely new type (spec: Phase 19 Design). None
+        # of recover/stop/reduce/monitor/maintain fit "put more toward
+        # this specific goal," so the taxonomy grows by one rather than
+        # force-fitting an ill-matching label.
+        "type": "protect",
+        "actionUnit": None,
+        "source": "goalRisk",
+        "expiresWhen": "{goalName} is no longer at risk",
+    },
 }
 
 _HEALTHY_RECOMMENDATION = {
@@ -144,6 +155,15 @@ def _lookup_action_value(trigger_code: str, flag: dict, metrics: dict):
         entry = category_daily_target.get(category) if category else None
         return entry.get("value") if entry else None
 
+    if trigger_code == "GOAL_AT_RISK":
+        # Read directly off the flag -- compute_goal_risk() (Phase 18)
+        # already computed this; no fresh Metrics Engine lookup exists
+        # for a per-goal shortfall, and Rule 4 forbids computing one
+        # here. Explicit scope decision (spec Phase 19 Design): the
+        # shortfall fact only, never a suggested spending-cut number --
+        # that would need a new metric that doesn't exist yet.
+        return flag.get("shortfall")
+
     return None
 
 
@@ -160,9 +180,17 @@ def _build_recommendation(flag: dict, metrics: dict):
         return None
 
     category = flag.get("category")
+    # goalId/goalName (Phase 19) -- carried through exactly like
+    # `category` above, never a goal-specific code path. Only GOAL_AT_RISK
+    # flags ever set these; every other flag leaves them None.
+    goal_id = flag.get("goalId")
+    goal_name = flag.get("goalName")
+
     expires_when = template["expiresWhen"]
     if category and "{category}" in expires_when:
         expires_when = expires_when.format(category=category)
+    if goal_name and "{goalName}" in expires_when:
+        expires_when = expires_when.format(goalName=goal_name)
 
     return {
         "code": template["code"],
@@ -171,6 +199,8 @@ def _build_recommendation(flag: dict, metrics: dict):
         "actionValue": _lookup_action_value(trigger_code, flag, metrics),
         "actionUnit": template["actionUnit"],
         "category": category,
+        "goalId": goal_id,
+        "goalName": goal_name,
         "source": template["source"],
         "generatedFrom": trigger_code,
         "expiresWhen": expires_when,
@@ -186,6 +216,8 @@ def _build_healthy_recommendation() -> dict:
         "actionValue": None,
         "actionUnit": template["actionUnit"],
         "category": None,
+        "goalId": None,
+        "goalName": None,
         "source": template["source"],
         "generatedFrom": None,
         "expiresWhen": template["expiresWhen"],
@@ -204,7 +236,11 @@ def _build_recommendation_trace(flags: list, recommendations: list) -> list:
     for flag, rec in zip(flags, recommendations):
         if rec is None:
             continue
-        label = f"{flag['code']}" + (f" ({flag['category']})" if flag.get("category") else "")
+        label = f"{flag['code']}"
+        if flag.get("category"):
+            label += f" ({flag['category']})"
+        elif flag.get("goalName"):
+            label += f" ({flag['goalName']})"
         trace.append(f"Risk: {label}")
         trace.append(f"Matrix lookup: {rec['code']}")
         if rec.get("actionValue") is not None:
