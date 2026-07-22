@@ -27,7 +27,9 @@ from services import behavior_state_repository as behavior_repo
 from services import eligibility_engine
 from services.behavior_engine import (
     LOGGING_TIMEZONE, record_spending_activity, record_recovery_activity,
+    check_goal_milestones,
 )
+from services.financial_engine import get_summary
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +163,26 @@ def process_day(db, uid, date, dry_run=False):
 
             record_spending_activity(db, uid, overall_status, date)
             record_recovery_activity(db, uid, recovery_present, recovery_possible, date)
+
+            # check_goal_milestones() (spec 4.5.5) existed, unit-tested,
+            # since early in this project -- but nothing ever called it
+            # in the live app, the same "designed, never wired" gap
+            # already found once for the Eligibility Waterfall. Wired
+            # here, the same per-day evaluation spot spending/recovery
+            # already use. goalProgress already comes from get_summary()
+            # (financial_engine's own _calculate_goal_impact) -- the
+            # same computation the real /goals API response uses, not
+            # a re-derivation.
+            summary_result = get_summary(db, uid, month_key)
+            goal_progress = [
+                {
+                    "goalId": g["id"],
+                    "savedSoFar": g["savedSoFar"],
+                    "targetAmount": g["targetAmount"],
+                }
+                for g in summary_result.get("goalProgress", [])
+            ]
+            check_goal_milestones(db, uid, goal_progress, today=date)
 
             if dry_run:
                 gathered = snapshot_service._gather(db, uid, month_key)

@@ -11733,3 +11733,97 @@ approach already used in Reports). `widgets/report_chart.dart` deleted
 
 **Verification**: `flutter analyze` on the full project — zero errors,
 same pre-existing infos.
+
+---
+
+## Phase 13.13 — Existing Screen Integration: Goals & Income — FROZEN
+
+**Income → app-wide**: `HomeScreen`'s `onIncomeTap` had no refresh
+callback at all after returning from `IncomePage` — unlike
+`CategoriesScreen`'s equivalent push, which already did
+`.then((_) => _fetchFinancialSummary())`. An income edit updated
+`IncomePage`'s own state fine, but the balance card, health badge, and
+chart on Home stayed stale until the next pull-to-refresh or app
+reopen. Fixed the same way (`.then((_) => _fetchAll())`);
+`ProfileScreen`'s "My Income" stat card had the identical gap, fixed
+with its own existing `loadProfile()`.
+
+**Goals gained real Behavior Engine data**: a saving-streak and
+`FIRST_GOAL_COMPLETED`-milestone banner, read from `GET /behavior` (the
+same endpoint already powering the Streak screen) — pure surfacing of
+already-computed facts, no new logic. Goals previously had zero tie to
+the Behavior Engine at all.
+
+**A real dead-code bug found and fixed**: the goal progress bar's color
+was `isCompleted ? _primary : _primary` — a ternary that always
+evaluated to the same value, so completed and in-progress goals were
+visually identical. Fixed using `status` (a real backend field, not
+invented pace logic) to give completed goals a distinct celebratory
+color.
+
+**Deliberately deferred, confirmed before starting**: coloring a goal
+amber for falling behind its monthly saving pace — that would mean
+inventing a new domain rule ("what counts as behind pace?") with no
+backend equivalent, the same category of new reasoning named as
+deserving its own dedicated design pass, same as Pattern Spending
+Alerts.
+
+**Verification**: real-account check confirms both Goals conditions
+(`saving.currentProtectionStreak == 0`, `FIRST_GOAL_COMPLETED` not yet
+unlocked) — banner correctly stays hidden rather than showing a false
+positive. `flutter analyze` on the full project — zero errors, same
+pre-existing infos.
+
+---
+
+## Phase 13.14 — Two Real Bugs Found via Real Usage — FROZEN
+
+**Bug 1: `check_goal_milestones()` was designed, unit-tested, and never
+called anywhere in the live app** — the exact same "designed, never
+wired" gap already found once for the Eligibility Waterfall (spec
+5.9's own review). A real goal reached 100% funding on the real
+account and correctly computed `status: "completed"` via the real
+`/goals` API — but `FIRST_GOAL_COMPLETED` never had a chance to unlock,
+because nothing ever evaluated it. Fixed by wiring it into
+`scheduler_service.process_day()`, the same per-day evaluation spot
+`record_spending_activity`/`record_recovery_activity` already use,
+fed by `financial_engine.get_summary()`'s own `goalProgress` — the
+identical computation the real `/goals` endpoint already returns, not
+a re-derivation.
+
+**Bug 2, more serious, found while verifying Bug 1's fix**: even after
+wiring the check, the real notification still didn't fire. Root cause:
+`eligibility_engine._frequency_allows()`'s "ONCE" policy for
+`MILESTONE_UNLOCKED` matched notifications by `eventCode` alone — but
+every distinct milestone (`FIRST_EXPENSE_LOGGED`, `FIRST_HEALTHY_WEEK`,
+`FIRST_GOAL_COMPLETED`, ...) shares that same eventCode. This meant the
+very first milestone any user ever unlocked would silently and
+permanently block every subsequent, genuinely different milestone
+notification, forever — a bug affecting every user, not just this
+account, discovered only because a real completed goal produced zero
+notification where one was clearly warranted.
+
+**Fixed**: `_most_recent_notification_for_code()` now accepts an
+optional `milestone_code`, narrowing the match to `payload.code` when
+the event is `MILESTONE_UNLOCKED` — "ONCE" now means once per specific
+milestone, not once ever for the whole shared event code.
+
+**Verification, both bugs**: `test_eligibility_engine.py` extended with
+a direct regression test (a second, genuinely different milestone is
+eligible despite the shared eventCode; the same milestone twice is
+still correctly blocked) — 14/14 scenarios pass. Full backend suite (14
+files): zero regressions. Real-account confirmation, twice: first
+`check_goal_milestones()` was called directly to confirm
+`FIRST_GOAL_COMPLETED` unlocks in `behaviorHistory`; then
+`process_user()` was re-run for real and produced a genuine "First
+goal completed!" notification, delivered to the real device (confirmed
+`deliveredAt` set, status `Read` on the real account).
+
+**UI follow-up, same phase**: a completed goal previously reused the
+exact same plain white card as an in-progress one, just with a tiny
+"DONE" chip — real feedback: "doesn't look supportive at all." Now a
+genuinely distinct treatment (`_completedGoalCard`): a gold gradient
+hero, a trophy icon, and a real congratulatory line ("You saved Rs X.
+Nice work!"), not a small badge bolted onto the same layout. In-progress
+goals are visually unchanged. `flutter analyze`: zero errors, same
+pre-existing infos.

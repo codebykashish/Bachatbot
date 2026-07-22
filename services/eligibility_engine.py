@@ -63,14 +63,30 @@ def _conditional_passes(code: str, payload: dict) -> bool:
     return False
 
 
-def _most_recent_notification_for_code(db, uid: str, event_code: str):
-    matching = [n for n in repo.list_notifications(db, uid) if n.get("eventCode") == event_code]
+def _most_recent_notification_for_code(db, uid: str, event_code: str, milestone_code: str = None):
+    """
+    `milestone_code` narrows the match to one specific milestone
+    (payload.code) rather than every notification sharing the same
+    eventCode -- MILESTONE_UNLOCKED is the one event code shared by
+    every distinct milestone (FIRST_EXPENSE_LOGGED, FIRST_HEALTHY_WEEK,
+    FIRST_GOAL_COMPLETED, ...). Without this, "ONCE" per eventCode
+    would mean "once ever, for ANY milestone" -- the very first
+    milestone a user ever unlocks would silently block every
+    subsequent, genuinely distinct milestone forever after. Found via
+    a real account where a real goal completion produced no
+    notification at all.
+    """
+    matching = [
+        n for n in repo.list_notifications(db, uid)
+        if n.get("eventCode") == event_code
+        and (milestone_code is None or (n.get("payload") or {}).get("code") == milestone_code)
+    ]
     if not matching:
         return None
     return max(matching, key=lambda n: n.get("createdAt") or 0)
 
 
-def _frequency_allows(db, uid: str, code: str) -> bool:
+def _frequency_allows(db, uid: str, code: str, payload: dict) -> bool:
     policy = gen._FREQUENCY.get(code)
     if policy in (None, "UNTIL_RESOLVED"):
         # UNTIL_RESOLVED's real escalating cadence is a Delivery/scheduling
@@ -78,7 +94,8 @@ def _frequency_allows(db, uid: str, code: str) -> bool:
         # simplified to always-allow here, not half-built.
         return True
 
-    most_recent = _most_recent_notification_for_code(db, uid, code)
+    milestone_code = payload.get("code") if code == "MILESTONE_UNLOCKED" else None
+    most_recent = _most_recent_notification_for_code(db, uid, code, milestone_code)
     if most_recent is None:
         return True
     if policy == "ONCE":
@@ -125,7 +142,7 @@ def check_eligibility(db, uid: str, event: dict) -> dict:
         return {"eligible": False, "reason": "already informed (a notification already exists for this event)"}
 
     # Gate 5: Frequency
-    if not _frequency_allows(db, uid, code):
+    if not _frequency_allows(db, uid, code, event.get("payload") or {}):
         return {"eligible": False, "reason": f"'{code}' frequency policy ({gen._FREQUENCY.get(code)}) not yet elapsed"}
 
     return {"eligible": True, "reason": None}

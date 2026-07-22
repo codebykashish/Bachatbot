@@ -229,6 +229,36 @@ def run():
         f"got {decision7}",
     )
 
+    # 7b. Regression: two DIFFERENT milestones must both be eligible, even
+    # though both share the eventCode "MILESTONE_UNLOCKED" -- a real bug
+    # found on a real account (a completed goal produced zero notification
+    # because an earlier, unrelated milestone had already used up the
+    # "ONCE per eventCode" allowance). ONCE must be scoped per milestone
+    # code (payload.code), never per shared eventCode.
+    repo.save(db, "u4", {
+        "eventId": "u4:2026-07-01:milestone_unlocked:FIRST_EXPENSE_LOGGED", "eventCode": "MILESTONE_UNLOCKED",
+        "priority": "Low", "frequency": "ONCE", "timing": "IMMEDIATE", "interruptionLevel": None, "templateId": "T",
+        "title": "t", "body": "b", "cta": "c", "payload": {"code": "FIRST_EXPENSE_LOGGED"}, "deepLink": None, "status": "Created",
+    })
+    decision7b = elig.check_eligibility(db, "u4", {
+        "eventId": "u4:2026-08-01:milestone_unlocked:FIRST_GOAL_COMPLETED",
+        "event": "MILESTONE_UNLOCKED", "payload": {"code": "FIRST_GOAL_COMPLETED"},
+    })
+    check(
+        "A second, genuinely different milestone is still eligible despite sharing MILESTONE_UNLOCKED's eventCode",
+        decision7b["eligible"] is True,
+        f"got {decision7b}",
+    )
+    decision7c = elig.check_eligibility(db, "u4", {
+        "eventId": "u4:2026-09-01:milestone_unlocked:FIRST_EXPENSE_LOGGED_AGAIN",
+        "event": "MILESTONE_UNLOCKED", "payload": {"code": "FIRST_EXPENSE_LOGGED"},
+    })
+    check(
+        "The SAME milestone code a second time is still correctly ineligible (ONCE per milestone, not unlimited)",
+        decision7c["eligible"] is False and "frequency policy" in decision7c["reason"],
+        f"got {decision7c}",
+    )
+
     # 8. process_event on an eligible event creates and returns a real notification
     result8 = elig.process_event(db, "u3", {"eventId": "u3:2026-07-19:milestone_unlocked:FIRST_HEALTHY_WEEK", "event": "MILESTONE_UNLOCKED", "payload": {"code": "FIRST_HEALTHY_WEEK"}})
     check(
