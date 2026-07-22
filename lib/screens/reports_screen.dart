@@ -44,6 +44,14 @@ class ReportsScreenState extends State<ReportsScreen>
   Map<String, String> _categoryHealth = {}; // category -> green/amber/red
   List<Goal> _goals = [];
   Map<String, dynamic>? _projectedSavings; // Metrics Engine (Phase 2.7, Predictive) — null when no budgets exist
+
+  // Guards against an out-of-order response overwriting fresher data --
+  // _loadReport() can be triggered concurrently (refresh, view switch,
+  // month navigation, lifecycle resume); without this, whichever
+  // Future.wait resolves last wins the setState, even if it started
+  // first and is now stale. Same root cause already found and fixed on
+  // the Categories and Home screens.
+  int _loadGeneration = 0;
   // Recommendation, Recovery Plan, and Risk Flags moved to HealthScreen
   // (Phase 13.4) — this screen stays focused on income/spending/savings;
   // "am I okay, what should I do" now lives in one place, not two.
@@ -120,6 +128,7 @@ class ReportsScreenState extends State<ReportsScreen>
   }
 
   Future<void> _loadReport() async {
+    final myGen = ++_loadGeneration;
     try {
       final futures = await Future.wait([
         ApiService.get('/monthly-report?monthKey=$_selectedMonthKey&view=$_selectedView'),
@@ -132,7 +141,7 @@ class ReportsScreenState extends State<ReportsScreen>
       final metricsRes = futures[2];
       final healthRes = futures[3];
 
-      if (!mounted) return;
+      if (!mounted || myGen != _loadGeneration) return;
 
       if (res['success'] == true) {
         final data = res['data'];
@@ -177,12 +186,12 @@ class ReportsScreenState extends State<ReportsScreen>
           _projectedSavings = projectedSavings;
           _isLoading = false;
         });
-      } else {
+      } else if (myGen == _loadGeneration) {
         setState(() => _isLoading = false);
       }
     } catch (e) {
       debugPrint('[ReportsScreen] Error loading report: $e');
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted && myGen == _loadGeneration) setState(() => _isLoading = false);
     }
   }
 

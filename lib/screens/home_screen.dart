@@ -64,6 +64,17 @@ class HomeScreenState extends State<HomeScreen> {
   // Latest first name fetched from profile — overrides widget.firstName when set
   String? _profileFirstName;
 
+  // Guards against an out-of-order response overwriting fresher data.
+  // _fetchAll()/_refreshData()/refresh() can overlap (e.g. a transaction's
+  // own refresh trigger racing a rebalance-confirm's refresh trigger
+  // moments later) -- without this, whichever response's setState runs
+  // last wins, even if it's the older one. Incremented once per fetch
+  // batch; each sub-fetch below captures it at its own start and only
+  // applies its result if no newer batch has started since. Found via
+  // real usage: a category's numbers got stuck mid-rebalance on Home,
+  // same root cause already found and fixed on the Categories screen.
+  int _fetchGeneration = 0;
+
   static const List<Map<String, dynamic>> _catMeta = [
     {'name': 'Food', 'icon': Icons.restaurant, 'color': Color(0xFF4A90E2)},
     {'name': 'Transport', 'icon': Icons.directions_car, 'color': Color(0xFF26A69A)},
@@ -97,6 +108,7 @@ class HomeScreenState extends State<HomeScreen> {
   // ── Data fetching ────────────────────────────────────────────────────────
 
   Future<void> _fetchAll() async {
+    _fetchGeneration++;
     setState(() => _isLoading = true);
     try {
       await Future.wait([_fetchFinancialSummary(), _fetchFinancialMetrics(), _fetchOverallHealth(), _fetchReport(), _fetchTrend(), _fetchLatestActivity(), _fetchProfileName(), _fetchBehaviorPreview()]);
@@ -149,15 +161,17 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _refreshData() async {
+    _fetchGeneration++;
     try {
       await Future.wait([_fetchFinancialSummary(), _fetchFinancialMetrics(), _fetchOverallHealth(), _fetchReport(), _fetchTrend(), _fetchLatestActivity(), _fetchProfileName(), _fetchBehaviorPreview()]);
     } catch (_) {}
   }
 
   Future<void> _fetchProfileName() async {
+    final myGen = _fetchGeneration;
     try {
       final res = await ApiService.get('/profile');
-      if (!mounted) return;
+      if (!mounted || myGen != _fetchGeneration) return;
       final name = res['data']?['firstName'] as String?;
       if (name != null && name.trim().isNotEmpty) {
         setState(() => _profileFirstName = name.trim());
@@ -169,9 +183,10 @@ class HomeScreenState extends State<HomeScreen> {
   // formulas (remaining/savings/over-budget math) live in this screen
   // anymore, they all come from financial_engine.py via this one endpoint.
   Future<void> _fetchFinancialSummary() async {
+    final myGen = _fetchGeneration;
     try {
       final res = await ApiService.get('/financial-summary?monthKey=$_selectedMonth');
-      if (!mounted) return;
+      if (!mounted || myGen != _fetchGeneration) return;
       if (res['success'] == true) {
         setState(() {
           _summary = res['data'] as Map<String, dynamic>?;
@@ -185,9 +200,10 @@ class HomeScreenState extends State<HomeScreen> {
   // Metrics Engine (Phase 2.1) — read-only interpretations of financialSummary.
   // Never a formula computed here; daysRemaining comes straight from the endpoint.
   Future<void> _fetchFinancialMetrics() async {
+    final myGen = _fetchGeneration;
     try {
       final res = await ApiService.get('/financial-metrics?monthKey=$_selectedMonth');
-      if (!mounted) return;
+      if (!mounted || myGen != _fetchGeneration) return;
       if (res['success'] == true) {
         setState(() {
           _metrics = res['data'] as Map<String, dynamic>?;
@@ -202,9 +218,10 @@ class HomeScreenState extends State<HomeScreen> {
   // `overallHealth.status` is surfaced in the UI; reasons/trace stay
   // backend-only until Chat (Phase 6) has an Explainer to word them.
   Future<void> _fetchOverallHealth() async {
+    final myGen = _fetchGeneration;
     try {
       final res = await ApiService.get('/financial-health?monthKey=$_selectedMonth');
-      if (!mounted) return;
+      if (!mounted || myGen != _fetchGeneration) return;
       if (res['success'] == true) {
         final overallHealth = res['data']?['overallHealth'] as Map<String, dynamic>?;
         // Category Health (Phase 13.12) -- same map Reports already
@@ -242,13 +259,14 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _fetchBehaviorPreview() => BehaviorPreviewService.refresh();
 
   Future<void> _fetchReport() async {
+    final myGen = _fetchGeneration;
     try {
       // Home screen shows today's view -- the most immediately relevant
       // slice, per real feedback. Budgets (Unused Budget / Savings card)
       // are unaffected; they come from /budgets separately and stay
       // monthly, as budgets are inherently a monthly allocation.
       final res = await ApiService.get('/monthly-report?monthKey=$_selectedMonth&view=today');
-      if (!mounted) return;
+      if (!mounted || myGen != _fetchGeneration) return;
       if (res['success'] == true) {
         setState(() {
           final data = res['data'];
@@ -268,9 +286,10 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _fetchLatestActivity() async {
+    final myGen = _fetchGeneration;
     try {
       final res = await ApiService.get('/alerts?limit=1');
-      if (!mounted) return;
+      if (!mounted || myGen != _fetchGeneration) return;
       if (res['success'] == true) {
         final alerts = res['data']?['alerts'] as List? ?? [];
         if (alerts.isNotEmpty) {

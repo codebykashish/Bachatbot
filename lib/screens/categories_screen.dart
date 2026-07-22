@@ -36,6 +36,17 @@ class CategoriesScreenState extends State<CategoriesScreen>
   // fixed elsewhere on this screen for the per-category cards.
   String? _overallHealthStatus;
 
+  // Guards against an out-of-order response overwriting fresher data --
+  // e.g. a refresh fired right before a rebalance confirms (still
+  // reading the pre-rebalance limit, a real transient backend state,
+  // not corrupt data) can resolve AFTER the correct post-confirm
+  // refresh if the earlier request happens to take longer. Without
+  // this, whichever response's setState runs last wins, even if it's
+  // the older one -- found via real usage: a category's card got
+  // stuck showing spent/limit from just before a rebalance had been
+  // confirmed, and nothing ever re-fetched to correct it.
+  int _fetchToken = 0;
+
   late final AnimationController _shakeCtrl;
   late final Animation<double> _shakeAnim;
 
@@ -94,6 +105,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
   // remaining) so every renderer below keeps its existing map shape —
   // nothing downstream needed to change, only where the numbers came from.
   Future<void> _fetchFinancialSummary() async {
+    final myToken = ++_fetchToken;
     setState(() => _isLoading = true);
     try {
       final now = DateTime.now();
@@ -109,7 +121,10 @@ class CategoriesScreenState extends State<CategoriesScreen>
       final res = results[0];
       final metricsRes = results[1];
       final healthRes = results[2];
-      if (!mounted) return;
+      // A newer _fetchFinancialSummary() call has started since this one
+      // did -- its response (whenever it lands) is the one that should
+      // win, so this now-stale response is discarded rather than applied.
+      if (!mounted || myToken != _fetchToken) return;
       if (res['success'] == true) {
         final summary = res['data'] as Map<String, dynamic>? ?? {};
         final categoryRemaining = (summary['categoryRemaining'] as Map?)?.cast<String, dynamic>() ?? {};
@@ -156,12 +171,12 @@ class CategoriesScreenState extends State<CategoriesScreen>
         });
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || myToken != _fetchToken) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Failed to load budgets.'), backgroundColor: Colors.red),
       );
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted && myToken == _fetchToken) setState(() => _isLoading = false);
     }
   }
 
