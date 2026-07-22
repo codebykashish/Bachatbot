@@ -271,6 +271,15 @@ async def confirm_transaction(
         else:
             print(f"[CONFIRM] No budget for '{category}' in {month_key}")
 
+        # Pattern Spending Alert (Phase 17) — runs regardless of whether a
+        # budget exists for this category (a pure pattern comparison, not
+        # a budget-limit check) — best-effort, never blocks confirmation.
+        try:
+            from services.pattern_service import check_spending_pattern
+            check_spending_pattern(db, uid, category)
+        except Exception as pattern_err:
+            print(f"[CONFIRM] [PATTERN] error (non-fatal): {pattern_err}")
+
     # income → no budget update (intentional)
 
     # ── 5b. Update the original "pending_transaction" alert in place ─────

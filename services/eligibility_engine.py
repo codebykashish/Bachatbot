@@ -42,7 +42,7 @@ _ALWAYS = {
     "HEALTH_WORSENED", "HEALTH_IMPROVED", "RECOVERY_STARTED",
     "RECOVERY_BECAME_IMPOSSIBLE", "RECOVERY_COMPLETED", "RECOVERY_FAILED",
     "CATEGORY_BECAME_EXHAUSTED", "MILESTONE_UNLOCKED", "HEALTHY_STREAK_BROKEN",
-    "SAVING_STREAK_BROKEN",
+    "SAVING_STREAK_BROKEN", "UNUSUAL_SPENDING_DETECTED",
 }
 
 # Streak lengths worth celebrating -- first cut, tunable (spec 5.2A).
@@ -80,6 +80,22 @@ _PREFERENCE_CATEGORY = {
     "SAVING_STREAK_EXTENDED": "streaks",
     "SAVING_STREAK_BROKEN": "streaks",
     "MILESTONE_UNLOCKED": "milestones",
+    "UNUSUAL_SPENDING_DETECTED": "budgetAlerts",
+}
+
+# Frequency Scoping (Phase 17's generalization of the Phase 13.14 fix).
+# Any event code where ONE eventCode is shared by many genuinely
+# distinct payload identities (MILESTONE_UNLOCKED's many milestone
+# codes; UNUSUAL_SPENDING_DETECTED's many categories) must scope its
+# "most recent notification" lookup by that identity field, or a
+# frequency policy meant to apply per-identity silently becomes
+# per-eventCode instead -- the exact bug MILESTONE_UNLOCKED had before
+# it was scoped by `payload.code`. Registered here once, generically,
+# instead of adding another hardcoded `if code == ...` branch for
+# every future event with the same shape of problem.
+_FREQUENCY_SCOPE_FIELD = {
+    "MILESTONE_UNLOCKED": "code",
+    "UNUSUAL_SPENDING_DETECTED": "category",
 }
 
 
@@ -91,23 +107,24 @@ def _conditional_passes(code: str, payload: dict) -> bool:
     return False
 
 
-def _most_recent_notification_for_code(db, uid: str, event_code: str, milestone_code: str = None):
+def _most_recent_notification_for_code(db, uid: str, event_code: str, scope_field: str = None, scope_value=None):
     """
-    `milestone_code` narrows the match to one specific milestone
-    (payload.code) rather than every notification sharing the same
-    eventCode -- MILESTONE_UNLOCKED is the one event code shared by
-    every distinct milestone (FIRST_EXPENSE_LOGGED, FIRST_HEALTHY_WEEK,
-    FIRST_GOAL_COMPLETED, ...). Without this, "ONCE" per eventCode
-    would mean "once ever, for ANY milestone" -- the very first
-    milestone a user ever unlocks would silently block every
-    subsequent, genuinely distinct milestone forever after. Found via
-    a real account where a real goal completion produced no
-    notification at all.
+    `scope_field`/`scope_value` narrow the match to one specific
+    payload identity (e.g. payload.code for MILESTONE_UNLOCKED,
+    payload.category for UNUSUAL_SPENDING_DETECTED) rather than every
+    notification sharing the same eventCode -- see
+    `_FREQUENCY_SCOPE_FIELD`. Without this, a frequency policy meant to
+    apply "once per identity" would mean "once ever, for ANY identity"
+    -- the first one a user ever triggers would silently block every
+    subsequent, genuinely distinct one forever after. Found via a real
+    account where a real goal completion produced no notification at
+    all (MILESTONE_UNLOCKED, Phase 13.14); generalized here so the same
+    bug shape doesn't need to be independently rediscovered per event.
     """
     matching = [
         n for n in repo.list_notifications(db, uid)
         if n.get("eventCode") == event_code
-        and (milestone_code is None or (n.get("payload") or {}).get("code") == milestone_code)
+        and (scope_field is None or (n.get("payload") or {}).get(scope_field) == scope_value)
     ]
     if not matching:
         return None
@@ -149,8 +166,9 @@ def _frequency_allows(db, uid: str, code: str, payload: dict) -> bool:
         # simplified to always-allow here, not half-built.
         return True
 
-    milestone_code = payload.get("code") if code == "MILESTONE_UNLOCKED" else None
-    most_recent = _most_recent_notification_for_code(db, uid, code, milestone_code)
+    scope_field = _FREQUENCY_SCOPE_FIELD.get(code)
+    scope_value = payload.get(scope_field) if scope_field else None
+    most_recent = _most_recent_notification_for_code(db, uid, code, scope_field, scope_value)
     if most_recent is None:
         return True
     if policy == "ONCE":

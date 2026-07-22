@@ -12016,3 +12016,252 @@ account's actual `financialSummary`/`overallHealth` (income Rs 24,500,
 previous false-green outcomes on this exact data. `flutter analyze` on
 both files: zero issues (2 files, only pre-existing-style const infos
 on lines untouched by this change).
+
+## Phase 17 — Pattern Spending Alerts — Design, FROZEN
+
+Detects when today's spending in a category is unusually high compared
+to the user's own recent baseline in that category, and notifies
+through the same Notification Engine everything else in this app now
+goes through — not a second, parallel alert system. Design decisions
+below are frozen; implementation follows in the same commit/session.
+
+**Detection algorithm** (`backend/services/pattern_service.py`, mirrors
+`goal_service.py`'s plain-function/`db, uid, ...`-first convention):
+- Fetch the category's confirmed, non-deleted expense transactions
+  (`type == "expense"`, `status == "confirmed"`), capped at the 200
+  most recent, ordered by `createdAt` descending — matching this
+  codebase's existing convention (`utils.py`'s `is_today`/
+  `is_in_current_month` etc.) of filtering by date client-side rather
+  than a server-side range query, which would need a new composite
+  Firestore index this app doesn't otherwise require.
+- Group into daily totals by `createdAt`'s UTC date.
+- Minimum trust gate: skip entirely (no anomaly possible) if fewer
+  than 5 expenses have ever been logged in this category — matches
+  the "5-8 logged expenses" floor already agreed; 5 chosen as the
+  permissive end of that range.
+- Baseline window: average of daily totals over the last 30 calendar
+  days: if that window has at least 8 spending-days, use it as-is; if
+  fewer (a newer or sparser category), fall back to the most recent 10
+  spending-days regardless of calendar window, so a real but sparse
+  history still gets a baseline instead of being starved by the 30-day
+  cutoff.
+- Threshold: flag if today's running total (including the transaction
+  that just triggered this check) is at least 2x the baseline average.
+  Rough heuristic, tunable later — same spirit as `_classify_pressure`'s
+  first-cut thresholds in `metrics_engine.py`.
+- Suggestion: `overage = todayTotal - baselineAverage`;
+  `suggestedDailyAmount = max(0, baselineAverage - overage / 3)` for
+  the next 3 days — spread the correction rather than a single "stop
+  spending" message.
+- Dedup: one flag per category per day. Enforced structurally by
+  `eventId = f"{uid}:{today}:unusual_spending:{category}"` (Gate 4,
+  Already Informed, rejects a repeat automatically), not a separate
+  check inside `pattern_service.py` itself.
+
+**New event `UNUSUAL_SPENDING_DETECTED`**, added to every matrix
+`notification_generator.py`/`eligibility_engine.py` already keeps
+(Rule 8 fails fast on any missing row, so every table needs an entry):
+- Eligibility Matrix: `_ALWAYS` (the anomaly check itself is the
+  justification — nothing further to gate at Eligibility's Gate 1/3).
+- Priority: `High` (comparable to `CATEGORY_BECAME_EXHAUSTED` —
+  timely and actionable, not Critical).
+- Frequency: `DAILY`, but see the scoping fix below — this code fires
+  for many different categories, the same shape of problem
+  `MILESTONE_UNLOCKED` had with many different milestones.
+- Timing: `IMMEDIATE` (the whole point is "tied to the specific
+  transaction," not a batched daily digest).
+- Template: `("TITLE_UNUSUAL_SPENDING", "Unusual {category} spending
+  today", "You've spent Rs {todayTotal} on {category} today — about
+  double your usual Rs {baselineAverage}", "Review {category}
+  spending")` — English, matching every other row in `_TEMPLATES`
+  (the Notification Center/Activity Feed read as one consistent
+  language; only the chatbot's own conversational replies are
+  Romanized Nepali, a distinct surface this event doesn't touch).
+- Deep Link: `category_detail` (reused, same key
+  `CATEGORY_BECAME_EXHAUSTED` already uses).
+- Notification Preference category (Phase 16): `budgetAlerts` — the
+  closest existing user-facing bucket to "alerts about my spending
+  patterns," despite this event needing no budget/limit to exist at
+  all (it's a pure pattern comparison, unlike `CATEGORY_BECAME_EXHAUSTED`).
+
+**Frequency scoping, generalized instead of re-special-cased.**
+`eligibility_engine._frequency_allows()`/`_most_recent_notification_for_code()`
+previously hardcoded one exception (`payload.code` for
+`MILESTONE_UNLOCKED` only, from the Phase 13.14 bug). Rather than add
+a second hardcoded `if code == "UNUSUAL_SPENDING_DETECTED"` branch and
+risk a third such bug going undetected for some future event,
+generalized into one lookup: `_FREQUENCY_SCOPE_FIELD = {
+"MILESTONE_UNLOCKED": "code", "UNUSUAL_SPENDING_DETECTED": "category"}`
+— any event code sharing one eventCode across many distinct payload
+identities registers its scoping field here once, and the lookup/match
+logic is written once, generically, against whichever field is named.
+
+**Architecturally new call site.** Every existing event so far is
+produced by `scheduler_service.process_day()`'s nightly diff against
+the previous day's snapshot — nothing today calls
+`eligibility_engine.process_event()` synchronously from a live route.
+`UNUSUAL_SPENDING_DETECTED` is deliberately the first to do so, called
+from `pattern_service.check_spending_pattern()` right after the budget
+increment in all three transaction-creation paths
+(`routes/chat.py`'s `_handle_expense_or_income`,
+`routes/transactions.py`'s manual-entry endpoint,
+`routes/confirm.py`'s `confirm_transaction`) — required by the
+"immediate, tied to the transaction" trigger timing agreed before this
+phase was designed; a nightly diff cannot satisfy that requirement.
+Delivery is best-effort (same as every other event, spec 5.8) and
+never blocks the transaction's own success response.
+
+**Scope decision: no separate chat-echo message.** The original plan
+(written 2026-07-13, before this session's Notification Center existed)
+wanted a bot message posted directly into chat history, specifically
+so the nudge would be visible even without a dedicated notification
+surface. Explicitly dropped now that the Notification Center/Activity
+Feed (Phase 13.1) already gives equivalent-or-better visibility across
+all three entry points uniformly — one delivery path, one copy to
+maintain, instead of a second Romanized-Nepali copy living only in the
+chat-origin path.
+
+## Phase 17 — Pattern Spending Alerts — Implementation, FROZEN
+
+Built exactly as designed above. `backend/services/pattern_service.py`
+(new); `UNUSUAL_SPENDING_DETECTED` added to every matrix
+`notification_generator.py`/`eligibility_engine.py` requires
+(`_PRIORITY`, `_FREQUENCY`, `_TIMING`, `_TEMPLATES`, `_DEEP_LINKS`,
+`_ALWAYS`, `_PREFERENCE_CATEGORY`); `_frequency_allows()`'s
+scope-by-identity fix generalized from a single MILESTONE_UNLOCKED
+special case into `_FREQUENCY_SCOPE_FIELD`, a small table any future
+event with the same shape of problem can register into without a new
+hardcoded branch. Wired into all three transaction-creation paths
+(`chat.py`, `transactions.py`, `confirm.py`), each call best-effort and
+non-blocking, matching the existing rebalance-check pattern already in
+all three.
+
+**A real query bug found and fixed during real-account verification,
+before any real account was touched**: the original
+`_recent_category_expenses()` chained `.order_by("createdAt")` on top
+of three equality `.where()` filters, which Firestore rejected with
+`FailedPrecondition: The query requires an index` — a genuinely new
+composite index this app doesn't otherwise need. Fixed by dropping the
+server-side `order_by`/`limit` entirely and sorting/capping in Python
+instead, matching `utils.py`'s own `sum_category_expense()` (equality
+filters only, no order_by) — no new Firestore index required.
+
+**Verification**: `test_pattern_service.py` (new, 9 scenarios) tests
+the pure decision core (`_detect_anomaly`, `_baseline_average`,
+`_daily_totals`) directly against plain dicts, the same convention
+`test_financial_engine.py` uses for its own pure pipeline stages — no
+Firestore needed. `test_eligibility_engine.py` extended with a
+regression scenario proving the generalized frequency-scoping fix
+against a SECOND event code (not just the one, MILESTONE_UNLOCKED,
+the underlying bug shape was originally found through): two different
+categories sharing `UNUSUAL_SPENDING_DETECTED`'s eventCode are both
+independently eligible the same day. Full backend suite (14 files):
+zero regressions.
+
+Real-account verification, two parts:
+1. Against the real personal account (`BDpx6it7MeSZSrUJEBu9Bbwfp8l1`),
+   confirmed the fix above (no crash) and correct negative-path
+   behavior across all 6 real categories — every category correctly
+   returned no anomaly, since none had any spending logged on the
+   verification date at all (nothing to compare against).
+2. Against the shared test account (`BvjbjFOGHQNmI1xcRm5xowKPpoB3`,
+   safe to seed/clean up), a genuine positive path: seeded a Rs
+   100/day baseline across 6 sparse days plus a real Rs 500 anomaly
+   day, ran `check_spending_pattern()` for real — it detected the
+   anomaly, computed `baselineAverage: 100`, `todayTotal: 500`,
+   `suggestedDailyAmount: 0` (correctly floored at 0 rather than
+   going negative — the 3-day spread math would have suggested
+   -33.33/day), and a real notification was created and persisted in
+   `generatedNotifications`. A second same-day call correctly
+   returned `None` (deduped by `eventId` + Gate 4, Already Informed).
+   All 7 seeded transactions and the notification doc were deleted
+   afterward — the test account was left exactly as it started.
+
+## Phase 17 follow-up — Category Health Materiality Bug, Found via Real Usage
+
+Real feedback while looking at the Categories screen ("the Rent card
+should have changed color too"): Rent was spent Rs 1,000 against a Rs
+900 limit (111% over — genuinely `CATEGORY_EXHAUSTED`), yet its card
+showed green. Root cause, confirmed against the real account: Rent's
+limit is ~4.4% of the total budget, under `HEALTH_MATERIALITY_THRESHOLD`
+(5%), so `_evaluate_category_rules()` (`health_engine.py`) short-circuited
+to `LOW_MATERIALITY` before ever checking exhaustion — a category too
+small to move the Overall Health *aggregate* was also having its own
+individual card's true status suppressed, which was never the intent
+of materiality (spec Phase 3.0, Q4: a tiny category "shouldn't
+single-handedly move Overall Health" — nothing about hiding its own
+honest status when the user is looking directly at it).
+
+This one was a deliberate, tested, frozen design decision from Phase
+3.2 (`test_health_engine.py` scenario 4 explicitly asserted
+"materiality gates before exhaustion" for the category's own card) —
+not a coding mistake, so it was raised as a design question rather
+than silently changed. Confirmed: materiality should affect only
+Overall Health's aggregate (unchanged — still correctly applied in
+`_evaluate_rules()`'s `MULTIPLE_CATEGORIES_PRESSURED`/
+`CATEGORY_HIGH_PRESSURE` logic); a category's own card should always
+report its true exhaustion/pressure status regardless of size.
+
+**Fixed**: removed the materiality short-circuit from
+`_evaluate_category_rules()` entirely — exhaustion and pressure are
+now always evaluated honestly for every category. `_build_category_
+decision_trace()`'s materiality line kept as context only ("affects
+Overall Health only"), no longer gating what follows it.
+
+**Verification**: `test_health_engine.py`'s scenario 4 rewritten —
+a non-material category with `CATEGORY_EXHAUSTED` now correctly
+returns red (was asserting green before), and a new case confirms a
+non-material `CATEGORY_HIGH_PRESSURE` (not exhausted) escalates to
+amber too. Decision-trace assertions updated to match the always-full
+waterfall. Full backend suite (14 files): zero regressions.
+Real-account re-verification against `BDpx6it7MeSZSrUJEBu9Bbwfp8l1`:
+Rent now correctly resolves to `red`/`CATEGORY_EXHAUSTED`; "Other" and
+"Health" (genuinely under-spent, not merely small) correctly remain
+green — confirming the fix escalates true exhaustion without
+introducing noise for categories that are simply quiet.
+
+## Frontend follow-up — Out-of-Order Response Race, Found via Real Usage
+
+Real feedback, working through the fixes above: after a genuine
+budget-rebalance transfer (confirmed correct via direct Firestore
+checks each time — donor category's limit really did decrease,
+target category's limit really did increase, every time), the
+Categories/Home screens sometimes kept showing pre-rebalance numbers
+(e.g. a card stuck at `Rs 4910 / Rs 4800`, exactly `todaySpent /
+oldLimit` from just before that category's own rebalance had
+confirmed) — even after a pull-to-refresh, and in one case even after
+a full app restart.
+
+Root cause: none of `categories_screen.dart`'s `_fetchFinancialSummary()`,
+`home_screen.dart`'s eight per-widget fetch functions, or
+`reports_screen.dart`'s `_loadReport()` guarded against their own
+responses arriving out of order. Each of these screens can legitimately
+be asked to refetch twice in quick succession (an expense's own refresh
+trigger, then the rebalance-confirmation dialog's refresh trigger
+moments later; or a lifecycle-resume racing a manual pull-to-refresh).
+If the *older* request's response happened to arrive after the newer
+one — which real network timing makes entirely possible — its
+`setState()` silently overwrote the fresher data, and nothing else was
+scheduled to fire and correct it. The older response wasn't corrupt
+data either — it was a real, valid backend snapshot from the narrow
+window between the transaction saving (updating `spent` immediately)
+and the rebalance being confirmed (updating `limit` moments later) —
+just no longer the current truth by the time it got applied.
+
+**Fixed** in all three files with the same pattern: a monotonically
+incrementing generation counter (`_fetchToken`/`_fetchGeneration`/
+`_loadGeneration`), incremented once per fetch batch. Each async fetch
+function captures the counter's value at its own start and checks it
+still matches before ever calling `setState()` — a response whose
+generation has been superseded by a newer fetch is discarded outright,
+regardless of arrival order. Applied to every `setState()` site in all
+three files' fetch paths, including `catch`/`else` branches (a stale
+error handler resetting `_isLoading` after a newer fetch already
+started was an equally real instance of the same bug).
+
+**Verification**: `flutter analyze` clean on all three files (only
+pre-existing, unrelated const-hint infos). No backend change was
+needed or made — every real-account check throughout this
+investigation confirmed the rebalance/budget-transfer math itself was
+correct the entire time; this was purely a client-side display race,
+never a money-movement bug.

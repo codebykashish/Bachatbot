@@ -303,13 +303,27 @@ def run():
         f"got {(code, source, confidence, status)}",
     )
 
-    # 4. Tiny (non-material) category never escalates, even if also exhausted
+    # 4. A tiny (non-material) category STILL reports its own true status
+    # (spec revised, real usage: a category worth ~4% of the total budget
+    # showed green with zero signal despite being 111% spent, purely
+    # because it was "immaterial" to the OVERALL score -- confusing on a
+    # screen specifically about that one category). Materiality now
+    # affects only Overall Health's aggregate, never this category's own
+    # card.
     code, source, confidence, status, trace = run_category(
         {"status": "high", "material": False, "confidence": "high"}, {"Food": "medium"}
     )
     check(
-        "Non-material category -> green, LOW_MATERIALITY, materiality gates before exhaustion",
-        (code, status) == ("LOW_MATERIALITY", "green"),
+        "Non-material category still escalates honestly -> red, CATEGORY_EXHAUSTED",
+        (code, status) == ("CATEGORY_EXHAUSTED", "red"),
+        f"got {(code, status)}",
+    )
+    code, source, confidence, status, trace = run_category(
+        {"status": "high", "material": False, "confidence": "high"}, {}
+    )
+    check(
+        "Non-material category with high pressure (not exhausted) still escalates -> amber, CATEGORY_HIGH_PRESSURE",
+        (code, status) == ("CATEGORY_HIGH_PRESSURE", "amber"),
         f"got {(code, status)}",
     )
 
@@ -328,7 +342,10 @@ def run():
     )
     check(
         "Decision trace for exhausted category stops after exhaustion check",
-        trace_exhausted == ["Materiality checked — material", "Exhaustion checked — exhausted"],
+        trace_exhausted == [
+            "Materiality checked — material (affects Overall Health only)",
+            "Exhaustion checked — exhausted",
+        ],
         f"got {trace_exhausted}",
     )
     _, _, _, _, trace_normal = run_category(
@@ -337,7 +354,7 @@ def run():
     check(
         "Decision trace for normal category includes all three checks",
         trace_normal == [
-            "Materiality checked — material",
+            "Materiality checked — material (affects Overall Health only)",
             "Exhaustion checked — not exhausted",
             "Category Pressure checked — normal",
         ],
@@ -347,8 +364,12 @@ def run():
         {"status": "high", "material": False, "confidence": "high"}, {}
     )
     check(
-        "Decision trace for non-material category stops after materiality check",
-        trace_tiny == ["Materiality checked — not material"],
+        "Decision trace for non-material category still runs the full waterfall (materiality no longer gates it)",
+        trace_tiny == [
+            "Materiality checked — not material (affects Overall Health only)",
+            "Exhaustion checked — not exhausted",
+            "Category Pressure checked — high",
+        ],
         f"got {trace_tiny}",
     )
 

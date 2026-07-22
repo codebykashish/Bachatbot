@@ -37,7 +37,11 @@ from datetime import datetime, timezone
 
 from firebase_config import get_firestore
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
-from services.financial_engine import get_summary as get_financial_summary
+from services.financial_engine import (
+    get_summary as get_financial_summary,
+    recompute as engine_recompute,
+    RecomputeReason,
+)
 from services.behavior_engine import record_saving_activity
 
 logger = logging.getLogger("bachatbot.budget_service")
@@ -268,6 +272,23 @@ def apply_pending_rebalance(db, uid, rebalance_id):
 
     pending_ref.update({"status": "confirmed", "updatedAt": SERVER_TIMESTAMP})
     logger.info(f"[REBALANCE] uid={uid} confirmed id={rebalance_id} covered Rs {total_covered:.0f}")
+
+    # This function writes directly to the `budgets` collection (the
+    # overspent category's new limit, each donor's reduced limit) but
+    # get_summary() never re-derives categoryRemaining from `budgets` on
+    # its own -- it just returns the last-computed financialSummary
+    # snapshot. Without this, every screen reading /financial-summary
+    # (Categories, Home) kept showing the pre-rebalance limit until some
+    # unrelated later transaction happened to trigger its own recompute()
+    # call, which is exactly the "always one category behind" pattern
+    # real usage caught: whichever category was most recently rebalanced
+    # stayed stale until the NEXT transaction's recompute incidentally
+    # caught it up. Best-effort -- a recompute failure here must never
+    # undo the rebalance that already succeeded above.
+    try:
+        engine_recompute(db, uid, month_key, reason=RecomputeReason.REBALANCE_APPLIED)
+    except Exception as e:
+        logger.warning(f"[REBALANCE] recompute after rebalance failed (non-fatal): {e}")
 
     return {
         "overspend": overspend,

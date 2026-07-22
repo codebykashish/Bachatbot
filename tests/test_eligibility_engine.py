@@ -309,6 +309,34 @@ def run():
         f"got {decision7g}",
     )
 
+    # 7h. Regression (Phase 17): the SAME generalized scoping fix, proven
+    # against a second event code (UNUSUAL_SPENDING_DETECTED, scoped by
+    # payload.category) -- not just the one case (MILESTONE_UNLOCKED)
+    # the bug was originally found through. Two different categories
+    # sharing the DAILY frequency policy must both be eligible the same day.
+    repo.save(db, "u8", {
+        "eventId": "u8:2026-07-22:unusual_spending:Food", "eventCode": "UNUSUAL_SPENDING_DETECTED",
+        "priority": "High", "frequency": "DAILY", "timing": "IMMEDIATE", "interruptionLevel": None,
+        "templateId": "T", "title": "t", "body": "b", "cta": "c",
+        "payload": {"category": "Food"}, "deepLink": None, "status": "Created",
+    })
+    decision7h = elig.check_eligibility(db, "u8", {
+        "eventId": "u8:2026-07-22:unusual_spending:Transport",
+        "event": "UNUSUAL_SPENDING_DETECTED", "payload": {"category": "Transport"},
+    })
+    check(
+        "A different category's UNUSUAL_SPENDING_DETECTED is still eligible the same day",
+        decision7h["eligible"] is True,
+        f"got {decision7h}",
+    )
+    # Note: this file doesn't assert the reverse (same category blocked
+    # same day) here, on purpose -- DAILY's windowed check compares real
+    # elapsed time, and this fake DB's createdAt is a plain sequence
+    # counter, always "old enough" regardless of policy (see
+    # _frequency_allows' own comment). Same limitation already applies
+    # to every other DAILY/WEEKLY/MONTHLY event in this suite; verified
+    # against the real account instead (Phase 17's real-account check).
+
     # 8. process_event on an eligible event creates and returns a real notification
     result8 = elig.process_event(db, "u3", {"eventId": "u3:2026-07-19:milestone_unlocked:FIRST_HEALTHY_WEEK", "event": "MILESTONE_UNLOCKED", "payload": {"code": "FIRST_HEALTHY_WEEK"}})
     check(

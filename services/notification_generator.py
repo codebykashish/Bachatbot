@@ -37,6 +37,7 @@ _PRIORITY = {
     "HEALTHY_STREAK_EXTENDED": "Low",
     "SAVING_STREAK_EXTENDED": "Low",
     "MILESTONE_UNLOCKED": "Low",
+    "UNUSUAL_SPENDING_DETECTED": "High",
 }
 
 # ─── Frequency Matrix (spec 5.4A) ──────────────────────────────────────────
@@ -58,6 +59,14 @@ _FREQUENCY = {
     "SAVING_STREAK_EXTENDED": "MONTHLY",
     "SAVING_STREAK_BROKEN": "MONTHLY",
     "MILESTONE_UNLOCKED": "ONCE",
+    # DAILY here is a defense-in-depth backstop, not the real dedup
+    # mechanism -- eventId already scopes by date+category (Gate 4,
+    # Already Informed, already rejects a same-day repeat). Scoped by
+    # `category` (see eligibility_engine._FREQUENCY_SCOPE_FIELD) so a
+    # DAILY check on one category can never block a different
+    # category's alert the same day -- the exact shape of bug
+    # MILESTONE_UNLOCKED's ONCE policy had before it was scoped by code.
+    "UNUSUAL_SPENDING_DETECTED": "DAILY",
 }
 
 # ─── Timing Matrix (spec 5.5A) ─────────────────────────────────────────────
@@ -79,6 +88,7 @@ _TIMING = {
     "SAVING_STREAK_EXTENDED": "MONTH_END",
     "SAVING_STREAK_BROKEN": "MONTH_END",
     "MILESTONE_UNLOCKED": "IMMEDIATE",
+    "UNUSUAL_SPENDING_DETECTED": "IMMEDIATE",
 }
 
 # ─── Template Matrix (spec 5.6A) ───────────────────────────────────────────
@@ -103,6 +113,12 @@ _TEMPLATES = {
     "HEALTHY_STREAK_BROKEN": ("TITLE_HEALTHY_BROKEN", "Your healthy streak ended today", "Tomorrow starts a new opportunity", "Review today's spending"),
     "SAVING_STREAK_EXTENDED": ("TITLE_SAVING_EXTENDED", "Another month protected", "You saved money again this month", "View your savings"),
     "SAVING_STREAK_BROKEN": ("TITLE_SAVING_BROKEN", "This month's savings goal was missed", "Here's what changed this month", "View monthly report"),
+    "UNUSUAL_SPENDING_DETECTED": (
+        "TITLE_UNUSUAL_SPENDING",
+        "Unusual {category} spending today",
+        "You've spent Rs {todayTotal} on {category} today — about double your usual Rs {baselineAverage}",
+        "Review {category} spending",
+    ),
 }
 
 # ─── Deep Link Matrix (Step 13's own completion of spec 5.6B's
@@ -134,6 +150,7 @@ _DEEP_LINKS = {
     # applied to NEW_BEST_STREAK elsewhere.
     "TRANSACTION_CREATED": "activity",
     "TRANSACTION_CONFIRMED": "activity",
+    "UNUSUAL_SPENDING_DETECTED": "category_detail",
 }
 
 # MILESTONE_UNLOCKED is keyed by its payload's milestone code, not a

@@ -181,6 +181,18 @@ def _handle_expense_or_income(db, uid, action, source, month_key, idempotency_ke
         else:
             print(f"[CHAT] [BUDGET] No budget for '{category}' in {month_key}")
 
+    # ── Pattern Spending Alert (Phase 17) ─────────────────────────────────
+    # Runs regardless of whether a budget exists for this category (it's a
+    # pure pattern comparison, not a budget-limit check) -- best-effort,
+    # same as the rebalance check above, and must never block the
+    # transaction's own success response.
+    if tx_type == "expense" and category:
+        try:
+            from services.pattern_service import check_spending_pattern
+            check_spending_pattern(db, uid, category)
+        except Exception as _pattern_err:
+            print(f"[CHAT] [PATTERN] error (non-fatal): {_pattern_err}")
+
     # ── Alert ────────────────────────────────────────────────────────────
     alert_out = None
     desc = description.strip() if description else ""

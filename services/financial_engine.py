@@ -50,6 +50,7 @@ class RecomputeReason:
     TRANSACTION_EDITED = "TRANSACTION_EDITED"
     TRANSACTION_DELETED = "TRANSACTION_DELETED"
     MONTH_ROLLOVER = "MONTH_ROLLOVER"
+    REBALANCE_APPLIED = "REBALANCE_APPLIED"
 
 
 # ─── Pipeline: Load Data ───────────────────────────────────────────────────

@@ -101,6 +101,15 @@ async def add_manual_expense(
     except Exception as e:
         logger.warning(f"[MANUAL] budget update failed: {e}")
 
+    # 2b — Pattern Spending Alert (Phase 17) — runs regardless of whether a
+    # budget exists for this category (a pure pattern comparison, not a
+    # budget-limit check) — best-effort, never blocks this endpoint's response.
+    try:
+        from services.pattern_service import check_spending_pattern
+        check_spending_pattern(db, uid, body.category)
+    except Exception as pattern_err:
+        logger.warning(f"[MANUAL] [PATTERN] error (non-fatal): {pattern_err}")
+
     # 3 — Create alert
     try:
         msg = f"Rs {int(body.amount)} {body.category} expense saved."

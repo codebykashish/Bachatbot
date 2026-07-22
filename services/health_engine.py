@@ -281,18 +281,27 @@ def compute_overall_health(db, uid: str, month_key: str = None) -> dict:
 
 def _evaluate_category_rules(cat: str, pressure_entry: dict, exhausted: dict) -> tuple:
     """
-    Waterfall for one category (spec: Phase 3.2 Design). Materiality
-    gates first (a non-material category never escalates); exhaustion
-    (sourced from Recovery Plan's affectedCategories) overrides pressure;
-    otherwise a direct mapping from Category Pressure's own four
-    statuses. Returns exactly one (code, source, confidence) — unlike
-    Overall Health, exhaustion and high pressure are nearly the same
-    fact wearing two names within a single category, so collecting both
-    would be near-redundant, not informative.
-    """
-    if not pressure_entry.get("material"):
-        return ("LOW_MATERIALITY", "categoryPressure", pressure_entry.get("confidence", "high"))
+    Waterfall for one category (spec: Phase 3.2 Design, revised).
+    Materiality is deliberately NOT checked here -- it gates only
+    whether a category counts toward OVERALL Health's aggregate
+    (still correctly applied in _evaluate_rules' own
+    MULTIPLE_CATEGORIES_PRESSURED/CATEGORY_HIGH_PRESSURE logic). A
+    category's OWN card always reports its true exhaustion/pressure
+    status regardless of size -- a small budget that's genuinely over
+    is over, whether or not it's big enough to move the overall score.
+    Found via real usage: a category worth ~4% of the total budget
+    showed green with zero signal at 111% spent, purely because it was
+    "immaterial" to the whole picture -- confusing on a screen that's
+    specifically about that one category, not the aggregate.
 
+    Exhaustion (sourced from Recovery Plan's affectedCategories)
+    overrides pressure; otherwise a direct mapping from Category
+    Pressure's own four statuses. Returns exactly one (code, source,
+    confidence) — unlike Overall Health, exhaustion and high pressure
+    are nearly the same fact wearing two names within a single
+    category, so collecting both would be near-redundant, not
+    informative.
+    """
     if cat in exhausted:
         # Sourced from Recovery Plan, not Category Pressure — carries
         # Recovery Plan's own confidence for this call.
@@ -320,11 +329,12 @@ def _determine_category_status(code: str) -> str:
 def _build_category_decision_trace(material: bool, exhausted: bool, status: str) -> list:
     """
     Same treatment as _build_decision_trace, scoped to one category —
-    debug-only, never shown to the user.
+    debug-only, never shown to the user. Materiality is reported here
+    as context only (relevant to Overall Health's aggregate, computed
+    elsewhere) — it no longer gates this category's own verdict; see
+    _evaluate_category_rules.
     """
-    trace = [f"Materiality checked — {'material' if material else 'not material'}"]
-    if not material:
-        return trace
+    trace = [f"Materiality checked — {'material' if material else 'not material'} (affects Overall Health only)"]
     trace.append(f"Exhaustion checked — {'exhausted' if exhausted else 'not exhausted'}")
     if exhausted:
         return trace
