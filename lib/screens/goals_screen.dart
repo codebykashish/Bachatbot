@@ -18,6 +18,14 @@ class _GoalsScreenState extends State<GoalsScreen> {
   List<Goal> _goals = [];
   double _availableToSave = 0;
 
+  // Phase 13.13 -- Behavior Engine data (Saving streak + the
+  // FIRST_GOAL_COMPLETED milestone), read directly from GET /behavior,
+  // the same endpoint already powering the Streak screen. Purely
+  // surfacing already-computed backend facts -- no new logic invented
+  // here, unlike goal-pace coloring (deliberately deferred).
+  int _savingStreak = 0;
+  bool _goalMilestoneUnlocked = false;
+
   @override
   void initState() {
     super.initState();
@@ -27,15 +35,29 @@ class _GoalsScreenState extends State<GoalsScreen> {
   Future<void> _fetchGoals() async {
     setState(() => _isLoading = true);
     try {
-      final res = await ApiService.get('/goals');
+      final results = await Future.wait([
+        ApiService.get('/goals'),
+        ApiService.get('/behavior'),
+      ]);
+      final res = results[0];
+      final behaviorRes = results[1];
       if (!mounted) return;
       if (res['success'] == true) {
         final list = (res['data']?['goals'] as List? ?? [])
             .map((g) => Goal.fromJson(g as Map<String, dynamic>))
             .toList();
+        int savingStreak = 0;
+        bool milestoneUnlocked = false;
+        if (behaviorRes['success'] == true) {
+          savingStreak = ((behaviorRes['data']?['state']?['saving']?['currentProtectionStreak']) as num?)?.toInt() ?? 0;
+          final milestones = behaviorRes['data']?['milestones'] as List? ?? [];
+          milestoneUnlocked = milestones.any((m) => m['code'] == 'FIRST_GOAL_COMPLETED' && m['unlocked'] == true);
+        }
         setState(() {
           _goals = list;
           _availableToSave = (res['data']?['availableToSave'] ?? 0).toDouble();
+          _savingStreak = savingStreak;
+          _goalMilestoneUnlocked = milestoneUnlocked;
         });
       }
     } catch (e) {
@@ -248,6 +270,10 @@ class _GoalsScreenState extends State<GoalsScreen> {
             : ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
                 children: [
+                  if (_savingStreak > 0 || _goalMilestoneUnlocked) ...[
+                    _behaviorBanner(),
+                    const SizedBox(height: 12),
+                  ],
                   _currentSavingsCard(),
                   if (_goals.length > 1) ...[
                     const SizedBox(height: 10),
@@ -289,6 +315,39 @@ class _GoalsScreenState extends State<GoalsScreen> {
                     ..._sortedGoals.map(_goalCard),
                 ],
               ),
+      ),
+    );
+  }
+
+  // Real Behavior Engine facts (Phase 13.13) -- the same saving streak
+  // and FIRST_GOAL_COMPLETED milestone already tracked on the Streak
+  // screen, surfaced here too since Goals is where they're most
+  // relevant to the user in the moment.
+  Widget _behaviorBanner() {
+    final parts = <String>[];
+    if (_savingStreak > 0) {
+      parts.add('$_savingStreak-month saving streak');
+    }
+    if (_goalMilestoneUnlocked) {
+      parts.add('First goal completed');
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3E8),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.local_fire_department, color: Color(0xFFE67E22), size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              parts.join(' · '),
+              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFFE67E22)),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -336,6 +395,8 @@ class _GoalsScreenState extends State<GoalsScreen> {
 
   Widget _goalCard(Goal goal) {
     final isCompleted = goal.status == 'completed';
+    if (isCompleted) return _completedGoalCard(goal);
+
     final progress = (goal.percentComplete / 100).clamp(0.0, 1.0);
 
     return GestureDetector(
@@ -367,22 +428,10 @@ class _GoalsScreenState extends State<GoalsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            goal.name,
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (isCompleted)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(color: _primary, borderRadius: BorderRadius.circular(6)),
-                            child: const Text('DONE', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800)),
-                          ),
-                      ],
+                    Text(
+                      goal.name,
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
                     ),
                     Text(
                       'Rs ${goal.savedSoFar.toInt()} / Rs ${goal.targetAmount.toInt()}',
@@ -418,7 +467,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
                   style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: _primary),
                 ),
               ),
-              if (!isCompleted && goal.savedSoFar == 0 && _goals.any((g) => g.priority < goal.priority)) ...[
+              if (goal.savedSoFar == 0 && _goals.any((g) => g.priority < goal.priority)) ...[
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -437,7 +486,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
               value: progress,
               minHeight: 8,
               backgroundColor: Colors.grey.shade200,
-              color: isCompleted ? _primary : _primary,
+              color: _primary,
             ),
           ),
           const SizedBox(height: 8),
@@ -447,6 +496,75 @@ class _GoalsScreenState extends State<GoalsScreen> {
           ),
         ],
       ),
+      ),
+    );
+  }
+
+  // A completed goal was previously the same plain white card with a
+  // tiny "DONE" chip -- real feedback: "doesn't look supportive at
+  // all," wanted something Duolingo-cheerful. Genuinely different
+  // treatment now: a gold gradient hero, a trophy, and a real
+  // congratulatory line, not a small badge bolted onto the same layout.
+  Widget _completedGoalCard(Goal goal) {
+    const gold = Color(0xFFE6A817);
+    return GestureDetector(
+      onTap: () => _showGoalDetail(goal),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [gold, Color(0xFFF4C542)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [BoxShadow(color: gold.withValues(alpha: 0.3), blurRadius: 12, offset: const Offset(0, 4))],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.25), shape: BoxShape.circle),
+              child: const Icon(Icons.emoji_events, color: Colors.white, size: 28),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Goal completed! 🎉',
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    goal.name,
+                    style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'You saved Rs ${goal.targetAmount.toInt()}. Nice work!',
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12.5),
+                  ),
+                ],
+              ),
+            ),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: Colors.white, size: 20),
+              onSelected: (v) {
+                if (v == 'edit') _editGoal(goal);
+                if (v == 'delete') _deleteGoal(goal);
+              },
+              itemBuilder: (ctx) => [
+                const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                const PopupMenuItem(value: 'delete', child: Text('Delete')),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

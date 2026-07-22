@@ -398,10 +398,16 @@ class HomeScreenState extends State<HomeScreen> {
         context,
         MaterialPageRoute(builder: (_) => const ActivityFeedScreen(initialFilter: 'transactions')),
       ),
+      // Phase 13.13 -- previously had no refresh callback at all, unlike
+      // every other sub-screen push on this file (onExpenseTap included).
+      // Editing income on IncomePage refreshed IncomePage's own state
+      // fine, but returning to Home left the balance card, health
+      // badge, and chart all showing stale numbers until the next
+      // pull-to-refresh or app reopen.
       onIncomeTap: () => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const IncomePage()),
-      ),
+      ).then((_) => _fetchAll()),
     );
   }
 

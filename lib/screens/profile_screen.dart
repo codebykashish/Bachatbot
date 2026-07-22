@@ -348,7 +348,7 @@ class ProfileScreenState extends State<ProfileScreen> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => const IncomePage()),
-                    ),
+                    ).then((_) => loadProfile()),
                     child: _statCard(
                       icon: Icons.account_balance_wallet_outlined,
                       label: 'My Income',
