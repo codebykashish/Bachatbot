@@ -143,12 +143,20 @@ class _HealthScreenState extends State<HealthScreen> {
   ({String headline, String detail}) _recommendationCopy(Map<String, dynamic> rec) {
     final code = rec['code'] as String?;
     final category = rec['category'] as String?;
+    final goalName = rec['goalName'] as String?;
     final actionValue = rec['actionValue'];
     final actionUnit = rec['actionUnit'] as String?;
     final amount = (actionValue is num) ? actionValue.round() : null;
     final perDay = actionUnit == 'per_day' && amount != null ? 'Rs $amount/day' : null;
 
     switch (code) {
+      case 'INCREASE_GOAL_CONTRIBUTION':
+        return (
+          headline: goalName != null ? '$goalName may fall behind' : 'A goal may fall behind',
+          detail: amount != null
+              ? "You're projected to be Rs $amount short of this month's target."
+              : "This goal's pace has slipped below its monthly target.",
+        );
       case 'STOP_CATEGORY_SPENDING':
         return (
           headline: 'Your $category budget is used up',
@@ -194,7 +202,17 @@ class _HealthScreenState extends State<HealthScreen> {
       'CATEGORY_HIGH_PRESSURE': 'is close to its limit',
       'SPENDING_TOO_FAST': "You're spending faster than planned",
       'CATEGORY_RECOVERABLE': 'needs some attention, but is fixable',
+      'GOAL_AT_RISK': 'may fall behind this month',
     };
+
+    if (code == 'GOAL_AT_RISK') {
+      final goalName = flag['goalName'] as String?;
+      final shortfall = flag['shortfall'];
+      final amount = (shortfall is num) ? shortfall.round() : null;
+      final base = goalName != null ? '$goalName ${labels[code]}' : labels[code]!;
+      return amount != null ? '$base (Rs $amount short)' : base;
+    }
+
     final label = labels[code] ?? code;
     return category != null && label.startsWith(RegExp('[a-z]')) ? '$category $label' : label;
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../api_service.dart';
 import '../models/goal.dart';
 import '../widgets/goal_pie_chart.dart';
+import '../theme/health_theme.dart';
 import 'add_edit_goal_screen.dart';
 
 class GoalsScreen extends StatefulWidget {
@@ -26,6 +27,14 @@ class _GoalsScreenState extends State<GoalsScreen> {
   int _savingStreak = 0;
   bool _goalMilestoneUnlocked = false;
 
+  // Goal Risk (Phase 18/19) — the real backend signal (whether this
+  // goal's projected contribution this month falls short of its own
+  // monthly target), keyed by goal id. Read directly from
+  // /financial-health, never recomputed here -- this is the "goal-pace
+  // coloring" the comment above named as deliberately deferred, now
+  // that a real engine exists to back it.
+  Map<String, dynamic> _goalRisk = {};
+
   @override
   void initState() {
     super.initState();
@@ -38,9 +47,11 @@ class _GoalsScreenState extends State<GoalsScreen> {
       final results = await Future.wait([
         ApiService.get('/goals'),
         ApiService.get('/behavior'),
+        ApiService.get('/financial-health'),
       ]);
       final res = results[0];
       final behaviorRes = results[1];
+      final healthRes = results[2];
       if (!mounted) return;
       if (res['success'] == true) {
         final list = (res['data']?['goals'] as List? ?? [])
@@ -53,11 +64,15 @@ class _GoalsScreenState extends State<GoalsScreen> {
           final milestones = behaviorRes['data']?['milestones'] as List? ?? [];
           milestoneUnlocked = milestones.any((m) => m['code'] == 'FIRST_GOAL_COMPLETED' && m['unlocked'] == true);
         }
+        final goalRisk = healthRes['success'] == true
+            ? (healthRes['data']?['goalRisk'] as Map?)?.cast<String, dynamic>() ?? {}
+            : <String, dynamic>{};
         setState(() {
           _goals = list;
           _availableToSave = (res['data']?['availableToSave'] ?? 0).toDouble();
           _savingStreak = savingStreak;
           _goalMilestoneUnlocked = milestoneUnlocked;
+          _goalRisk = goalRisk;
         });
       }
     } catch (e) {
@@ -398,6 +413,12 @@ class _GoalsScreenState extends State<GoalsScreen> {
     if (isCompleted) return _completedGoalCard(goal);
 
     final progress = (goal.percentComplete / 100).clamp(0.0, 1.0);
+    // Goal Risk (Phase 18/19) — the real backend signal, read directly
+    // off /financial-health's goalRisk map, never recomputed here.
+    final riskEntry = _goalRisk[goal.id] as Map<String, dynamic>?;
+    final atRisk = riskEntry?['atRisk'] == true;
+    final shortfall = riskEntry?['shortfall'];
+    final riskTheme = HealthTheme.forStatus('amber');
 
     return GestureDetector(
       onTap: () => _showGoalDetail(goal),
@@ -428,10 +449,30 @@ class _GoalsScreenState extends State<GoalsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      goal.name,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            goal.name,
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (atRisk) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: riskTheme.accent,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'May fall behind',
+                              style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 0.2),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     Text(
                       'Rs ${goal.savedSoFar.toInt()} / Rs ${goal.targetAmount.toInt()}',
@@ -494,6 +535,13 @@ class _GoalsScreenState extends State<GoalsScreen> {
             '${goal.percentComplete.toStringAsFixed(0)}% · Rs ${goal.monthlyTarget.toStringAsFixed(0)}/mo · ${goal.timeframeMonths} mo',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
           ),
+          if (atRisk && shortfall is num) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Rs ${shortfall.round()} short this month, at your current pace',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: riskTheme.statusColor),
+            ),
+          ],
         ],
       ),
       ),
