@@ -11827,3 +11827,192 @@ hero, a trophy icon, and a real congratulatory line ("You saved Rs X.
 Nice work!"), not a small badge bolted onto the same layout. In-progress
 goals are visually unchanged. `flutter analyze`: zero errors, same
 pre-existing infos.
+
+## Phase 16 — Notification Preference Philosophy — FROZEN
+
+**The core distinction this phase draws**: user preferences answer
+"what types of information do I want to receive?" — the Notification
+Engine (Eligibility → Frequency → Timing → Priority → Interruption
+Level) still answers "should this particular event be delivered right
+now?" A preference is one additional input to the existing waterfall,
+never a second notification engine sitting beside it. Concretely: a
+preference toggle is a bool an event's category is checked against;
+it never touches Frequency windows, Timing, or Priority computation.
+
+**Six user-facing categories** (invented here — no such grouping
+existed anywhere in the codebase before this phase), each mapped to
+the existing event codes, never exposing event-code names to the user:
+
+| Category | Event codes | User sees |
+|---|---|---|
+| `transactions` | TRANSACTION_CREATED, TRANSACTION_CONFIRMED | "Transactions" |
+| `budgetAlerts` | CATEGORY_BECAME_EXHAUSTED | "Budget Alerts" |
+| `financialHealth` | HEALTH_WORSENED, HEALTH_IMPROVED, PRIMARY_RECOMMENDATION_CHANGED | "Financial Health" |
+| `recovery` | RECOVERY_STARTED, RECOVERY_BECAME_IMPOSSIBLE, RECOVERY_COMPLETED, RECOVERY_FAILED | "Recovery" |
+| `streaks` | all 6 *_STREAK_EXTENDED/_BROKEN codes | "Streaks & Progress" |
+| `milestones` | MILESTONE_UNLOCKED | "Milestones" |
+
+Transactions and Budget Alerts are deliberately split rather than
+merged into one "Spending & Budgets" bucket, per real design feedback:
+"Your transaction of Rs. 500 was confirmed" and "You've used 90% of
+your Food budget" are psychologically different kinds of information,
+and a user may reasonably want one without the other.
+
+**Critical bypass**: `RECOVERY_BECAME_IMPOSSIBLE` is the only
+Critical-priority event in the whole Priority Matrix (spec 5.3). It
+always bypasses the Preference Gate regardless of the `recovery`
+toggle — user preferences can control attention, but they cannot
+suppress critical financial information. This is priority-specific,
+not a blanket exemption for the "recovery" category: `RECOVERY_STARTED`
+(Normal priority) is muted normally when `recovery` is off.
+
+**No user-facing Frequency control**: the existing Frequency Matrix
+(DAILY/WEEKLY/MONTHLY/ONCE/UNTIL_RESOLVED per event code) stays
+entirely internal. Exposing it (e.g. "Health Worsened → Daily/Weekly/
+Never") would leak internal architecture into the Settings screen for
+no real user benefit — the six category toggles are a high-level
+opt-in/opt-out signal only.
+
+**Storage**: `users/{uid}.preferences.notifications`, a new
+`NotificationPreferencesData` sub-model (`schemas/profile.py`) sitting
+beside the existing `PreferencesData` (language/currency/
+alertThreshold) — reuses the existing `/profile` GET/PATCH routes and
+their dot-notation merge rather than a new router. Every field
+defaults `True`; a missing category (including a user document that
+predates this phase entirely) is treated as `True` — opt-out only, so
+no migration is needed for existing accounts.
+
+**Gate placement**: a new "User Preferences" gate in
+`eligibility_engine.check_eligibility()`, between Gate 2 (Context) and
+Gate 4 (Already Informed) — before Already Informed/Frequency are
+even consulted, since a muted category should never reach the state
+that would otherwise let it through. Implemented as
+`_preferences_allow(db, uid, code)`: Critical bypass first, then
+`_PREFERENCE_CATEGORY` lookup, then a live read of
+`users/{uid}.preferences.notifications`. A code with no category
+mapping (there are none today — all 17 event codes are covered) is a
+pass-through, not a silent reject.
+
+**Full waterfall, current state**:
+```
+EVENT
+  ↓
+Gate 1/3: Justification + Notification-Eligible (Eligibility Matrix)
+  ↓
+Gate 2: Context (pass-through, no real signal exists)
+  ↓
+Gate: User Preferences (Phase 16 — this phase)
+  ↓
+Gate 4: Already Informed
+  ↓
+Gate 5: Frequency
+  ↓
+Timing / Interruption Level (inform delivery, never reject)
+  ↓
+Notification Generator → Repository → Delivery
+```
+
+**Verification**: `test_eligibility_engine.py` extended with four
+scenarios (7d–7g): a muted category blocks an otherwise-eligible
+event with a named reason; a user with no profile document at all
+still receives notifications (default-on, no migration); Critical
+`RECOVERY_BECAME_IMPOSSIBLE` still delivers with `recovery` muted;
+Normal-priority `RECOVERY_STARTED` IS muted by the same toggle,
+proving the bypass is priority-specific. Full backend suite (13
+files): zero regressions. Real-account verification against the real
+account's live Firestore document (`_preferences_allow()` called
+directly, isolated from Already Informed/Frequency history so the
+result reflects the Preference Gate alone): muting `streaks` blocked
+`LOGGING_STREAK_EXTENDED`, muting `recovery` blocked `RECOVERY_STARTED`
+but not `RECOVERY_BECAME_IMPOSSIBLE` (Critical bypass), an untouched
+category (`milestones`) still defaulted to allowed — account restored
+to its original preference state (no `notifications` sub-map) exactly
+afterward.
+
+**Frontend**: `frontend/lib/screens/notification_preferences_screen.dart`
+— 6 `SwitchListTile`s (Transactions/Budget Alerts/Financial Health/
+Recovery/Streaks & Progress/Milestones), each defaulting on, backed by
+`GET`/`PATCH /profile`'s existing `preferences` sub-map (sends the full
+current `preferences` object with only `notifications` changed, to
+avoid clobbering `language`/`currency`/`alertThreshold` on a partial
+update — the same whole-object PATCH semantics the rest of `/profile`
+already has). A highlighted amber callout states the Critical bypass
+plainly ("Some critical financial alerts will still be delivered...").
+Reachable from Profile → "Notification Preferences", between Goals and
+the dev-only mock notification tile. `flutter analyze`: zero issues.
+
+## Phase 16 follow-up — 5th "Duplicate Signal" Bug, Found via Real Usage
+
+While asked to sanity-check the new Settings screen on-device, real
+feedback surfaced a genuine, unrelated bug: a real account with income
+Rs 24,500 and all 5 budget categories fully exhausted (Rs 14,500
+total spent against Rs 14,500 total limit) correctly computes
+`overallHealth.status: "red"` (`RECOVERY_IMPOSSIBLE`) on the backend —
+confirmed directly via `compute_overall_health()` against the real
+account's live data — yet the user reported the app visually looking
+"fine" (green) after raising their income, even though no category
+budget changed.
+
+Root cause: `home_screen.dart`'s `_buildSnapshot()` ("Latest Activity"
+card) computed its own `isOnTrack = totalExpense <= income` and used
+that to color its own "ON TRACK"/"OVER" badge — entirely independent of
+`_overallHealthStatus`, which this same screen already reads correctly
+for its Health badge and greeting subtitle. Because `savingsPool`
+(unallocated income) was never part of that local comparison, raising
+income only widened the gap between `totalExpense` and `income`,
+making the false-green badge look more confident, not less — exactly
+matching "after I added the income it changed to green."
+
+This is the same "duplicate signal" architectural flaw already found
+and fixed 4 times earlier this session (ambient overlay, Categories
+cards, Reports' Overall Status card, Health screen's own local color
+functions) — a 5th instance, in a spot none of those passes touched.
+Fixed the same way each time: deleted the local computation, consolidated
+onto `HealthTheme.forStatus(_overallHealthStatus)` — badge label now
+`OVER`/`WATCH`/`ON TRACK` for red/amber/green respectively.
+`flutter analyze`: zero issues on both changed files.
+
+## Phase 16 follow-up — 6th and 7th "Duplicate Signal" Bugs
+
+Same real feedback continued: with the fix above rebuilt, the user
+pointed out the Categories screen and the Home screen's main balance
+card were STILL green with the same fully-exhausted account. Two more
+instances of the identical architectural flaw, both threshold bugs
+this time rather than a wrong-metric bug:
+
+**6th instance — `categories_screen.dart`'s "TOTAL MONTHLY BUDGET"
+banner.** Colored by `_spentPercent > 100` — strictly-greater-than, so
+a category set exactly 100% spent (fully exhausted, the real account's
+actual state: Rs 14,500 spent against Rs 14,500 total limit) evaluated
+`false` and stayed green. This banner never read any backend signal at
+all, unlike the rest of this same screen (which already reads real
+`categoryHealth` per card, Phase 13.7). Fixed by fetching
+`overallHealth.status` alongside the `categoryHealth` map this screen
+already loads, and coloring the banner via
+`HealthTheme.forStatus(_overallHealthStatus)` instead of the percent
+threshold.
+
+**7th instance — `home_screen.dart`'s `_isOverAllocatedBudget`
+(drives the main `BalanceCard`'s Over Budget/Unused Budget coloring).**
+Was `_totalBudgetSpent > _totalBudgetLimit` — the same
+strictly-greater-than gap, and one this file's own comment had already
+flagged as provisional ("Phase 3 will replace this once the Engine
+exposes a health flag directly"). Rethresholded to
+`_totalBudgetLimit > 0 && _unusedBudget <= 0` — `_unusedBudget` is
+already a direct, unmodified read of the Engine's `remainingBudget`
+(never a local subtraction), and `<= 0` is the exact same convention
+`compute_recovery_plan()` already uses server-side to decide a category
+is exhausted (`metrics_engine.py`, `exhausted = [... if remaining <= 0]`)
+— so this card's threshold now agrees with the backend's own, instead
+of inventing a second one.
+
+**Verification**: both fixes checked directly against the real
+account's actual `financialSummary`/`overallHealth` (income Rs 24,500,
+5 categories, Rs 14,500 total limit == Rs 14,500 total spent,
+`remainingBudget: 0.0`, `overallHealth.status: "red"`) —
+`_overallHealthStatus` resolves to `red` (Categories banner now renders
+`HealthTheme._red`) and `_isOverAllocatedBudget` resolves to `true`
+(BalanceCard now renders "Over Budget"), both flipped from their
+previous false-green outcomes on this exact data. `flutter analyze` on
+both files: zero issues (2 files, only pre-existing-style const infos
+on lines untouched by this change).

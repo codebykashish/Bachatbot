@@ -259,6 +259,56 @@ def run():
         f"got {decision7c}",
     )
 
+    # 7d. Preference Gate: a muted category blocks an otherwise-eligible
+    # event, with a named reason identifying the category.
+    db._store["users/u5"] = {"preferences": {"notifications": {"streaks": False}}}
+    decision7d = elig.check_eligibility(db, "u5", {
+        "eventId": "u5:2026-07-19:logging_streak_extended", "event": "LOGGING_STREAK_EXTENDED",
+        "payload": {"from": 6, "to": 7},
+    })
+    check(
+        "A muted category ('streaks' off) makes an otherwise-eligible event ineligible",
+        decision7d["eligible"] is False and "streaks" in decision7d["reason"],
+        f"got {decision7d}",
+    )
+
+    # 7e. Preference Gate: an unmuted category (or no user doc at all) still
+    # allows the event through -- default-on, no migration required.
+    decision7e = elig.check_eligibility(db, "u6", {
+        "eventId": "u6:2026-07-19:logging_streak_extended", "event": "LOGGING_STREAK_EXTENDED",
+        "payload": {"from": 6, "to": 7},
+    })
+    check(
+        "A user with no profile doc at all still receives notifications (default-on)",
+        decision7e["eligible"] is True,
+        f"got {decision7e}",
+    )
+
+    # 7f. Critical bypass: RECOVERY_BECAME_IMPOSSIBLE ignores a muted
+    # "recovery" preference -- user preferences can control attention but
+    # cannot suppress critical financial information.
+    db._store["users/u7"] = {"preferences": {"notifications": {"recovery": False}}}
+    decision7f = elig.check_eligibility(db, "u7", {
+        "eventId": "u7:2026-07-19:recovery_became_impossible", "event": "RECOVERY_BECAME_IMPOSSIBLE",
+        "payload": {},
+    })
+    check(
+        "RECOVERY_BECAME_IMPOSSIBLE (Critical) still delivers even with 'recovery' muted",
+        decision7f["eligible"] is True,
+        f"got {decision7f}",
+    )
+    # ...and a non-Critical recovery event (e.g. RECOVERY_STARTED) IS muted
+    # by the same preference, proving the bypass is priority-specific, not
+    # a blanket exemption for the whole "recovery" category.
+    decision7g = elig.check_eligibility(db, "u7", {
+        "eventId": "u7:2026-07-19:recovery_started", "event": "RECOVERY_STARTED", "payload": {},
+    })
+    check(
+        "RECOVERY_STARTED (Normal priority) IS muted by 'recovery' off -- bypass is Critical-only",
+        decision7g["eligible"] is False and "recovery" in decision7g["reason"],
+        f"got {decision7g}",
+    )
+
     # 8. process_event on an eligible event creates and returns a real notification
     result8 = elig.process_event(db, "u3", {"eventId": "u3:2026-07-19:milestone_unlocked:FIRST_HEALTHY_WEEK", "event": "MILESTONE_UNLOCKED", "payload": {"code": "FIRST_HEALTHY_WEEK"}})
     check(

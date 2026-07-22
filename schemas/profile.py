@@ -26,10 +26,25 @@ class IncomeData(BaseModel):
     onlineBanking: float = 0.0
     total: float = 0.0
 
+class NotificationPreferencesData(BaseModel):
+    """
+    Phase 16 — Notification Preferences. One bool per user-facing category
+    (see FINANCIAL_ENGINE_SPEC.md "Phase 16 — Notification Preference
+    Philosophy"). Missing category = True (opt-out only, never opt-in
+    silently) so existing accounts need no migration.
+    """
+    transactions: bool = True
+    budgetAlerts: bool = True
+    financialHealth: bool = True
+    recovery: bool = True
+    streaks: bool = True
+    milestones: bool = True
+
 class PreferencesData(BaseModel):
     language: str = "en"
     currency: str = "NPR"
     alertThreshold: int = Field(default=80, ge=0, le=100)
+    notifications: NotificationPreferencesData = Field(default_factory=NotificationPreferencesData)
 
 class UserProfileCreate(BaseModel):
     firstName: str = Field(..., min_length=1)

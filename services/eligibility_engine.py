@@ -13,7 +13,9 @@ looked up inside notification_generator.py. Gate 2 (Context) has no
 real signal to check against anywhere in this codebase, so it is a
 named pass-through, not a fabricated check. The gates that actually
 reject here are 1/3 (Justification + Notification-Eligible, via the
-Eligibility Matrix), 4 (Already Informed), and 5 (Frequency).
+Eligibility Matrix), User Preferences (Phase 16, sits between Gates 2
+and 4 — see FINANCIAL_ENGINE_SPEC.md "Phase 16 — Notification
+Preference Philosophy"), 4 (Already Informed), and 5 (Frequency).
 
 This module owns the eligibility DECISION only — it never computes
 Health/Metrics/Behavior, never generates wording (that's
@@ -54,6 +56,32 @@ _CONDITIONAL_EVENTS = {"LOGGING_STREAK_EXTENDED", "HEALTHY_STREAK_EXTENDED", "SA
 
 _FREQUENCY_WINDOWS = {"DAILY": 1, "WEEKLY": 7, "MONTHLY": 30}
 
+# Notification Preference Category Map (spec Phase 16 — Notification
+# Preference Philosophy). Maps each event code to the one user-facing
+# category it belongs to; a code with no entry has nothing to gate
+# (pass-through). RECOVERY_BECAME_IMPOSSIBLE is deliberately still
+# listed under "recovery" -- the Critical-priority bypass below is what
+# keeps it undeliverable-proof, not an omission from this map.
+_PREFERENCE_CATEGORY = {
+    "TRANSACTION_CREATED": "transactions",
+    "TRANSACTION_CONFIRMED": "transactions",
+    "CATEGORY_BECAME_EXHAUSTED": "budgetAlerts",
+    "HEALTH_WORSENED": "financialHealth",
+    "HEALTH_IMPROVED": "financialHealth",
+    "PRIMARY_RECOMMENDATION_CHANGED": "financialHealth",
+    "RECOVERY_STARTED": "recovery",
+    "RECOVERY_BECAME_IMPOSSIBLE": "recovery",
+    "RECOVERY_COMPLETED": "recovery",
+    "RECOVERY_FAILED": "recovery",
+    "LOGGING_STREAK_EXTENDED": "streaks",
+    "LOGGING_STREAK_BROKEN": "streaks",
+    "HEALTHY_STREAK_EXTENDED": "streaks",
+    "HEALTHY_STREAK_BROKEN": "streaks",
+    "SAVING_STREAK_EXTENDED": "streaks",
+    "SAVING_STREAK_BROKEN": "streaks",
+    "MILESTONE_UNLOCKED": "milestones",
+}
+
 
 def _conditional_passes(code: str, payload: dict) -> bool:
     if code in ("LOGGING_STREAK_EXTENDED", "HEALTHY_STREAK_EXTENDED", "SAVING_STREAK_EXTENDED"):
@@ -84,6 +112,33 @@ def _most_recent_notification_for_code(db, uid: str, event_code: str, milestone_
     if not matching:
         return None
     return max(matching, key=lambda n: n.get("createdAt") or 0)
+
+
+def _preferences_allow(db, uid: str, code: str) -> bool:
+    """
+    Gate: User Preferences (spec Phase 16). A user preference is a
+    high-level opt-in/opt-out signal, not a second eligibility engine --
+    it never touches Frequency/Timing/Priority, it only asks "does the
+    user want this category at all." Critical-priority events (today,
+    only RECOVERY_BECAME_IMPOSSIBLE) always bypass this gate: user
+    preferences can control attention, but they cannot suppress
+    critical financial information.
+    """
+    if gen._PRIORITY.get(code) == "Critical":
+        return True
+
+    category = _PREFERENCE_CATEGORY.get(code)
+    if category is None:
+        return True
+
+    doc = db.collection("users").document(uid).get()
+    if not doc.exists:
+        return True
+    data = doc.to_dict() or {}
+    notification_prefs = (data.get("preferences") or {}).get("notifications") or {}
+    # Missing category = True -- opt-out only, so pre-existing accounts
+    # need no migration and default to fully informed.
+    return notification_prefs.get(category, True)
 
 
 def _frequency_allows(db, uid: str, code: str, payload: dict) -> bool:
@@ -135,6 +190,11 @@ def check_eligibility(db, uid: str, event: dict) -> dict:
 
     # Gate 2: Context -- no app-presence signal exists anywhere in this
     # codebase; named pass-through, not a fabricated check.
+
+    # Gate: User Preferences (Phase 16) -- an additional input to the
+    # same waterfall, not a second notification engine.
+    if not _preferences_allow(db, uid, code):
+        return {"eligible": False, "reason": f"muted by user preference for category '{_PREFERENCE_CATEGORY.get(code)}'"}
 
     # Gate 4: Already Informed
     event_id = event.get("eventId")
