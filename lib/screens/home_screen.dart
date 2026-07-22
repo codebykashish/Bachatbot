@@ -309,7 +309,6 @@ class HomeScreenState extends State<HomeScreen> {
   // health flag directly).
   double get _totalBudgetLimit => _categoryRemaining.values
       .fold(0.0, (s, c) => s + ((c as Map)['limit'] ?? 0).toDouble());
-  double get _totalBudgetSpent => (_summary?['totalSpent'] ?? 0).toDouble();
 
   // Unused Budget — read directly from the Engine, never recomputed here.
   double get _unusedBudget => (_summary?['remainingBudget'] ?? 0).toDouble();
@@ -360,7 +359,14 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  bool get _isOverAllocatedBudget => _totalBudgetSpent > _totalBudgetLimit;
+  // Was `_totalBudgetSpent > _totalBudgetLimit`, which stayed false at
+  // exactly 100% used (spent == limit) -- a fully exhausted budget
+  // showed as "Unused Budget" in green. Rethreshold to `<= 0` on
+  // Engine-sourced `_unusedBudget` (never a local subtraction) -- the
+  // same "remaining <= 0" convention compute_recovery_plan() already
+  // uses to decide a category is exhausted, so this card now agrees
+  // with the real backend threshold instead of inventing its own.
+  bool get _isOverAllocatedBudget => _totalBudgetLimit > 0 && _unusedBudget <= 0;
 
   double get _todayTotalExpense => (_report?['todayTotalExpense'] ?? 0).toDouble();
   String get _todayTopCategory => (_report?['todayTopCategory'] ?? '').toString();
@@ -639,7 +645,20 @@ class HomeScreenState extends State<HomeScreen> {
       summaryText = 'No activity recorded today.';
     }
 
-    final isOnTrack = _totalExpense <= _incomeForCard || _incomeForCard == 0;
+    // Reads the same real backend signal as the Health badge (Health
+    // Engine's overallHealth.status) instead of a local income-vs-spend
+    // guess -- that local guess previously said "ON TRACK" whenever
+    // totalExpense <= income, even with every category budget fully
+    // exhausted, since unallocated income (savingsPool) was never part
+    // of that comparison. Same "duplicate signal" bug already fixed 4
+    // times elsewhere (ambient overlay, Categories, Reports, Health
+    // screen) -- this was the 5th instance.
+    final badgeTheme = HealthTheme.forStatus(_overallHealthStatus);
+    final badgeLabel = switch (_overallHealthStatus) {
+      'red' => 'OVER',
+      'amber' => 'WATCH',
+      _ => 'ON TRACK',
+    };
 
     return GestureDetector(
       onTap: () => Navigator.push(
@@ -700,15 +719,15 @@ class HomeScreenState extends State<HomeScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: isOnTrack ? _primary.withValues(alpha: 0.1) : Colors.red.shade50,
+                      color: badgeTheme.cardTint,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      isOnTrack ? 'ON TRACK' : 'OVER',
+                      badgeLabel,
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color: isOnTrack ? _primary : Colors.red,
+                        color: badgeTheme.statusColor,
                       ),
                     ),
                   ),

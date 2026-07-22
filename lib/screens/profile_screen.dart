@@ -11,6 +11,7 @@ import 'activity_feed_screen.dart';
 import 'income_page.dart';
 import 'login_screen.dart';
 import 'mock_notification_screen.dart';
+import 'notification_preferences_screen.dart';
 import 'about_us_screen.dart';
 import 'contact_us_screen.dart';
 import 'faqs_screen.dart';
@@ -399,6 +400,23 @@ class ProfileScreenState extends State<ProfileScreen> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => const GoalsScreen()),
+                    ),
+                  ),
+                ]),
+
+                const SizedBox(height: 12),
+
+                // Notification Preferences
+                _sectionCard(children: [
+                  _tile(
+                    icon: Icons.notifications_none_outlined,
+                    title: 'Notification Preferences',
+                    subtitle: 'Choose what BachatBot keeps you informed about',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              const NotificationPreferencesScreen()),
                     ),
                   ),
                 ]),

@@ -29,6 +29,12 @@ class CategoriesScreenState extends State<CategoriesScreen>
   // when categoryPressure is null (no budgets at all).
   List<String> _priorityOrder = [];
   final Set<String> _deletingCategories = {};
+  // Overall Health (Phase 3.1), the real backend signal — the Total
+  // Budget banner used to color itself from a local `_spentPercent >
+  // 100` check, which never flagged a category set fully exhausted (100%
+  // used exactly, not yet over 100%). Same "duplicate signal" bug already
+  // fixed elsewhere on this screen for the per-category cards.
+  String? _overallHealthStatus;
 
   late final AnimationController _shakeCtrl;
   late final Animation<double> _shakeAnim;
@@ -126,6 +132,9 @@ class CategoriesScreenState extends State<CategoriesScreen>
         final categoryHealth = healthRes['success'] == true
             ? (healthRes['data']?['categoryHealth'] as Map?)?.cast<String, dynamic>()
             : null;
+        final overallHealthStatus = healthRes['success'] == true
+            ? (healthRes['data']?['overallHealth']?['status'] as String?)
+            : null;
         setState(() {
           _budgets = categoryRemaining.entries
               .where((e) => e.key.toLowerCase() != 'salary' && (e.value['limit'] ?? 0) > 0)
@@ -143,6 +152,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
           _savingsPool = (summary['savingsPool'] ?? 0).toDouble();
           _remainingBudget = (summary['remainingBudget'] ?? 0).toDouble();
           _priorityOrder = priorityOrder;
+          _overallHealthStatus = overallHealthStatus;
         });
       }
     } catch (e) {
@@ -460,18 +470,22 @@ class CategoriesScreenState extends State<CategoriesScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // ── Total Budget banner ──────────────────────────────────
-                    Container(
+                    // Colored from the real Overall Health status (Phase
+                    // 3.1), not a local `_spentPercent > 100` guess -- that
+                    // guess never flagged a category set fully exhausted
+                    // (100% used exactly stays "not > 100"), which is
+                    // exactly the account state real feedback caught this
+                    // banner showing green for.
+                    Builder(builder: (context) {
+                      final banner = HealthTheme.forStatus(_overallHealthStatus);
+                      final isHealthy = _overallHealthStatus == null || _overallHealthStatus == 'green';
+                      return Container(
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [
-                            _spentPercent > 100
-                                ? const Color(0xFFE53935)
-                                : const Color(0xFF2DBE7F),
-                            _spentPercent > 100
-                                ? const Color(0xFFC62828)
-                                : const Color(0xFF1DA870),
-                          ],
+                          colors: isHealthy
+                              ? const [Color(0xFF2DBE7F), Color(0xFF1DA870)]
+                              : [banner.accent, banner.statusColor],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
@@ -511,7 +525,7 @@ class CategoriesScreenState extends State<CategoriesScreen>
                                 Row(
                                   children: [
                                     Icon(
-                                      _spentPercent > 100 ? Icons.warning_amber_rounded : Icons.check_circle_outline_rounded,
+                                      isHealthy ? Icons.check_circle_outline_rounded : Icons.warning_amber_rounded,
                                       color: Colors.white,
                                       size: 14,
                                     ),
@@ -537,7 +551,8 @@ class CategoriesScreenState extends State<CategoriesScreen>
                           ),
                         ],
                       ),
-                    ),
+                      );
+                    }),
 
                     const SizedBox(height: 12),
 
