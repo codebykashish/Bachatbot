@@ -13,6 +13,7 @@ import 'activity_feed_screen.dart';
 import 'reports_screen.dart';
 import 'income_page.dart';
 import 'health_screen.dart';
+import 'weekly_reflection_screen.dart';
 
 // State is public so MainScreen can call refresh() via GlobalKey
 class HomeScreen extends StatefulWidget {
@@ -64,6 +65,13 @@ class HomeScreenState extends State<HomeScreen> {
   // Latest first name fetched from profile — overrides widget.firstName when set
   String? _profileFirstName;
 
+  // "Your Week in Money" (Phase 22) — the already-composed reflection,
+  // read directly from GET /weekly-reflection. Null until the account
+  // has completed at least one full week (Account Existence Boundary,
+  // spec Phase 22B) -- the card is simply hidden in that case, no
+  // placeholder shown.
+  Map<String, dynamic>? _weeklyReflection;
+
   // Guards against an out-of-order response overwriting fresher data.
   // _fetchAll()/_refreshData()/refresh() can overlap (e.g. a transaction's
   // own refresh trigger racing a rebalance-confirm's refresh trigger
@@ -111,10 +119,25 @@ class HomeScreenState extends State<HomeScreen> {
     _fetchGeneration++;
     setState(() => _isLoading = true);
     try {
-      await Future.wait([_fetchFinancialSummary(), _fetchFinancialMetrics(), _fetchOverallHealth(), _fetchReport(), _fetchTrend(), _fetchLatestActivity(), _fetchProfileName(), _fetchBehaviorPreview()]);
+      await Future.wait([_fetchFinancialSummary(), _fetchFinancialMetrics(), _fetchOverallHealth(), _fetchReport(), _fetchTrend(), _fetchLatestActivity(), _fetchProfileName(), _fetchBehaviorPreview(), _fetchWeeklyReflection()]);
       _maybeShowYesterdayInsight();
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _fetchWeeklyReflection() async {
+    final myGen = _fetchGeneration;
+    try {
+      final res = await ApiService.get('/weekly-reflection');
+      if (!mounted || myGen != _fetchGeneration) return;
+      if (res['success'] == true) {
+        setState(() {
+          _weeklyReflection = res['data'] as Map<String, dynamic>?;
+        });
+      }
+    } catch (e) {
+      debugPrint('[HomeScreen] /weekly-reflection error: $e');
     }
   }
 
@@ -163,7 +186,7 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _refreshData() async {
     _fetchGeneration++;
     try {
-      await Future.wait([_fetchFinancialSummary(), _fetchFinancialMetrics(), _fetchOverallHealth(), _fetchReport(), _fetchTrend(), _fetchLatestActivity(), _fetchProfileName(), _fetchBehaviorPreview()]);
+      await Future.wait([_fetchFinancialSummary(), _fetchFinancialMetrics(), _fetchOverallHealth(), _fetchReport(), _fetchTrend(), _fetchLatestActivity(), _fetchProfileName(), _fetchBehaviorPreview(), _fetchWeeklyReflection()]);
     } catch (_) {}
   }
 
@@ -491,6 +514,73 @@ class HomeScreenState extends State<HomeScreen> {
               ),
             ),
             Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Your Week in Money (Phase 22) ───────────────────────────────────────
+  // A small preview only -- the full reflection lives on its own
+  // dedicated screen (WeeklyReflectionScreen), never inline here. Hidden
+  // entirely (not a placeholder) until the account has a real reflection.
+  Widget _buildWeeklyReflectionCard() {
+    final reflection = _weeklyReflection;
+    if (reflection == null) return const SizedBox.shrink();
+
+    final highlightCount = (reflection['highlights'] as List?)?.length ?? 0;
+    final concernCount = (reflection['concerns'] as List?)?.length ?? 0;
+
+    return GestureDetector(
+      onTap: () => Navigator.push(context, slideUpRoute(const WeeklyReflectionScreen())),
+      child: Container(
+        margin: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 3)),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Text('📖', style: TextStyle(fontSize: 16)),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('Your Week in Money', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                ),
+                Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 18),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              (reflection['opening'] as String?) ?? 'See what stood out about your money this week.',
+              style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700, height: 1.4),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (highlightCount > 0 || concernCount > 0) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  if (highlightCount > 0) ...[
+                    Icon(Icons.check_circle_outline, size: 14, color: HealthTheme.forStatus('green').statusColor),
+                    const SizedBox(width: 4),
+                    Text('$highlightCount went well', style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+                  ],
+                  if (highlightCount > 0 && concernCount > 0) const SizedBox(width: 14),
+                  if (concernCount > 0) ...[
+                    Icon(Icons.visibility_outlined, size: 14, color: HealthTheme.forStatus('amber').statusColor),
+                    const SizedBox(width: 4),
+                    Text('$concernCount to watch', style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+                  ],
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -847,6 +937,7 @@ class HomeScreenState extends State<HomeScreen> {
                     children: [
                       _buildSummaryCards(),
                       _buildHealthBadge(),
+                      _buildWeeklyReflectionCard(),
                     ],
                   ),
 
