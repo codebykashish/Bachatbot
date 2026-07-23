@@ -21,8 +21,6 @@ Public API:
 # ─── Priority Matrix (spec 5.3) ────────────────────────────────────────────
 _PRIORITY = {
     "RECOVERY_BECAME_IMPOSSIBLE": "Critical",
-    "TRANSACTION_CREATED": "High",
-    "TRANSACTION_CONFIRMED": "High",
     "HEALTH_WORSENED": "High",
     "RECOVERY_STARTED": "High",
     "RECOVERY_FAILED": "High",
@@ -42,8 +40,6 @@ _PRIORITY = {
 
 # ─── Frequency Matrix (spec 5.4A) ──────────────────────────────────────────
 _FREQUENCY = {
-    "TRANSACTION_CREATED": "UNTIL_RESOLVED",
-    "TRANSACTION_CONFIRMED": "UNTIL_RESOLVED",
     "PRIMARY_RECOMMENDATION_CHANGED": "UNTIL_RESOLVED",
     "HEALTH_WORSENED": "DAILY",
     "HEALTH_IMPROVED": "ONCE",
@@ -71,8 +67,6 @@ _FREQUENCY = {
 
 # ─── Timing Matrix (spec 5.5A) ─────────────────────────────────────────────
 _TIMING = {
-    "TRANSACTION_CREATED": "IMMEDIATE",
-    "TRANSACTION_CONFIRMED": "IMMEDIATE",
     "PRIMARY_RECOMMENDATION_CHANGED": "IMMEDIATE",
     "HEALTH_WORSENED": "IMMEDIATE",
     "HEALTH_IMPROVED": "IMMEDIATE",
@@ -97,8 +91,6 @@ _TIMING = {
 # diff_generator.py actually produces (spec 5.6's own correction), never
 # the illustrative "{n}" placeholder first sketched.
 _TEMPLATES = {
-    "TRANSACTION_CREATED": ("TITLE_PENDING_TXN", "New transaction detected", "Was this your transaction?", "Confirm transaction"),
-    "TRANSACTION_CONFIRMED": ("TITLE_PENDING_TXN", "New transaction detected", "Was this your transaction?", "Confirm transaction"),
     "PRIMARY_RECOMMENDATION_CHANGED": ("TITLE_RECOMMENDATION_CHANGED", "Your recommendation has changed", "Your financial situation changed, so has our advice", "View recommendation"),
     "HEALTH_WORSENED": ("TITLE_HEALTH_WORSENED", "Spending pace increased", "You're spending faster than your monthly plan", "Review your spending"),
     "HEALTH_IMPROVED": ("TITLE_HEALTH_IMPROVED", "Your finances are back on track", "Your spending pace has improved this week", "View your report"),
@@ -144,14 +136,31 @@ _DEEP_LINKS = {
     "HEALTHY_STREAK_BROKEN": "streak",
     "SAVING_STREAK_EXTENDED": "streak",
     "SAVING_STREAK_BROKEN": "streak",
-    # Phantom today (spec 5.9's own audit: no Diff Matrix producer exists
-    # for either code) — completed here anyway, per Rule 3's "every
-    # matrix stays consistent even for codes that can't fire yet" already
-    # applied to NEW_BEST_STREAK elsewhere.
-    "TRANSACTION_CREATED": "activity",
-    "TRANSACTION_CONFIRMED": "activity",
     "UNUSUAL_SPENDING_DETECTED": "category_detail",
 }
+
+# TRANSACTION_CREATED/TRANSACTION_CONFIRMED — deliberately absent from
+# every matrix above (spec Phase 21). They were never designed-but-
+# forgotten Notification Engine events; they started as
+# financial_engine.RecomputeReason values (Phase 1.5), and Phase 5
+# borrowed that existing naming to fill out matrix rows for
+# completeness discipline, despite no producer ever existing (still
+# true as of the Phase 5.9/13.6 audits — no Diff Matrix row, no
+# scheduler awareness of individual transactions). Unlike NEW_BEST_STREAK
+# (a genuinely missing feature with no substitute), a complete,
+# already-working notification mechanism for "a transaction happened"
+# already exists: every transaction-creation path writes its own
+# `alerts` doc ("expense"/"income"/"transaction_confirmed"/
+# "pending_transaction"), delivered in real time by AlertPopupService.
+# Giving these two codes a real producer here would create a SECOND
+# notification for the same transaction through a second system.
+# If you're reading this because the "missing policy" check below
+# flagged them again -- don't add rows back. The Notification Engine
+# does not own transaction lifecycle notifications; it owns
+# behavior/state-change notifications the alert system doesn't already
+# cover. RecomputeReason.TRANSACTION_CREATED/TRANSACTION_CONFIRMED in
+# financial_engine.py are a different concept (why a recompute ran) and
+# are untouched by this removal.
 
 # MILESTONE_UNLOCKED is keyed by its payload's milestone code, not a
 # single fixed template — one row per milestone (spec 5.6A: `TITLE_

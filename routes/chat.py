@@ -19,12 +19,36 @@ from services.report_service import (
 )
 from services.financial_engine import recompute as engine_recompute, get_summary, RecomputeReason
 from services.behavior_engine import record_logging_activity
-from services.health_engine import compute_overall_health
+from services.health_engine import compute_overall_health, compute_risk_flags
 import logging
 
 logger = logging.getLogger("bachatbot.chat")
 
 router = APIRouter()
+
+
+def _chat_context_facts(db, uid, month_key):
+    """
+    Chat Context v2 (spec Phase 20) — the two facts the chatbot may
+    state beyond tone. Both are pure reads off compute_risk_flags()'s
+    already severity-sorted list (Engine calculates -> this function
+    selects -> Gemini explains); nothing here is a new calculation.
+    Returns (top_risk_category, at_risk_goal_dict_or_None).
+    """
+    top_risk_category = None
+    at_risk_goal = None
+    try:
+        flags = compute_risk_flags(db, uid, month_key).get("riskFlags") or []
+        for f in flags:
+            if top_risk_category is None and f.get("category"):
+                top_risk_category = f["category"]
+            if at_risk_goal is None and f.get("code") == "GOAL_AT_RISK":
+                at_risk_goal = {"name": f.get("goalName"), "shortfall": f.get("shortfall")}
+            if top_risk_category is not None and at_risk_goal is not None:
+                break
+    except Exception as ctx_err:
+        print(f"[CHAT] Risk context lookup failed (non-critical): {ctx_err}")
+    return top_risk_category, at_risk_goal
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1023,6 +1047,10 @@ async def chat(
     except Exception as health_err:
         print(f"[CHAT] Health status lookup failed (non-critical): {health_err}")
 
+    # Chat Context v2 (Phase 20) — same best-effort treatment as HealthStatus
+    # above: a failure here falls back to no extra facts, never blocks chat.
+    top_risk_category, at_risk_goal = _chat_context_facts(db, uid, curr_month)
+
     # ── Call Gemini ──────────────────────────────────────────────────────
     try:
         gemini_result = await process_chat_message(
@@ -1032,6 +1060,8 @@ async def chat(
             missing_budget_categories=missing_budget_categories,
             history=history,
             overall_health_status=overall_health_status,
+            top_risk_category=top_risk_category,
+            at_risk_goal=at_risk_goal,
         )
         gemini_reply = gemini_result["reply"]
         actions = gemini_result["actions"]
@@ -2222,10 +2252,15 @@ async def chat_sync(
             except Exception as health_err:
                 print(f"[SYNC] Health status lookup failed (non-critical): {health_err}")
 
+            # Chat Context v2 (Phase 20) -- same best-effort treatment.
+            top_risk_category, at_risk_goal = _chat_context_facts(db, uid, derived_month_key)
+
             gemini_result = await process_chat_message(
                 user_message,
                 missing_budget_categories=missing_budget_categories,
                 overall_health_status=overall_health_status,
+                top_risk_category=top_risk_category,
+                at_risk_goal=at_risk_goal,
             )
             gemini_reply = gemini_result["reply"]
             actions = gemini_result["actions"]

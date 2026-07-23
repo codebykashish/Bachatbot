@@ -68,6 +68,8 @@ FirstName: <name or 'User'>
 FirstMessage: true|false
 MissingBudgetCategories: ["Food","Transport", ...]
 HealthStatus: green|amber|red|unknown
+TopRiskCategory: <category name, or 'none'>
+AtRiskGoal: <"GoalName short by Rs X", or 'none'>
 --- END CONTEXT ---
 
 `MissingBudgetCategories` = categories whose monthly budget is NOT set.
@@ -84,9 +86,27 @@ never the facts in your reply:
 - unknown: no health data yet (e.g. no budgets set) — use your normal,
   neutral tone.
 Never state a specific number, category, or amount because of
-HealthStatus alone — only mention specifics the user already brought
-up, or that are already in DATA/actions. HealthStatus shapes how you
-say things, never what you claim is true.
+HealthStatus alone — HealthStatus shapes how you say things, never
+what you claim is true.
+
+`TopRiskCategory`/`AtRiskGoal` (Chat Context v2) ARE facts you may
+state — but only these two, and only when relevant:
+- `TopRiskCategory` — the single category currently under the most
+  real financial pressure (already computed by the Risk engine, not
+  by you). Mention it only when the user's question is about
+  spending, budgeting, or financial health. If it's 'none', you have
+  no category fact to offer — do not guess one.
+- `AtRiskGoal` — a specific goal currently projected to fall short
+  this month, already computed, with its real shortfall amount.
+  Mention it only when the user's question is about savings, goals,
+  or financial planning. If it's 'none', you have no goal fact to
+  offer — do not guess one.
+- You may ONLY state facts explicitly present in this context block.
+  Never calculate a new financial fact, never invent an amount,
+  category, goal, or cause beyond what's given here.
+- Context supports your answer — it doesn't force you to mention every
+  available fact in every reply. A greeting doesn't need TopRiskCategory
+  shoehorned in.
 
 Use this context in every reply.
 
@@ -544,6 +564,8 @@ async def process_chat_message(
     missing_budget_categories: list[str] | None = None,
     history: list[dict] | None = None,
     overall_health_status: str | None = None,
+    top_risk_category: str | None = None,
+    at_risk_goal: dict | None = None,
 ) -> dict:
     """
     Send user message to Gemini, parse response.
@@ -553,6 +575,13 @@ async def process_chat_message(
     Engine, or None if unavailable) shapes reply TONE only, per the
     system prompt's own explicit instruction — it is never a new fact,
     just how an already-true fact is said.
+
+    `top_risk_category`/`at_risk_goal` (Chat Context v2, spec Phase 20)
+    ARE facts the bot may state, but only these two, and only read
+    directly off the already-computed Risk Flags list (the first
+    category-bearing entry / the first GOAL_AT_RISK entry) — never
+    calculated here or in gemini.py. `at_risk_goal`, if present, is
+    `{"name": str, "shortfall": float}`.
     Returns dict with:
       - reply: str (friendly text)
       - actions: list of action dicts
@@ -568,12 +597,23 @@ async def process_chat_message(
             }
 
         # ── Build system instruction (prompt + user context) ─────────────────
+        at_risk_goal_line = "none"
+        if at_risk_goal and at_risk_goal.get("name"):
+            shortfall = at_risk_goal.get("shortfall")
+            at_risk_goal_line = (
+                f"{at_risk_goal['name']} short by Rs {round(shortfall)}"
+                if isinstance(shortfall, (int, float))
+                else at_risk_goal["name"]
+            )
+
         context_block = (
             f"\n--- USER CONTEXT ---\n"
             f"FirstName: {first_name}\n"
             f"FirstMessage: {str(is_first_message).lower()}\n"
             f"MissingBudgetCategories: {json.dumps(missing_budget_categories or [])}\n"
             f"HealthStatus: {overall_health_status or 'unknown'}\n"
+            f"TopRiskCategory: {top_risk_category or 'none'}\n"
+            f"AtRiskGoal: {at_risk_goal_line}\n"
             f"--- END CONTEXT ---\n"
         )
         instruction = f"{SYSTEM_PROMPT}\n{context_block}"

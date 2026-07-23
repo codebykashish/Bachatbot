@@ -12496,3 +12496,137 @@ exactly matching that goal's real `monthlyTarget`/shortfall since
 already-verified negative-projected-savings state), each correctly
 named via `goalName`/`expiresWhen` — not synthetic data, the account's
 real current recommendations.
+
+## Phase 20 — Chat Context v2 — FROZEN
+
+Widens Phase 13.10's "tone only" rule deliberately, to let the bot
+state exactly two real facts beyond how it says things — confirmed
+before starting:
+
+**Scope**: `TopRiskCategory` (the single category under the most real
+pressure right now) and `AtRiskGoal` (a goal + its real shortfall
+amount, from Phase 18/19's Goal Risk). Both are pure selections off
+`compute_risk_flags()`'s already severity-sorted list — the first
+entry with a `category`, and the first `GOAL_AT_RISK` entry — never a
+new calculation. Explicitly deferred: an "available buffer" fact
+(what category currently has the most unused budget) — what
+"available" even means in this app (unallocated income vs. unused
+category budget vs. savings) isn't a settled concept anywhere yet, and
+a quick `max()` risked giving misleading advice under an unexamined
+definition. Left for its own future design pass.
+
+**Contract, frozen**:
+- `HealthStatus` continues to control tone only, unchanged from Phase 13.10.
+- `TopRiskCategory` may be mentioned only when the question is about
+  spending, budgeting, or financial health.
+- `AtRiskGoal` may be mentioned only when the question is about
+  savings, goals, or financial planning.
+- The bot may only state facts explicitly present in the context
+  block — never calculate a new one, never invent an amount, category,
+  goal, or cause beyond what's given.
+- A missing/`'none'` field means no fact to offer — the bot must not
+  guess in its place.
+- Context supports an answer; it doesn't force every field into every
+  reply (a greeting doesn't need `TopRiskCategory` shoehorned in).
+
+**Implementation**: `routes/chat.py` gained `_chat_context_facts(db,
+uid, month_key)` — a single shared helper (used by both `chat()` and
+`chat_sync()`) that reads `compute_risk_flags()` once and selects the
+first category-bearing entry and the first `GOAL_AT_RISK` entry,
+best-effort, same non-blocking treatment as the existing
+`compute_overall_health()` lookup right above it. `gemini.py`'s
+`SYSTEM_PROMPT` extended with the `TopRiskCategory`/`AtRiskGoal` fields
+and the rules above; `process_chat_message()` gained
+`top_risk_category: str | None` and `at_risk_goal: dict | None`
+(`{"name": str, "shortfall": float}`) params, rendered into the
+existing USER CONTEXT block (`AtRiskGoal: <name> short by Rs <X>`, or
+`'none'`).
+
+**Verification, against real Gemini, not simulated** (same discipline
+as Phase 13.10): called `process_chat_message()` three times.
+(1) A financial-health question with `TopRiskCategory="Food"` — the
+real reply named "Food category" as under pressure. (2) The identical
+question with `TopRiskCategory=None` — the real reply correctly
+declined to guess a category, redirecting to the monthly report
+instead of inventing one. (3) A goals question with
+`at_risk_goal={"name": "laptop", "shortfall": 12000}` — the real reply
+stated "your laptop goal is currently projected to be short by Rs
+12,000," the exact real number, not a paraphrase or a different
+figure. Confirms the contract is respected, not just that the prompt
+text changed. Full backend suite (15 files): zero regressions; both
+`gemini.py`/`routes/chat.py` import cleanly.
+
+## Phase 21 — Removed the Phantom Transaction Events, FROZEN
+
+`TRANSACTION_CREATED`/`TRANSACTION_CONFIRMED` removed entirely from
+the Notification Engine's matrices, after a focused design pass
+answered one question first: **what should these two codes actually
+mean in this app's event architecture** — a producer to build, or dead
+weight to remove?
+
+**Why removal, not a producer, decided before touching code**: these
+were never a "designed but forgotten" gap (the shape the Eligibility
+Waterfall and `check_goal_milestones()` gaps both had earlier this
+session). They started as `financial_engine.RecomputeReason` values
+(Phase 1.5 — a reason code for why a recompute ran, nothing to do with
+notifications). Phase 5 borrowed that existing naming to fill matrix
+rows purely for completeness discipline ("every matrix stays
+consistent even for codes that can't fire yet," the same treatment
+`NEW_BEST_STREAK` got), fully aware no producer existed — confirmed by
+Phase 5.9's and 13.6's own audits, both already recording them as
+phantom. The distinction that settled it: `NEW_BEST_STREAK` is a
+genuinely missing feature with no substitute; these two are not — a
+complete, already-working notification mechanism for "a transaction
+happened" already exists (every transaction-creation path writes its
+own `alerts` doc, delivered in real time by `AlertPopupService`).
+Building a producer here would create a second notification for the
+same transaction through a second system — the exact double-
+notification risk raised before any code was touched. The Notification
+Engine's own architecture reinforces this: `diff_generator.py`/
+`scheduler_service.py` have zero per-transaction awareness anywhere —
+they operate strictly on day-level snapshot diffs — so a real producer
+would have meant a third architectural first this session (after
+Pattern Spending Alerts) of a live route calling `process_event()`
+synchronously, for a need already met elsewhere.
+
+**The frozen boundary, stated so it doesn't get "fixed" back in**:
+the Notification Engine does not own transaction lifecycle
+notifications. It owns behavior- and state-change-driven notifications
+that the existing `alerts`/`AlertPopupService` system doesn't already
+cover. If a future missing-policy check flags these two again, the
+correct response is to leave them out, not add rows back.
+
+**Removed from**: `notification_generator.py`'s `_PRIORITY`,
+`_FREQUENCY`, `_TIMING`, `_TEMPLATES`, `_DEEP_LINKS`;
+`eligibility_engine.py`'s `_ALWAYS` (Eligibility Matrix) and
+`_PREFERENCE_CATEGORY` (Phase 16 — see follow-up note below). A
+comment block replaces the old "Phantom today" note at the Deep Link
+Matrix, explaining the removal rationale in place so a future reader
+finds the reasoning exactly where they'd look for the missing rows.
+
+**Explicitly untouched, a different concept**:
+`financial_engine.RecomputeReason.TRANSACTION_CREATED`/
+`TRANSACTION_CONFIRMED` (why a recompute ran — still legitimately used
+by `chat.py`/`transactions.py`/`confirm.py`) and
+`behavior_engine.record_logging_activity()`'s `reason` parameter
+(a third, independent reuse of the same strings, for Logging Behavior
+tracking — confirmed via `test_behavior_engine.py`, which exercises it
+extensively and is unrelated to the Notification Engine). Also
+untouched: the existing `expense`/`income`/`transaction_confirmed`/
+`pending_transaction` alert flows and `AlertPopupService`'s delivery of
+them — the mechanism this decision confirms is the real owner of
+transaction-lifecycle notifications, not something being replaced.
+
+**A real, honest side effect worth naming**: Notification Preferences'
+(Phase 16) `"transactions"` category existed ONLY to gate these two
+codes — removing them leaves the "Transactions" toggle on the
+Notification Preferences screen with nothing left to control. The
+toggle itself was not removed from the frontend in this phase (out of
+scope for this pass); it is now a no-op until a future decision either
+retires it or maps a different, real event to it.
+
+**Verification**: full backend suite (15 files) — zero regressions.
+Grepped the entire backend for both code strings first — confirmed
+zero references remain in any Notification Engine matrix, test, or
+Eligibility table; the only remaining references are the two
+explicitly-different-concept usages named above.

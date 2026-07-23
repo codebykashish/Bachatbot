@@ -38,7 +38,7 @@ from services import delivery_service as delivery
 # guarantees "not amber-to-amber" -- the same reconciliation already
 # applied once to PRIMARY_RECOMMENDATION_CHANGED in 5.6B.
 _ALWAYS = {
-    "TRANSACTION_CREATED", "TRANSACTION_CONFIRMED", "PRIMARY_RECOMMENDATION_CHANGED",
+    "PRIMARY_RECOMMENDATION_CHANGED",
     "HEALTH_WORSENED", "HEALTH_IMPROVED", "RECOVERY_STARTED",
     "RECOVERY_BECAME_IMPOSSIBLE", "RECOVERY_COMPLETED", "RECOVERY_FAILED",
     "CATEGORY_BECAME_EXHAUSTED", "MILESTONE_UNLOCKED", "HEALTHY_STREAK_BROKEN",
@@ -63,8 +63,6 @@ _FREQUENCY_WINDOWS = {"DAILY": 1, "WEEKLY": 7, "MONTHLY": 30}
 # listed under "recovery" -- the Critical-priority bypass below is what
 # keeps it undeliverable-proof, not an omission from this map.
 _PREFERENCE_CATEGORY = {
-    "TRANSACTION_CREATED": "transactions",
-    "TRANSACTION_CONFIRMED": "transactions",
     "CATEGORY_BECAME_EXHAUSTED": "budgetAlerts",
     "HEALTH_WORSENED": "financialHealth",
     "HEALTH_IMPROVED": "financialHealth",
