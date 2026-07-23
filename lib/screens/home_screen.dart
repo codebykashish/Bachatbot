@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../api_service.dart';
 import '../widgets/adaptive_report_chart.dart';
@@ -53,9 +54,8 @@ class HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _summary; // financialSummary — the only source of calculated values
   Map<String, dynamic>? _metrics; // financialMetrics — the Metrics Engine's read-only interpretations (Phase 2)
   Map<String, dynamic>? _overallHealth; // Health Engine's judgment (Phase 3.1) — status/confidence/reasons, never computed here
-  Map<String, String> _categoryHealth = {}; // category -> green/amber/red, for the Today chart
   Map<String, dynamic>? _report;
-  Map<String, double> _categoryBreakdown = {};
+  List<dynamic> _dailyBreakdown = [];
 
   bool _hideAmounts = true;
   String _selectedMonth = '';
@@ -247,22 +247,8 @@ class HomeScreenState extends State<HomeScreen> {
       if (!mounted || myGen != _fetchGeneration) return;
       if (res['success'] == true) {
         final overallHealth = res['data']?['overallHealth'] as Map<String, dynamic>?;
-        // Category Health (Phase 13.12) -- same map Reports already
-        // uses to color its Today chart. Fetched here too so Home's
-        // own Today chart can use the identical AdaptiveReportChart
-        // widget Reports does, instead of the separate, plain-green
-        // ReportChart widget it used before -- two different widgets
-        // rendering "today's categories" had quietly drifted apart
-        // (no health coloring, different sort order, different style).
-        final rawCategoryHealth = res['data']?['categoryHealth'] as Map?;
-        final categoryHealth = rawCategoryHealth == null
-            ? <String, String>{}
-            : rawCategoryHealth.map(
-                (k, v) => MapEntry(k.toString(), (v as Map)['status'] as String? ?? 'green'),
-              );
         setState(() {
           _overallHealth = overallHealth;
-          _categoryHealth = categoryHealth;
         });
         // Phase 13.5 — the one real signal the app-wide Health Theme
         // hangs off. Pushed here rather than fetched again by a separate
@@ -284,17 +270,22 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _fetchReport() async {
     final myGen = _fetchGeneration;
     try {
-      // Home screen shows today's view -- the most immediately relevant
-      // slice, per real feedback. Budgets (Unused Budget / Savings card)
-      // are unaffected; they come from /budgets separately and stay
-      // monthly, as budgets are inherently a monthly allocation.
-      final res = await ApiService.get('/monthly-report?monthKey=$_selectedMonth&view=today');
+      // Home screen shows this month's view -- per real feedback the
+      // Today-only chart made the page feel thin; the current month is
+      // the more useful glance. Budgets (Unused Budget / Savings card)
+      // are unaffected; they come from /budgets separately and were
+      // always monthly, as budgets are inherently a monthly allocation.
+      // The "today"/"yesterday" daily-snapshot fields the backend
+      // returns alongside this (todayTotalExpense, yesterdaySummaryText,
+      // etc.) are computed from the same full month's transactions
+      // regardless of view, so switching view here doesn't touch them.
+      final res = await ApiService.get('/monthly-report?monthKey=$_selectedMonth&view=month');
       if (!mounted || myGen != _fetchGeneration) return;
       if (res['success'] == true) {
         setState(() {
           final data = res['data'];
           _report = data?['report'] ?? data;
-          _categoryBreakdown = _mapToDouble(_report?['categoryBreakdown'] ?? {});
+          _dailyBreakdown = _report?['dailyBreakdown'] as List? ?? [];
         });
       }
     } catch (e) {
@@ -322,11 +313,6 @@ class HomeScreenState extends State<HomeScreen> {
         }
       }
     } catch (_) {}
-  }
-
-  Map<String, double> _mapToDouble(dynamic map) {
-    if (map is! Map) return {};
-    return map.map<String, double>((k, v) => MapEntry(k.toString(), (v ?? 0).toDouble()));
   }
 
   // ── Derived values ───────────────────────────────────────────────────────
@@ -973,11 +959,14 @@ class HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 28),
 
-            // ── Today's Spending Chart ────────────────────────────────────
+            // ── This Month's Spending Chart ───────────────────────────────
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text("Today's Spending", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(
+                  '${DateFormat('MMMM').format(DateTime.now())} Spending',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
                 TextButton(
                   onPressed: () {
                     if (widget.onViewFullReports != null) {
@@ -1008,9 +997,8 @@ class HomeScreenState extends State<HomeScreen> {
                         }
                       },
                     child: AdaptiveReportChart(
-                      mode: 'today',
-                      categoryBreakdown: _categoryBreakdown,
-                      categoryHealth: _categoryHealth,
+                      mode: 'month',
+                      dailyBreakdown: _dailyBreakdown,
                     ),
                   ),
 

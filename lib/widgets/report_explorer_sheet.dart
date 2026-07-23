@@ -6,13 +6,17 @@ import 'category_breakdown_list.dart';
 import 'month_strip.dart';
 import 'week_strip.dart';
 
-/// The full report-exploration experience -- time-range tabs, category
-/// filter, year/month navigation, the chart itself, and the category
-/// breakdown -- all live here, reached only by tapping the compact month
-/// graph on the main Reports page. Self-contained: fetches its own data
-/// independently of ReportsScreenState, so switching tabs/months/weeks
-/// in here never disturbs the main page's own "this month, right now"
-/// view underneath.
+/// The full report-exploration experience -- time-range tabs, year/month
+/// navigation, the chart itself, and the category breakdown -- all live
+/// here, reached only by tapping the compact month graph on the main
+/// Reports page. Self-contained: fetches its own data independently of
+/// ReportsScreenState, so switching tabs/months/weeks in here never
+/// disturbs the main page's own "this month, right now" view underneath.
+///
+/// No category-type filter (Food/Transport/...) here -- the full
+/// CategoryBreakdownList below already answers "which category," so a
+/// separate filter narrowing the chart to one category at a time was
+/// redundant with what's already on screen.
 class ReportExplorerSheet extends StatefulWidget {
   final int initialYear;
   final DateTime initialMonth;
@@ -26,13 +30,8 @@ class ReportExplorerSheet extends StatefulWidget {
 class _ReportExplorerSheetState extends State<ReportExplorerSheet> {
   static const Color _primary = Color(0xFF2DBE7F);
 
-  static const List<String> _categories = [
-    'Food', 'Transport', 'Rent', 'Education', 'Shopping', 'Health', 'Entertainment', 'Other',
-  ];
-
   bool _isLoading = true;
   String _selectedView = 'month'; // 'today' | 'week' | 'month'
-  String? _selectedCategory;
   late DateTime _currentMonth;
   late String _selectedMonthKey;
   late int _selectedYear;
@@ -75,11 +74,6 @@ class _ReportExplorerSheetState extends State<ReportExplorerSheet> {
       if (view == 'week') _selectedWeekIndex = _defaultWeekIndexForMonth(_currentMonth);
     });
     _loadReport();
-  }
-
-  void _setCategory(String? category) {
-    if (_selectedCategory == category) return;
-    setState(() => _selectedCategory = category);
   }
 
   void _selectMonth(int month) {
@@ -239,12 +233,9 @@ class _ReportExplorerSheetState extends State<ReportExplorerSheet> {
     if (_selectedView == 'week') {
       final buckets = _weekBuckets;
       if (buckets.isEmpty) return 0;
-      final idx = _selectedWeekIndex.clamp(0, buckets.length - 1);
-      if (_selectedCategory == null) return buckets[idx].total;
-      return _weekCategoryBreakdown(idx)[_selectedCategory] ?? 0;
+      return buckets[_selectedWeekIndex.clamp(0, buckets.length - 1)].total;
     }
-    if (_selectedCategory == null) return _totalExpense;
-    return _categoryBreakdown[_selectedCategory] ?? 0;
+    return _totalExpense;
   }
 
   String get _headlinePeriodLabel {
@@ -265,50 +256,6 @@ class _ReportExplorerSheetState extends State<ReportExplorerSheet> {
       return _weekCategoryBreakdown(_selectedWeekIndex.clamp(0, buckets.length - 1));
     }
     return _categoryBreakdown;
-  }
-
-  void _openCategoryFilterSheet() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (sheetContext) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Filter by Category', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _FilterChip(
-                    label: 'All',
-                    selected: _selectedCategory == null,
-                    onTap: () {
-                      _setCategory(null);
-                      Navigator.pop(sheetContext);
-                    },
-                  ),
-                  ..._categories.map((c) => _FilterChip(
-                        label: c,
-                        selected: _selectedCategory == c,
-                        onTap: () {
-                          _setCategory(c);
-                          Navigator.pop(sheetContext);
-                        },
-                      )),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
   }
 
   @override
@@ -352,47 +299,8 @@ class _ReportExplorerSheetState extends State<ReportExplorerSheet> {
                               Expanded(child: _TabChip(label: 'Week', selected: _selectedView == 'week', onTap: () => _setView('week'))),
                               const SizedBox(width: 8),
                               Expanded(child: _TabChip(label: 'Month', selected: _selectedView == 'month', onTap: () => _setView('month'))),
-                              const SizedBox(width: 8),
-                              Stack(
-                                children: [
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: Colors.grey.shade300),
-                                    ),
-                                    child: IconButton(
-                                      icon: const Icon(Icons.tune_rounded, size: 20),
-                                      color: _selectedCategory != null ? _primary : Colors.grey.shade700,
-                                      tooltip: 'Filter by category',
-                                      onPressed: _openCategoryFilterSheet,
-                                    ),
-                                  ),
-                                  if (_selectedCategory != null)
-                                    Positioned(
-                                      right: 8,
-                                      top: 8,
-                                      child: Container(
-                                        width: 8,
-                                        height: 8,
-                                        decoration: const BoxDecoration(color: _primary, shape: BoxShape.circle),
-                                      ),
-                                    ),
-                                ],
-                              ),
                             ],
                           ),
-                          if (_selectedCategory != null) ...[
-                            const SizedBox(height: 10),
-                            Chip(
-                              label: Text(_selectedCategory!, style: const TextStyle(fontSize: 12, color: _primary, fontWeight: FontWeight.w600)),
-                              backgroundColor: _primary.withValues(alpha: 0.1),
-                              deleteIcon: const Icon(Icons.close, size: 16, color: _primary),
-                              onDeleted: () => _setCategory(null),
-                              visualDensity: VisualDensity.compact,
-                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ],
                           const SizedBox(height: 16),
                           Text(
                             _selectedView == 'month' ? 'Monthly Spending' : (_selectedView == 'week' ? 'Weekly Spending' : "Today's Spending"),
@@ -404,7 +312,7 @@ class _ReportExplorerSheetState extends State<ReportExplorerSheet> {
                             style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.black87),
                           ),
                           Text(
-                            _selectedCategory == null ? 'Spending $_headlinePeriodLabel' : 'On $_selectedCategory $_headlinePeriodLabel',
+                            'Spending $_headlinePeriodLabel',
                             style: TextStyle(fontSize: 12.5, color: Colors.grey.shade500),
                           ),
                           const SizedBox(height: 16),
@@ -475,7 +383,6 @@ class _ReportExplorerSheetState extends State<ReportExplorerSheet> {
                               mode: _selectedView,
                               categoryBreakdown: _categoryBreakdown,
                               dailyBreakdown: _dailyBreakdown,
-                              selectedCategory: _selectedCategory,
                               categoryHealth: _categoryHealth,
                             ),
                           const SizedBox(height: 20),
@@ -529,35 +436,6 @@ class _TabChip extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: selected ? Colors.white : Colors.grey.shade700),
-        ),
-      ),
-    );
-  }
-}
-
-class _FilterChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _FilterChip({required this.label, required this.selected, required this.onTap});
-
-  static const Color _primary = Color(0xFF2DBE7F);
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected ? _primary.withValues(alpha: 0.12) : Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? _primary : Colors.grey.shade300),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? _primary : Colors.grey.shade700),
         ),
       ),
     );

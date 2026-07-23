@@ -7,8 +7,11 @@ import 'package:flutter/material.dart';
 /// with no spending render as an empty dot (nothing to show, not a
 /// zero-value bar); months after the current one are disabled -- there's
 /// no "future" report to view yet.
-class MonthStrip extends StatelessWidget {
-  static const Color _primary = Color(0xFF2DBE7F);
+///
+/// Auto-scrolls (centering) to whichever month is selected on open and
+/// whenever it changes -- opening the strip and having to manually
+/// scroll to see e.g. July defeated the point of a "glance" view.
+class MonthStrip extends StatefulWidget {
   static const List<String> _labels = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
@@ -26,6 +29,49 @@ class MonthStrip extends StatelessWidget {
     required this.onSelect,
   });
 
+  @override
+  State<MonthStrip> createState() => _MonthStripState();
+}
+
+class _MonthStripState extends State<MonthStrip> {
+  static const Color _primary = Color(0xFF2DBE7F);
+  static const double _itemWidth = 56;
+  static const double _stripHeight = 164;
+  static const double _maxBarHeight = 92;
+
+  final ScrollController _controller = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSelected());
+  }
+
+  @override
+  void didUpdateWidget(covariant MonthStrip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedMonth != widget.selectedMonth || oldWidget.year != widget.year) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSelected());
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _scrollToSelected() {
+    if (!_controller.hasClients) return;
+    final viewport = _controller.position.viewportDimension;
+    final target = (widget.selectedMonth - 1) * _itemWidth - (viewport / 2) + (_itemWidth / 2);
+    _controller.animateTo(
+      target.clamp(0.0, _controller.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+  }
+
   String _formatValue(double v) {
     if (v <= 0) return '';
     if (v >= 1000) return '${(v / 1000).toStringAsFixed(v >= 10000 ? 0 : 2)}K';
@@ -35,26 +81,27 @@ class MonthStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final isCurrentYear = year == now.year;
-    final maxVal = monthTotals.values.fold<double>(0, (a, b) => a > b ? a : b);
+    final isCurrentYear = widget.year == now.year;
+    final maxVal = widget.monthTotals.values.fold<double>(0, (a, b) => a > b ? a : b);
 
     return SizedBox(
-      height: 128,
+      height: _stripHeight,
       child: ListView.builder(
+        controller: _controller,
         scrollDirection: Axis.horizontal,
         itemCount: 12,
         itemBuilder: (context, i) {
           final month = i + 1;
-          final monthKey = '$year-${month.toString().padLeft(2, '0')}';
-          final value = monthTotals[monthKey] ?? 0.0;
-          final isSelected = month == selectedMonth;
+          final monthKey = '${widget.year}-${month.toString().padLeft(2, '0')}';
+          final value = widget.monthTotals[monthKey] ?? 0.0;
+          final isSelected = month == widget.selectedMonth;
           final isFuture = isCurrentYear && month > now.month;
-          final barHeight = maxVal > 0 ? (value / maxVal).clamp(0.0, 1.0) * 56 : 0.0;
+          final barHeight = maxVal > 0 ? (value / maxVal).clamp(0.0, 1.0) * _maxBarHeight : 0.0;
 
           return GestureDetector(
-            onTap: isFuture ? null : () => onSelect(month),
+            onTap: isFuture ? null : () => widget.onSelect(month),
             child: Container(
-              width: 56,
+              width: _itemWidth,
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -100,7 +147,7 @@ class MonthStrip extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    _labels[i],
+                    MonthStrip._labels[i],
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,

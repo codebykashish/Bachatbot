@@ -37,12 +37,12 @@ class WeekStrip extends StatelessWidget {
     final maxVal = buckets.fold<double>(0, (a, b) => a > b.total ? a : b.total);
 
     return SizedBox(
-      height: 128,
+      height: 164,
       child: Row(
         children: List.generate(buckets.length, (i) {
           final bucket = buckets[i];
           final isSelected = i == selectedIndex;
-          final barHeight = maxVal > 0 ? (bucket.total / maxVal).clamp(0.0, 1.0) * 56 : 0.0;
+          final barHeight = maxVal > 0 ? (bucket.total / maxVal).clamp(0.0, 1.0) * 92 : 0.0;
 
           return Expanded(
             child: GestureDetector(
