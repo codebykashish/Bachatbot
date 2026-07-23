@@ -349,6 +349,56 @@ async def get_monthly_report(
     }
 
 
+# ── GET /monthly-report/year-summary ────────────────────────────────────────
+
+@router.get("/monthly-report/year-summary")
+async def get_year_summary(
+    year: Optional[int] = Query(None, description="Calendar year, e.g. 2026. Defaults to current year."),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    One total expense per calendar month, for the Reports screen's month
+    strip. A single range query on monthKey (lexically sortable as
+    "YYYY-MM") rather than 12 separate /monthly-report calls -- the strip
+    needs one number per month, not each month's full category/daily
+    breakdown.
+    """
+    uid = current_user["uid"]
+    db = get_firestore()
+
+    target_year = year or datetime.now(timezone.utc).year
+
+    # Filters only on `status` (already indexed everywhere else in this
+    # codebase) and does the year/month narrowing in Python -- a second
+    # `monthKey` range filter would need a new composite Firestore index
+    # that doesn't exist yet, same tradeoff pattern_service.py already
+    # makes rather than requiring new infra for a read this small.
+    tx_docs = (
+        db.collection("users").document(uid).collection("transactions")
+        .where("status", "==", "confirmed")
+        .stream()
+    )
+
+    totals = {f"{target_year}-{m:02d}": 0.0 for m in range(1, 13)}
+    for doc in tx_docs:
+        data = doc.to_dict()
+        if data.get("isDeleted", False):
+            continue
+        if data.get("type") != "expense":
+            continue
+        month_key = data.get("monthKey")
+        if month_key in totals:
+            totals[month_key] += data.get("amount", 0.0)
+
+    return {
+        "success": True,
+        "data": {
+            "year": target_year,
+            "months": totals,
+        },
+    }
+
+
 # ── GET /daily-summary ──────────────────────────────────────────────────────
 
 @router.get("/daily-summary")
