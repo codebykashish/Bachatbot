@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../api_service.dart';
 import '../services/behavior_preview_service.dart';
+import '../utils/behavior_status.dart';
 import '../widgets/hold_tooltip.dart';
 
 /// Phase 13.3 — redesigned from a Duolingo-style reference, in our own
@@ -29,14 +30,6 @@ class _BehaviorScreenState extends State<BehaviorScreen> {
   static const Color _flame = Color(0xFFE67E22);
 
   static const List<int> _checkpoints = [7, 14, 30, 60, 90, 180, 365];
-
-  static const Map<String, ({String emoji, String label, Color color})> _statusMeta = {
-    'excellent': (emoji: '🌟', label: 'Excellent', color: Color(0xFF2DBE7F)),
-    'good': (emoji: '🟢', label: 'Good', color: Color(0xFF2DBE7F)),
-    'building': (emoji: '🟡', label: 'Building', color: Color(0xFFE67E22)),
-    'needs_improvement': (emoji: '🔴', label: 'Needs Improvement', color: Color(0xFFE0223B)),
-    'inactive': (emoji: '⚪', label: 'Just Getting Started', color: Color(0xFF8A8F98)),
-  };
 
   static const Map<String, String> _statusTooltips = {
     'excellent': "You're logging, spending healthily, and saving — all at once. Keep doing exactly this.",
@@ -308,7 +301,7 @@ class _BehaviorScreenState extends State<BehaviorScreen> {
 
   Widget _buildStatusCard() {
     final status = _summary?['status'] as String? ?? 'inactive';
-    final meta = _statusMeta[status] ?? _statusMeta['inactive']!;
+    final meta = behaviorStatusMeta(status);
     final tooltip = _statusTooltips[status] ?? _statusTooltips['inactive']!;
 
     return HoldTooltip(

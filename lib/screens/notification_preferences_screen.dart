@@ -15,12 +15,6 @@ class _NotificationPreferencesScreenState
 
   static const List<_Category> _categories = [
     _Category(
-      key: 'transactions',
-      icon: '🔔',
-      title: 'Transactions',
-      subtitle: 'When a transaction is logged or confirmed',
-    ),
-    _Category(
       key: 'budgetAlerts',
       icon: '📊',
       title: 'Budget Alerts',
