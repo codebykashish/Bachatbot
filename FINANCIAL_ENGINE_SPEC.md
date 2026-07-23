@@ -12630,3 +12630,340 @@ Grepped the entire backend for both code strings first — confirmed
 zero references remain in any Notification Engine matrix, test, or
 Eligibility table; the only remaining references are the two
 explicitly-different-concept usages named above.
+
+## Phase 22A — Weekly Reflection Philosophy — FROZEN
+
+Closes the one loop none of the existing engines answer: Health
+Engine answers "what's happening now," Diff Generator answers "what
+changed," Recommendation Engine answers "what should I do" — nothing
+answers "what did I learn about my money this week." Weekly
+Reflection closes that loop by *assembling* an existing week's
+already-computed facts into a human reflection; it is never a second
+financial engine and never recalculates anything another engine
+already owns.
+
+**Frozen rules**:
+1. Every fact comes from an existing engine's already-persisted
+   output, or a direct, unmodified read of raw transaction records for
+   the week's date range — never a new financial calculation.
+2. A week is the ISO week (Mon–Sun) `utils.is_in_current_week()`
+   already implies — reused, not invented. Only *completed* weeks get
+   a reflection; there is no partial/in-progress version.
+3. Category spending amounts come from a direct transaction date-range
+   query — daily snapshots only ever stored category *health status*,
+   never rupee amounts, so this is genuinely new plumbing, named
+   plainly as such rather than pretended to be pure reuse.
+4. Budget-relative claims are omitted entirely for a week crossing a
+   month boundary — this app's Financial Engine is entirely
+   `monthKey`-scoped and has no cross-month merge logic anywhere.
+5. Streak facts state the current live count only, never a
+   reconstructed day-by-day history — `behaviorState` only stores a
+   running counter, not a per-day log.
+6. Health "start of week → end of week" uses the *first* and *last*
+   daily snapshot actually found with a stored status in range. Fewer
+   than 2 → the health-change narrative is omitted, not guessed.
+7. Goal Risk and Recommendations reflect *today's* live computation,
+   not a reconstructed history — both are inherently forward-looking.
+8. Pattern Alerts for the week come from `generatedNotifications`
+   filtered by `createdAt` + `eventCode == UNUSUAL_SPENDING_DETECTED`
+   — zero new storage.
+9. Persisted at `users/{uid}/weeklyReflections/{weekStart}` once
+   generated, not recomputed live on every view.
+10. Never punish: a week with any negative signal still leads with
+    what went well before what needs attention.
+11. Hard caps to protect a "understand your week in 30 seconds"
+    promise: max 2 highlights, max 2 concerns, max 1 pattern, max 1
+    next step.
+12. **Account Existence Boundary**: a week whose entire span ended
+    before the account was created has no valid evidence to gather —
+    budgets aren't versioned anywhere in this app, so "the current
+    limit" would be silently misattributed as "the limit back then."
+    No reflection may be generated for such a week. A week that only
+    *partially* overlaps account creation is allowed — the pre-account
+    days simply have no transactions/snapshots to find, reported
+    honestly as zero/absent by every gather function, no special-
+    casing needed beyond this one boundary check.
+
+Architecture: `weekly_reflection_service.py`'s `gather_weekly_observation()`
+(Phase B) is a read-only evidence assembler — it must not judge, rank,
+summarize, or generate user-facing language. Phase C (interpretation),
+Phase D (composition), and Phase E (persistence) are separate,
+not-yet-built steps that consume Phase B's output; this boundary is
+deliberate and must not blur.
+
+## Phase 22B — Weekly Observation — FROZEN
+
+**Implementation**: `backend/services/weekly_reflection_service.py`,
+`gather_weekly_observation(db, uid, week_start, week_end) -> dict`.
+Five isolated gather helpers, each a plain read:
+- `_gather_transactions` — direct date-range query over raw
+  `transactions` (equality-filter-then-client-side-date-filter, the
+  same convention `pattern_service.py`/`budget_service.py` already
+  use, deliberately not `monthKey`-scoped so a boundary-crossing week
+  needs no merge logic).
+- `_gather_budgets` — category limits from `financial_engine.
+  get_summary()`, only when the week's two endpoints resolve to the
+  same `month_key` (rule 4); reports `monthKeysInvolved` either way.
+- `_gather_health` — loops the week's (at most) 7 calendar dates,
+  collecting whichever `dailySnapshots` docs actually exist; never
+  assumes 7.
+- `_gather_behavior` — live `behaviorState` streak counts (rule 5).
+- `_gather_pattern_alerts` — `generatedNotifications` filtered
+  client-side by event code and date (rule 8).
+Goal Risk and the primary Recommendation are read directly against
+the current `month_key` (rule 7), not gathered by a dedicated helper
+since neither needs date-range filtering.
+
+**Account Existence Boundary implementation**: `_account_created_date()`
+reads the user document's `createdAt`; `gather_weekly_observation()`
+raises `WeeklyReflectionError` (fail-fast, the same convention as
+`NotificationGeneratorError`/`snapshot_service._is_complete`) if
+`week_end` falls before that date. A missing/unavailable `createdAt`
+is treated as no restriction, never a false negative.
+
+**Verification**: `test_weekly_reflection_service.py` (new) — 12
+scenarios testing each gather helper in isolation against minimal
+fakes (category grouping, deleted/out-of-range exclusion, honest
+zero/absent on missing snapshots, the boundary's raise/no-raise
+decision), deliberately not attempting a full multi-engine fake for
+the whole pipeline (financial + health + recommendation + goal_service
+all at once) — reserved for real-account verification instead, the
+same treatment Pattern Spending Alerts and Goal Risk got for their own
+deep dependency chains. Full backend suite (16 files): zero
+regressions.
+
+Real-account verification against `BDpx6it7MeSZSrUJEBu9Bbwfp8l1`
+(account created 2026-07-17), five scenarios:
+1. **Normal single-month week** (Jul 20–26): 16 real transactions
+   (Rs 11,300 across 7 categories), single `month_key`, real budget
+   limits, `snapshotsFound: 2` (the scheduler had only run twice by
+   then) — confirms missing-snapshot handling naturally, not just in
+   a synthetic test.
+2. **Month-boundary week** (Jul 27–Aug 2): correctly detected
+   `monthKeysInvolved: ["2026-07", "2026-08"]` and returned empty
+   `categoryLimits`.
+3. **Pre-account week** (Jul 6–12): initially (before the boundary
+   guard existed) returned *stale current* budget limits for a week
+   that predated the account entirely — the exact bug the guard now
+   prevents. After the fix: raises `WeeklyReflectionError` correctly.
+4. **Partial-overlap week** (Jul 13–19, account created Jul 17):
+   allowed, correctly gathered real data only from the days that
+   existed (10 transactions, 1 snapshot on Jul 19) — zero for the
+   pre-account days, no special-casing needed.
+5. Missing snapshots — covered by scenario 1 above (2 of 7 found, not
+   assumed to be 7).
+
+## Phase 22C — Weekly Interpretation — FROZEN
+
+Answers "what mattered," strictly from Phase B's already-gathered
+evidence — `interpret_weekly_observation(observation: dict) -> dict`
+is a pure function: no Firestore, no database reads, no new financial
+calculations, no recommendation generation, no user-facing prose. It
+may only compare directly-observed weekly spending against a directly-
+retrieved budget limit, select from existing engine outputs, and apply
+the deterministic rules below.
+
+**The Interpretation Matrix, frozen**:
+
+*Highlights (max 2, priority order)*: `HEALTH_IMPROVED` (≥2 snapshots,
+last status healthier than first, rank red<amber<green) → `MEANINGFUL_STREAK`
+(any streak ≥3, highest value wins, tie-break saving>healthySpending>logging)
+→ `CATEGORY_WITHIN_BUDGET` (single-month week, `0 < spent < limit×0.8`,
+highest spending amount wins among qualifying categories).
+
+*Concerns (max 2, priority order)*: `HEALTH_WORSENED` (mirror of
+above) → `CATEGORY_HIGH_USAGE` (single-month week, `spent/limit ≥ 0.8`,
+highest ratio wins) → `LOW_ACTIVITY` (`transactionCount == 0` AND
+`loggingStreak == 0`, phrased gently — "there wasn't much activity,"
+never "you failed to track").
+
+**The 80% boundary is shared and exclusive by design**: strictly below
+80% is highlight territory, ≥80% (whether under or over 100%) is
+concern territory — no category can ever produce both a highlight and
+a concern in the same reflection. Reuses the exact 80% this codebase
+already treats as its budget-alert threshold everywhere else
+(`chat.py`/`transactions.py`/`confirm.py`'s own alert messages), not an
+invented number.
+
+*Pattern (max 1)*: from `patternAlerts`, most recent `createdAt` wins
+— all `UNUSUAL_SPENDING_DETECTED` notifications share the same
+Priority ("High"), so there is no severity field to differentiate
+multiple alerts in one week; recency is the only honest deterministic
+tiebreak.
+
+*Goal Context (max 1, independent of highlights/concerns — a goal
+never competes with spending/health signals for a capped slot)*: any
+at-risk goal wins over any healthy one; among at-risk goals, largest
+`shortfall` wins. Current-state language only — "currently Rs X short,"
+never "fell behind this week," since Goal Risk is a live signal, not a
+reconstructed history (Phase A rule 7).
+
+*Next Step (max 1)*: direct pass-through of `observation["recommendation"]`'s
+code — never a new recommendation invented here. `KEEP_CURRENT_HABITS`
+is omitted entirely (not worth occupying the one slot with "maintain
+what you're doing").
+
+**A real gap found while designing `GOAL_ON_TRACK`, fixed before
+Phase C could rely on it**: `compute_goal_risk()` (Phase 18) only
+attached `goalName` inside the at-risk branch — a healthy goal's entry
+was just `{"atRisk": False, "confidence": ...}`, no name available to
+phrase "your X goal is currently on track" honestly. Fixed by moving
+`goalName` onto every entry regardless of risk state — a purely
+additive, backward-compatible change (verified via the full suite,
+zero regressions), not a new lookup.
+
+**Verification**: `test_weekly_interpretation.py` (new, 20 scenarios)
+— every highlight/concern condition and its tie-break rule tested in
+isolation against plain synthetic observation dicts (no Firestore
+needed, Phase C is pure); the 80%-boundary exclusivity explicitly
+tested at exactly 80.0% to prove no overlap; the hard-cap-of-2 tested
+with 3 qualifying highlights, confirming the frozen priority order
+survives truncation. Full backend suite (17 files): zero regressions.
+
+Real-account verification against `BDpx6it7MeSZSrUJEBu9Bbwfp8l1`'s
+real Jul 20–26 observation: `MEANINGFUL_STREAK` (logging streak of
+exactly 3, the frozen minimum) and `CATEGORY_WITHIN_BUDGET` (Transport,
+Rs 700 of a Rs 2,910 limit, ~24%) as highlights; `CATEGORY_HIGH_USAGE`
+(Shopping, Rs 2,590 of a Rs 2,590 limit, exactly 100%) as the concern;
+no pattern (correctly none detected that week); `GOAL_AT_RISK` correctly
+selected the laptop goal (Rs 50,000 shortfall) over the smaller trip
+shortfall (Rs 10,000); `nextStep` correctly passed through the
+account's real primary recommendation (`START_RECOVERY_PLAN`). Health
+produced no claim either way — the account's real status stayed
+`red → red` across the 2 snapshots found, correctly recognized as no
+change rather than forced into a highlight or concern.
+
+## Phase 22D — Weekly Reflection Composition — FROZEN
+
+Turns Phase C's structured interpretation into structured, human-worded
+content — `compose_weekly_reflection(interpretation, observation) -> dict`.
+Still not final prose for a page: each section carries both its `type`
+(for the UI's own icon/color choice, the same convention every
+HealthTheme-driven screen already uses) and the composed `text`. No
+Firestore, no LLM call, no new calculation — template-based and fully
+deterministic, the same reasoning that kept Chat Context v2 (Phase 20)
+to two named facts rather than free-form generation.
+
+**Tone Principle, frozen**: the reflection is observational, supportive,
+and actionable. It describes facts without shame, exaggeration,
+artificial urgency, or moral judgment. Negative signals are presented
+as opportunities for awareness, never as personal failure.
+- Good: "Shopping reached your full budget this week." Avoid: "You
+  overspent on Shopping."
+- Good: "There wasn't much spending activity recorded this week."
+  Avoid: "You failed to track your spending."
+- Good: "You're currently Rs 12,000 short of your laptop goal." Avoid:
+  "You're falling behind on your laptop goal."
+
+**The Template Matrix, frozen** — every Interpretation type maps to
+exactly one wording rule, never a random or LLM-chosen variant:
+- `HEALTH_IMPROVED`/`HEALTH_WORSENED` — human labels (`green`→"healthy",
+  `amber`→"watch", `red`→"needs attention"), never the raw status word.
+- `MEANINGFUL_STREAK` — "You kept your {streak label} going for {N} days."
+- `CATEGORY_WITHIN_BUDGET` — names the category only, never states the
+  raw rupee numbers (the fact of staying within budget is the
+  highlight, not the arithmetic).
+- `CATEGORY_HIGH_USAGE` — "used its full budget" at ≥100%, else "reached
+  {percent}%" — the same tone-neutral framing either way.
+- `LOW_ACTIVITY` — "There wasn't much spending activity recorded this
+  week," never "failed" or "didn't track."
+- `UNUSUAL_SPENDING` (pattern) — "Your {category} spending was
+  unusually high compared with your recent pattern."
+- `GOAL_AT_RISK`/`GOAL_ON_TRACK` — current-state phrasing only
+  ("you're currently Rs X short of your {Goal} goal"), never "this
+  week" or any causal claim between this week's spending and the
+  goal's state (Phase A rule 7 carried through to wording).
+- Next Step — one template per Recommendation Engine code (mirrors,
+  never duplicates, `health_screen.dart`'s own `_recommendationCopy` —
+  both word the same existing recommendation for their own screen's
+  framing, neither invents a new one). Reads `category`/`goalName`
+  from the Observation's `recommendation` object, not from
+  Interpretation's `nextStep` (which deliberately only carries the
+  code) — the one place Composition reaches into Observation for a
+  factual value, exactly as scoped in the Phase 22 Design.
+
+**Section visibility rule**: `highlights`/`concerns` are empty lists
+when nothing qualified — never padded with a filler item. `pattern`/
+`goalContext`/`nextStep` are `None` when Phase C found nothing to say.
+The caller (Flutter/Chat) is expected to hide an empty section
+entirely, never render a placeholder ("no concerns this week!").
+
+**Verification**: `test_weekly_composition.py` (new, 17 scenarios) —
+every template's exact wording tested, including the tone-principle
+assertions themselves (e.g. explicitly asserting `"overspent"` and
+`"fail"` never appear in the composed text), the opening-line selection
+rule, and the Observation-read for Next Step's category/goalName.
+Full backend suite (18 files): zero regressions.
+
+Real-account verification against `BDpx6it7MeSZSrUJEBu9Bbwfp8l1`'s real
+Jul 20–26 week — the complete Observe → Interpret → Compose pipeline,
+first time run start to finish on real data:
+```
+Here's what stood out about your money this week.
+
+Highlights:
+- You kept your logging streak going for 3 days.
+- Your Transport spending stayed comfortably within budget.
+
+Concerns:
+- Shopping used its full budget this week. It may be worth keeping
+  an eye on it next week.
+
+Goal: You're currently Rs 50000 short of your Laptop goal.
+
+Next step: Consider reviewing your spending this week to help get
+back on track.
+```
+A genuinely readable, correctly-toned reflection from real data, not a
+synthetic example.
+
+## Phase 22E — Weekly Reflection Persistence — FROZEN
+
+One completed week → one reflection. Persisted at
+`users/{uid}/weeklyReflections/{weekStart}` — idempotent, the same
+discipline as `snapshot_service.create_daily_snapshot()` and
+`notification_repository.save()`: `generate_weekly_reflection()` checks
+for an existing document first and returns it unchanged if found,
+never recomputing or overwriting an already-generated week.
+
+**Document shape**: both the composed, human-worded reflection
+(`opening`/`highlights`/`concerns`/`pattern`/`goalContext`/`nextStep`,
+ready for direct display) and the raw structured `interpretation`
+object (for Chat or any future consumer needing facts, not wording) —
+per the Phase 22 Design's own principle that the document shouldn't
+force a re-derivation just to read the week differently.
+`observationMetadata` is a light trace (`transactionCount`,
+`snapshotsFound`, `monthKeysInvolved`) rather than the full raw
+evidence — the composed text already condenses what mattered;
+duplicating all of Phase B's category/transaction maps forever would
+be evidence hoarding, not reuse.
+
+**`most_recent_completed_week()`**: returns the prior full Mon–Sun week
+relative to today — the current, in-progress week is never eligible
+(Phase A rule 2).
+
+**Route**: `GET /weekly-reflection` (`routes/weekly_reflection.py`) —
+generates-on-first-request, thereafter a cheap idempotent read.
+Returns `{"success": True, "data": null}` (not an error) when the
+account is too new for any completed week to exist yet — the Account
+Existence Boundary surfacing as an honest "nothing to show," never a
+failure the client has to handle specially.
+
+**Verification**: `test_weekly_reflection_service.py` extended with 4
+scenarios — `most_recent_completed_week()`'s Monday-boundary math,
+`get_weekly_reflection()`'s honest `None` before anything's generated,
+and idempotency proven with a deliberately incomplete fake (no user
+doc, no other collections) that would crash if
+`generate_weekly_reflection()` ever reached past its own existence
+check into `gather_weekly_observation()` — it doesn't, confirming the
+short-circuit fires first. Full backend suite (18 files): zero
+regressions; `routes/weekly_reflection.py` imports and registers
+cleanly in `main.py`.
+
+Real-account verification against `BDpx6it7MeSZSrUJEBu9Bbwfp8l1`: a
+real document now exists at `weeklyReflections/2026-07-20`. Called
+`generate_weekly_reflection()` twice — both calls returned the
+identical `generatedAt` timestamp, confirming the second call never
+recomputed; `get_weekly_reflection()`'s independent read matched
+exactly. The full pipeline (Observe → Interpret → Compose → Persist)
+is now genuinely complete, backend to Firestore, on real data.

@@ -450,16 +450,15 @@ def compute_goal_risk(db, uid: str, month_key: str = None) -> dict:
             contribution = projected_contribution.get(gid, 0.0)
             at_risk = contribution < monthly_target
 
-            entry = {"atRisk": at_risk, "confidence": confidence}
+            # goalName, Phase 19's own need -- carried on every entry, not
+            # just at-risk ones (Phase 22C's GOAL_ON_TRACK needs to name a
+            # healthy goal too) -- a pass-through from get_summary()'s
+            # already-present goalProgress, never a new lookup.
+            entry = {"atRisk": at_risk, "confidence": confidence, "goalName": g.get("name")}
             if at_risk:
                 entry["shortfall"] = round(monthly_target - contribution, 2)
                 entry["monthlyTarget"] = monthly_target
                 entry["projectedContribution"] = round(contribution, 2)
-                # goalName, Phase 19's own need -- carried here since
-                # get_summary()'s goalProgress already has it; a
-                # pass-through, not a new lookup, so Goal Protection's
-                # recommendation can name the goal without a second fetch.
-                entry["goalName"] = g.get("name")
             goal_risk[gid] = entry
 
     generation_ms = round((time.perf_counter() - start) * 1000, 2)
