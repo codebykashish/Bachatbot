@@ -33,7 +33,6 @@ class NotificationPreferencesData(BaseModel):
     Philosophy"). Missing category = True (opt-out only, never opt-in
     silently) so existing accounts need no migration.
     """
-    transactions: bool = True
     budgetAlerts: bool = True
     financialHealth: bool = True
     recovery: bool = True

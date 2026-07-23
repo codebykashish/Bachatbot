@@ -12967,3 +12967,40 @@ identical `generatedAt` timestamp, confirming the second call never
 recomputed; `get_weekly_reflection()`'s independent read matched
 exactly. The full pipeline (Observe → Interpret → Compose → Persist)
 is now genuinely complete, backend to Firestore, on real data.
+
+## Phase 22F — Weekly Reflection, Flutter UI — FROZEN
+
+A dedicated screen, not a tab inside Reports or Health — "Your Week in
+Money" answers a different question ("what did I learn this week")
+than either of those, per the Phase 22 Design's own framing.
+
+**`WeeklyReflectionScreen`** (`frontend/lib/screens/weekly_reflection_screen.dart`):
+reads `GET /weekly-reflection` and renders only what the backend
+already composed — no calculation, no interpretation happens in
+Flutter. An honest empty state ("No reflection yet") renders when
+`data` is `null`, matching the Account Existence Boundary's own
+"nothing to show, not a failure" contract. Sections (`highlights`,
+`concerns`, `pattern`, `goalContext`, `nextStep`) render independently
+— any missing section is simply omitted, never a placeholder. Reuses
+the existing `HealthTheme` system for section coloring (green for
+highlights/next step, amber for concerns/pattern) rather than
+inventing new colors for this one screen.
+
+**Home preview card** (`_buildWeeklyReflectionCard()` in
+`home_screen.dart`): a small teaser — opening line (2-line clamp) +
+"`X` went well / `Y` to watch" counts — that deep-links into the full
+screen. Hidden entirely (`SizedBox.shrink()`) when `_weeklyReflection`
+is `null`, the same "absent, not empty-stated" rule as the dedicated
+screen. Fetched via the existing `_fetchGeneration` race-guard
+pattern, alongside the other Home data fetches.
+
+**Verification**: `flutter analyze` — zero issues on both files.
+Real-device verification against `BDpx6it7MeSZSrUJEBu9Bbwfp8l1`
+(already-generated `weeklyReflections/2026-07-20`) confirmed the card
+renders correctly. A separate real account
+(`ygvhKwkyulc2DCeq1WuT0fkDjQZ2`, created 2026-07-22) correctly showed
+no card at all — traced to the Account Existence Boundary honestly
+returning `data: null` because its only completed week (Jul 13–19)
+predates the account's creation, not a bug. This confirms the
+null-vs-populated behavior is working as designed on both a
+populated and an empty real account.
