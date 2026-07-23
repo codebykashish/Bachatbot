@@ -17,6 +17,24 @@ IconData categoryIcon(String? category) {
   }
 }
 
+// Same palette Categories/Home already use per category (previously
+// duplicated as a local `_catMeta` list in each of those screens) --
+// one source of truth so a category reads as the same color everywhere,
+// including the new Reports category breakdown list.
+Color categoryColor(String? category) {
+  switch (category?.toLowerCase()) {
+    case 'food':          return const Color(0xFFFF7043);
+    case 'transport':     return const Color(0xFF42A5F5);
+    case 'rent':          return const Color(0xFF26A69A);
+    case 'education':     return const Color(0xFF7E57C2);
+    case 'shopping':      return const Color(0xFFAB47BC);
+    case 'health':        return const Color(0xFFEF5350);
+    case 'bills':         return const Color(0xFFFFA726);
+    case 'entertainment': return const Color(0xFF8D6E63);
+    default:              return const Color(0xFFFFCA28);
+  }
+}
+
 // ── Alert time formatting ─────────────────────────────────────────────────────
 
 String formatAlertTime(String? isoString) {

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../api_service.dart';
-import '../widgets/adaptive_report_chart.dart';
+import '../widgets/month_strip.dart';
+import '../widgets/report_explorer_sheet.dart';
 import '../models/goal.dart';
 import '../theme/health_theme.dart';
 import 'goals_screen.dart';
@@ -19,42 +21,30 @@ class ReportsScreen extends StatefulWidget {
   State<ReportsScreen> createState() => ReportsScreenState();
 }
 
+/// The main Reports page stays a simple, always-"this month, right now"
+/// glance: a compact month graph, overall status, goals, projected
+/// savings. Tapping the graph opens ReportExplorerSheet -- a
+/// self-contained popup that owns all the actual exploration (Today/
+/// Week/Month tabs, category filter, year/month navigation, the chart,
+/// and the full category breakdown). Keeping that entirely separate
+/// means this page never needs to re-fetch or re-render just because
+/// someone browsed a different month inside the popup.
 class ReportsScreenState extends State<ReportsScreen>
     with WidgetsBindingObserver {
   static const Color _primary = Color(0xFF2DBE7F);
 
-  static const List<String> _categories = [
-    'Food', 'Transport', 'Rent', 'Education', 'Shopping', 'Health', 'Entertainment', 'Other',
-  ];
-
   bool _isLoading = true;
-  String _selectedView = 'today'; // 'today' | 'week' | 'month'
-  String? _selectedCategory; // null = "All"
-  String _selectedMonthKey = '';
   late DateTime _currentMonth;
+  late String _selectedMonthKey;
+  late int _selectedYear;
 
-  // Report data
   double _totalExpense = 0;
-  Map<String, double> _categoryBreakdown = {};
-  List<dynamic> _dailyBreakdown = [];
-  // Real Health Engine status (green/amber/red), not a local proxy --
-  // Phase 13.8's own reconciliation, the same duplicate-signal problem
-  // already found and fixed for the ambient overlay and Categories.
   String? _overallHealthStatus;
-  Map<String, String> _categoryHealth = {}; // category -> green/amber/red
   List<Goal> _goals = [];
-  Map<String, dynamic>? _projectedSavings; // Metrics Engine (Phase 2.7, Predictive) — null when no budgets exist
+  Map<String, dynamic>? _projectedSavings;
+  Map<String, double> _yearMonthTotals = {};
 
-  // Guards against an out-of-order response overwriting fresher data --
-  // _loadReport() can be triggered concurrently (refresh, view switch,
-  // month navigation, lifecycle resume); without this, whichever
-  // Future.wait resolves last wins the setState, even if it started
-  // first and is now stale. Same root cause already found and fixed on
-  // the Categories and Home screens.
   int _loadGeneration = 0;
-  // Recommendation, Recovery Plan, and Risk Flags moved to HealthScreen
-  // (Phase 13.4) — this screen stays focused on income/spending/savings;
-  // "am I okay, what should I do" now lives in one place, not two.
 
   @override
   void initState() {
@@ -63,6 +53,7 @@ class ReportsScreenState extends State<ReportsScreen>
     final now = DateTime.now();
     _currentMonth = DateTime(now.year, now.month, 1);
     _selectedMonthKey = _formatMonthKey(_currentMonth);
+    _selectedYear = now.year;
     _loadReport();
   }
 
@@ -81,65 +72,21 @@ class ReportsScreenState extends State<ReportsScreen>
 
   String _formatMonthKey(DateTime date) => '${date.year}-${date.month.toString().padLeft(2, '0')}';
 
-  String _formatMonthLabel(DateTime date) {
-    const months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December',
-    ];
-    return '${months[date.month - 1]} ${date.year}';
-  }
-
-  void _setView(String view) {
-    if (_selectedView == view) return;
-    setState(() {
-      _selectedView = view;
-      _isLoading = true;
-    });
-    _loadReport();
-  }
-
-  void _setCategory(String? category) {
-    if (_selectedCategory == category) return;
-    // Category filter is applied client-side from already-fetched data —
-    // no need to refetch, keeps the filter feeling instant.
-    setState(() => _selectedCategory = category);
-  }
-
-  void _previousMonth() {
-    final prev = DateTime(_currentMonth.year, _currentMonth.month - 1);
-    setState(() {
-      _currentMonth = prev;
-      _selectedMonthKey = _formatMonthKey(prev);
-      _isLoading = true;
-    });
-    _loadReport();
-  }
-
-  void _nextMonth() {
-    final now = DateTime.now();
-    if (_currentMonth.year == now.year && _currentMonth.month == now.month) return;
-    final next = DateTime(_currentMonth.year, _currentMonth.month + 1);
-    setState(() {
-      _currentMonth = next;
-      _selectedMonthKey = _formatMonthKey(next);
-      _isLoading = true;
-    });
-    _loadReport();
-  }
-
   Future<void> _loadReport() async {
     final myGen = ++_loadGeneration;
     try {
       final futures = await Future.wait([
-        ApiService.get('/monthly-report?monthKey=$_selectedMonthKey&view=$_selectedView'),
+        ApiService.get('/monthly-report?monthKey=$_selectedMonthKey&view=month'),
         ApiService.get('/goals'),
         ApiService.get('/financial-metrics?monthKey=$_selectedMonthKey'),
         ApiService.get('/financial-health?monthKey=$_selectedMonthKey'),
+        ApiService.get('/monthly-report/year-summary?year=$_selectedYear'),
       ]);
       final res = futures[0];
       final goalsRes = futures[1];
       final metricsRes = futures[2];
       final healthRes = futures[3];
+      final yearRes = futures[4];
 
       if (!mounted || myGen != _loadGeneration) return;
 
@@ -161,29 +108,22 @@ class ReportsScreenState extends State<ReportsScreen>
             ? (metricsRes['data']?['projectedSavings'] as Map<String, dynamic>?)
             : null;
 
-        // Health Engine (Phase 3.1/3.2) — the real overall/category
-        // status, read directly, never recomputed. Replaces the old
-        // local overallStatus proxy (Phase 13.8's reconciliation).
-        String? overallHealthStatus;
-        Map<String, String> categoryHealth = {};
-        if (healthRes['success'] == true) {
-          overallHealthStatus = healthRes['data']?['overallHealth']?['status'] as String?;
-          final rawCategoryHealth = healthRes['data']?['categoryHealth'] as Map?;
-          if (rawCategoryHealth != null) {
-            categoryHealth = rawCategoryHealth.map(
-              (k, v) => MapEntry(k.toString(), (v as Map)['status'] as String? ?? 'green'),
-            );
-          }
-        }
+        // Health Engine (Phase 3.1) — the real overall status, read
+        // directly, never recomputed.
+        final overallHealthStatus = healthRes['success'] == true
+            ? (healthRes['data']?['overallHealth']?['status'] as String?)
+            : null;
+
+        final yearMonthTotals = yearRes['success'] == true
+            ? _mapToDouble(yearRes['data']?['months'] ?? {})
+            : <String, double>{};
 
         setState(() {
           _totalExpense = (report?['totalExpense'] ?? 0).toDouble();
-          _categoryBreakdown = _mapToDouble(report?['categoryBreakdown'] ?? {});
-          _dailyBreakdown = report?['dailyBreakdown'] as List? ?? [];
           _overallHealthStatus = overallHealthStatus;
-          _categoryHealth = categoryHealth;
           _goals = goals;
           _projectedSavings = projectedSavings;
+          _yearMonthTotals = yearMonthTotals;
           _isLoading = false;
         });
       } else if (myGen == _loadGeneration) {
@@ -200,83 +140,16 @@ class ReportsScreenState extends State<ReportsScreen>
     return map.map<String, double>((k, v) => MapEntry(k.toString(), (v ?? 0).toDouble()));
   }
 
-  // ── Derived: the headline number for the current view + category ────────
-  double get _headlineAmount {
-    if (_selectedCategory == null) return _totalExpense;
-    if (_selectedView == 'today') return _categoryBreakdown[_selectedCategory] ?? 0;
-    double sum = 0;
-    for (final raw in _dailyBreakdown) {
-      final d = raw as Map<String, dynamic>;
-      final categories = (d['categories'] as Map?)?.cast<String, dynamic>() ?? {};
-      sum += (categories[_selectedCategory] as num?)?.toDouble() ?? 0;
-    }
-    return sum;
-  }
-
-  String get _headlinePeriodLabel {
-    switch (_selectedView) {
-      case 'today':
-        return 'today';
-      case 'week':
-        return 'this week';
-      default:
-        return 'this month';
-    }
-  }
-
-  void _openCategoryFilterSheet() {
+  void _openExplorer() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (sheetContext) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Filter by Category', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _CategoryChip(
-                    label: 'All',
-                    selected: _selectedCategory == null,
-                    onTap: () {
-                      _setCategory(null);
-                      Navigator.pop(sheetContext);
-                    },
-                  ),
-                  ..._categories.map((c) => _CategoryChip(
-                        label: c,
-                        selected: _selectedCategory == c,
-                        onTap: () {
-                          _setCategory(c);
-                          Navigator.pop(sheetContext);
-                        },
-                      )),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
+      backgroundColor: Colors.transparent,
+      builder: (_) => FractionallySizedBox(
+        heightFactor: 0.92,
+        child: ReportExplorerSheet(initialYear: _selectedYear, initialMonth: _currentMonth),
+      ),
     );
-  }
-
-  // Top spending category this period -- the "good insight" asked for,
-  // purely a client-side max() over data already fetched (no new
-  // backend call, no new logic beyond finding the largest existing number).
-  MapEntry<String, double>? get _topCategory {
-    if (_categoryBreakdown.isEmpty) return null;
-    final entries = _categoryBreakdown.entries.where((e) => e.value > 0).toList();
-    if (entries.isEmpty) return null;
-    entries.sort((a, b) => b.value.compareTo(a.value));
-    return entries.first;
   }
 
   @override
@@ -302,134 +175,68 @@ class ReportsScreenState extends State<ReportsScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Time range tabs + category filter icon ────────────
-                    Row(
-                      children: [
-                        Expanded(child: _TabChip(label: 'Today', selected: _selectedView == 'today', onTap: () => _setView('today'))),
-                        const SizedBox(width: 8),
-                        Expanded(child: _TabChip(label: 'Week', selected: _selectedView == 'week', onTap: () => _setView('week'))),
-                        const SizedBox(width: 8),
-                        Expanded(child: _TabChip(label: 'Month', selected: _selectedView == 'month', onTap: () => _setView('month'))),
-                        const SizedBox(width: 8),
-                        Stack(
-                          children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: Colors.grey.shade300),
-                              ),
-                              child: IconButton(
-                                icon: const Icon(Icons.tune_rounded, size: 20),
-                                color: _selectedCategory != null ? _primary : Colors.grey.shade700,
-                                tooltip: 'Filter by category',
-                                onPressed: _openCategoryFilterSheet,
-                              ),
-                            ),
-                            if (_selectedCategory != null)
-                              Positioned(
-                                right: 8,
-                                top: 8,
-                                child: Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: const BoxDecoration(color: _primary, shape: BoxShape.circle),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
+                    // ── Headline: this month's total, always ────────────────
+                    Text(
+                      'Monthly Spending',
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
                     ),
-
-                    // ── Small month navigator (Month tab only) ────────────
-                    if (_selectedView == 'month') ...[
-                      const SizedBox(height: 10),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.chevron_left, size: 20),
-                            onPressed: _previousMonth,
-                            color: Colors.grey.shade600,
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          Text(
-                            _formatMonthLabel(_currentMonth),
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.chevron_right, size: 20),
-                            onPressed: _currentMonth.year == DateTime.now().year && _currentMonth.month == DateTime.now().month
-                                ? null
-                                : _nextMonth,
-                            color: Colors.grey.shade600,
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        ],
-                      ),
-                    ],
-
-                    if (_selectedCategory != null) ...[
-                      const SizedBox(height: 10),
-                      Chip(
-                        label: Text(_selectedCategory!, style: const TextStyle(fontSize: 12, color: _primary, fontWeight: FontWeight.w600)),
-                        backgroundColor: _primary.withValues(alpha: 0.1),
-                        deleteIcon: const Icon(Icons.close, size: 16, color: _primary),
-                        onDeleted: () => _setCategory(null),
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                    ],
+                    const SizedBox(height: 4),
+                    Text(
+                      'Rs ${NumberFormat('#,##0.00').format(_totalExpense)}',
+                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87),
+                    ),
+                    Text(
+                      'Spending this month',
+                      style: TextStyle(fontSize: 12.5, color: Colors.grey.shade500),
+                    ),
 
                     const SizedBox(height: 16),
 
-                    // ── The chart ──────────────────────────────────────────
-                    AdaptiveReportChart(
-                      mode: _selectedView,
-                      categoryBreakdown: _categoryBreakdown,
-                      dailyBreakdown: _dailyBreakdown,
-                      selectedCategory: _selectedCategory,
-                      categoryHealth: _categoryHealth,
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // ── Headline stat line ─────────────────────────────────
-                    Text(
-                      _selectedCategory == null
-                          ? 'Rs ${_headlineAmount.toInt()} total $_headlinePeriodLabel'
-                          : 'Rs ${_headlineAmount.toInt()} on $_selectedCategory $_headlinePeriodLabel',
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.black87),
-                    ),
-
-                    // ── Top category insight -- a plain max() over data
-                    // already on screen, no new fetch, no new logic.
-                    // Only shown unfiltered; picking one category out as
-                    // "top" is meaningless once you're already looking at
-                    // just that one category.
-                    if (_selectedCategory == null && _topCategory != null) ...[
-                      const SizedBox(height: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    // ── Tap to explore: opens ReportExplorerSheet with the
+                    // full Today/Week/Month/category-filter/year-nav
+                    // experience. The month pills here are non-interactive
+                    // on purpose (onSelect is a no-op) -- any tap, pill or
+                    // not, opens the popup instead of switching months here.
+                    GestureDetector(
+                      onTap: _openExplorer,
+                      child: Container(
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey.shade200),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 3))],
                         ),
-                        child: Row(
+                        child: Column(
                           children: [
-                            Icon(Icons.insights_outlined, size: 18, color: Colors.grey.shade500),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'You spent the most on ${_topCategory!.key}: Rs ${_topCategory!.value.toInt()}',
-                                style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: MonthStrip(
+                                year: _selectedYear,
+                                selectedMonth: _currentMonth.month,
+                                monthTotals: _yearMonthTotals,
+                                onSelect: (_) {},
+                              ),
+                            ),
+                            Divider(height: 1, indent: 16, endIndent: 16, color: Colors.grey.shade200),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.bar_chart_rounded, size: 16, color: _primary),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Tap to explore by day, week, or category',
+                                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade500),
+                                    ),
+                                  ),
+                                  Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 18),
+                                ],
                               ),
                             ),
                           ],
                         ),
                       ),
-                    ],
+                    ),
 
                     const SizedBox(height: 20),
 
@@ -502,9 +309,6 @@ class ReportsScreenState extends State<ReportsScreen>
       ),
     );
   }
-
-  // Recommendation, Recovery Plan, and Risk Flags wording/cards moved to
-  // HealthScreen (Phase 13.4).
 
   // Projected Savings (Phase 2.7) — a forecast, never a fact, still
   // named honestly with "≈". Made bigger and bolder per feedback that
@@ -620,65 +424,6 @@ class ReportsScreenState extends State<ReportsScreen>
             );
           })),
         ],
-      ),
-    );
-  }
-}
-
-class _TabChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _TabChip({required this.label, required this.selected, required this.onTap});
-
-  static const Color _primary = Color(0xFF2DBE7F);
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected ? _primary : Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: selected ? _primary : Colors.grey.shade300),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: selected ? Colors.white : Colors.grey.shade700),
-        ),
-      ),
-    );
-  }
-}
-
-class _CategoryChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _CategoryChip({required this.label, required this.selected, required this.onTap});
-
-  static const Color _primary = Color(0xFF2DBE7F);
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected ? _primary.withValues(alpha: 0.12) : Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? _primary : Colors.grey.shade300),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? _primary : Colors.grey.shade700),
-        ),
       ),
     );
   }
