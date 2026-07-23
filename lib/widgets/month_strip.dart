@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 /// The Reports screen's Month view navigator -- one pill per calendar
 /// month (Jan-Dec of the given year), each showing that month's total
@@ -74,8 +75,7 @@ class _MonthStripState extends State<MonthStrip> {
 
   String _formatValue(double v) {
     if (v <= 0) return '';
-    if (v >= 1000) return '${(v / 1000).toStringAsFixed(v >= 10000 ? 0 : 2)}K';
-    return v.toInt().toString();
+    return NumberFormat('#,##0').format(v);
   }
 
   @override

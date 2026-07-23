@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 class WeekBucketData {
   final String label;
@@ -28,8 +29,7 @@ class WeekStrip extends StatelessWidget {
 
   String _formatValue(double v) {
     if (v <= 0) return '';
-    if (v >= 1000) return '${(v / 1000).toStringAsFixed(v >= 10000 ? 0 : 2)}K';
-    return v.toInt().toString();
+    return NumberFormat('#,##0').format(v);
   }
 
   @override

@@ -7,16 +7,17 @@ import 'month_strip.dart';
 import 'week_strip.dart';
 
 /// The full report-exploration experience -- time-range tabs, year/month
-/// navigation, the chart itself, and the category breakdown -- all live
-/// here, reached only by tapping the compact month graph on the main
-/// Reports page. Self-contained: fetches its own data independently of
+/// navigation, the chart itself, and the category breakdown -- reached
+/// only by tapping the compact month graph on the main Reports page.
+/// Self-contained: fetches its own data independently of
 /// ReportsScreenState, so switching tabs/months/weeks in here never
 /// disturbs the main page's own "this month, right now" view underneath.
 ///
 /// No category-type filter (Food/Transport/...) here -- the full
 /// CategoryBreakdownList below already answers "which category," so a
 /// separate filter narrowing the chart to one category at a time was
-/// redundant with what's already on screen.
+/// redundant. The breakdown list itself stays -- only the filter chips
+/// were the redundant part.
 class ReportExplorerSheet extends StatefulWidget {
   final int initialYear;
   final DateTime initialMonth;
@@ -210,25 +211,6 @@ class _ReportExplorerSheetState extends State<ReportExplorerSheet> {
     });
   }
 
-  Map<String, double> _weekCategoryBreakdown(int weekIndex) {
-    if (_dailyBreakdown.isEmpty) return {};
-    final lastDay = DateTime(_currentMonth.year, _currentMonth.month + 1, 0).day;
-    final ranges = [
-      [1, 7], [8, 14], [15, 21], [22, lastDay],
-    ];
-    final start = ranges[weekIndex][0];
-    final end = ranges[weekIndex][1];
-    final cats = <String, double>{};
-    for (final raw in _dailyBreakdown) {
-      final d = raw as Map<String, dynamic>;
-      final dayNum = (d['dayNum'] as num?)?.toInt() ?? 0;
-      if (dayNum < start || dayNum > end) continue;
-      final dayCats = (d['categories'] as Map?)?.cast<String, dynamic>() ?? {};
-      dayCats.forEach((k, v) => cats[k] = (cats[k] ?? 0) + (v as num? ?? 0).toDouble());
-    }
-    return cats;
-  }
-
   double get _headlineAmount {
     if (_selectedView == 'week') {
       final buckets = _weekBuckets;
@@ -249,6 +231,27 @@ class _ReportExplorerSheetState extends State<ReportExplorerSheet> {
     }
   }
 
+  Map<String, double> _weekCategoryBreakdown(int weekIndex) {
+    if (_dailyBreakdown.isEmpty) return {};
+    final lastDay = DateTime(_currentMonth.year, _currentMonth.month + 1, 0).day;
+    final ranges = [
+      [1, 7], [8, 14], [15, 21], [22, lastDay],
+    ];
+    final start = ranges[weekIndex][0];
+    final end = ranges[weekIndex][1];
+    final cats = <String, double>{};
+    for (final raw in _dailyBreakdown) {
+      final d = raw as Map<String, dynamic>;
+      final dayNum = (d['dayNum'] as num?)?.toInt() ?? 0;
+      if (dayNum < start || dayNum > end) continue;
+      final dayCats = (d['categories'] as Map?)?.cast<String, dynamic>() ?? {};
+      dayCats.forEach((k, v) => cats[k] = (cats[k] ?? 0) + (v as num? ?? 0).toDouble());
+    }
+    return cats;
+  }
+
+  // What the category breakdown list shows -- scoped to whichever
+  // period is currently selected, same rule the headline above follows.
   Map<String, double> get _categoryBreakdownForDisplay {
     if (_selectedView == 'week') {
       final buckets = _weekBuckets;

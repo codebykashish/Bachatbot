@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../api_service.dart';
+import '../widgets/goal_pie_chart.dart';
 import '../widgets/month_strip.dart';
 import '../widgets/report_explorer_sheet.dart';
 import '../models/goal.dart';
@@ -318,38 +319,55 @@ class ReportsScreenState extends State<ReportsScreen>
   Widget _buildProjectedSavingsCard() {
     final projection = _projectedSavings!;
     final value = (projection['value'] as num?)?.round() ?? 0;
-    final theme = value < 0 ? HealthTheme.forStatus('red') : HealthTheme.forStatus('green');
+    final isPositive = value >= 0;
+    final theme = isPositive ? HealthTheme.forStatus('green') : HealthTheme.forStatus('red');
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
       decoration: BoxDecoration(
-        color: theme.cardTint,
-        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [theme.accent.withValues(alpha: 0.16), theme.accent.withValues(alpha: 0.04)],
+        ),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: theme.accent.withValues(alpha: 0.25)),
       ),
-      child: Row(
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(color: theme.accent.withValues(alpha: 0.15), shape: BoxShape.circle),
-            child: Icon(Icons.savings_outlined, color: theme.accent, size: 22),
+          Positioned(
+            right: -10,
+            top: -18,
+            child: Icon(Icons.savings_rounded, size: 88, color: theme.accent.withValues(alpha: 0.10)),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Projected savings',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
-                ),
-                Text(
-                  '≈ Rs $value',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: theme.statusColor),
-                ),
-              ],
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text('Projected savings', style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
+                  const SizedBox(width: 6),
+                  Icon(
+                    isPositive ? Icons.trending_up_rounded : Icons.trending_down_rounded,
+                    size: 16,
+                    color: theme.statusColor,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '≈ Rs ${NumberFormat('#,##0').format(value)}',
+                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: theme.statusColor, height: 1.1),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                isPositive
+                    ? "You're on track to end the month with this much saved."
+                    : "At this pace, you're projected to end the month short.",
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600, height: 1.3),
+              ),
+            ],
           ),
         ],
       ),
@@ -389,35 +407,28 @@ class ReportsScreenState extends State<ReportsScreen>
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 4),
           ...(_goals.take(3).map((g) {
-            final progress = (g.percentComplete / 100).clamp(0.0, 1.0);
+            final remaining = (g.targetAmount - g.savedSoFar).clamp(0.0, double.infinity);
             return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(g.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
-                      ),
-                      Text(
-                        '${(progress * 100).toInt()}%',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _primary),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(value: progress, minHeight: 7, backgroundColor: Colors.grey.shade200, color: _primary),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    'Rs ${g.savedSoFar.toInt()} of Rs ${g.targetAmount.toInt()}',
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                  GoalPieChart(saved: g.savedSoFar, remaining: remaining, size: 56),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(g.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Rs ${g.savedSoFar.toInt()} of Rs ${g.targetAmount.toInt()}',
+                          style: TextStyle(fontSize: 11.5, color: Colors.grey.shade500),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),

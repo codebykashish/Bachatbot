@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../api_service.dart';
-import '../widgets/adaptive_report_chart.dart';
 import '../widgets/balance_card.dart';
+import '../widgets/month_strip.dart';
+import '../widgets/weekly_reflection_card_stack.dart';
 import '../services/health_theme_service.dart';
 import '../theme/health_theme.dart';
 import '../services/behavior_preview_service.dart';
@@ -14,7 +14,6 @@ import 'activity_feed_screen.dart';
 import 'reports_screen.dart';
 import 'income_page.dart';
 import 'health_screen.dart';
-import 'weekly_reflection_screen.dart';
 
 // State is public so MainScreen can call refresh() via GlobalKey
 class HomeScreen extends StatefulWidget {
@@ -55,7 +54,7 @@ class HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _metrics; // financialMetrics — the Metrics Engine's read-only interpretations (Phase 2)
   Map<String, dynamic>? _overallHealth; // Health Engine's judgment (Phase 3.1) — status/confidence/reasons, never computed here
   Map<String, dynamic>? _report;
-  List<dynamic> _dailyBreakdown = [];
+  Map<String, double> _yearMonthTotals = {};
 
   bool _hideAmounts = true;
   String _selectedMonth = '';
@@ -279,13 +278,28 @@ class HomeScreenState extends State<HomeScreen> {
       // returns alongside this (todayTotalExpense, yesterdaySummaryText,
       // etc.) are computed from the same full month's transactions
       // regardless of view, so switching view here doesn't touch them.
-      final res = await ApiService.get('/monthly-report?monthKey=$_selectedMonth&view=month');
+      // Year-summary powers the Monthly Report graph -- the same
+      // MonthStrip widget Reports uses, not a separate daily bar chart.
+      final now = DateTime.now();
+      final futures = await Future.wait([
+        ApiService.get('/monthly-report?monthKey=$_selectedMonth&view=month'),
+        ApiService.get('/monthly-report/year-summary?year=${now.year}'),
+      ]);
       if (!mounted || myGen != _fetchGeneration) return;
+      final res = futures[0];
+      final yearRes = futures[1];
       if (res['success'] == true) {
         setState(() {
           final data = res['data'];
           _report = data?['report'] ?? data;
-          _dailyBreakdown = _report?['dailyBreakdown'] as List? ?? [];
+        });
+      }
+      if (yearRes['success'] == true) {
+        final months = yearRes['data']?['months'] as Map?;
+        setState(() {
+          _yearMonthTotals = months == null
+              ? {}
+              : months.map<String, double>((k, v) => MapEntry(k.toString(), (v ?? 0).toDouble()));
         });
       }
     } catch (e) {
@@ -507,9 +521,10 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   // ── Your Week in Money (Phase 22) ───────────────────────────────────────
-  // A small preview only -- the full reflection lives on its own
-  // dedicated screen (WeeklyReflectionScreen), never inline here. Hidden
-  // entirely (not a placeholder) until the account has a real reflection.
+  // A small preview only -- tapping opens the full reflection as a
+  // swipeable stack of cards in a popup (WeeklyReflectionCardStack),
+  // not a separate page. Hidden entirely (not a placeholder) until the
+  // account has a real reflection.
   Widget _buildWeeklyReflectionCard() {
     final reflection = _weeklyReflection;
     if (reflection == null) return const SizedBox.shrink();
@@ -518,7 +533,12 @@ class HomeScreenState extends State<HomeScreen> {
     final concernCount = (reflection['concerns'] as List?)?.length ?? 0;
 
     return GestureDetector(
-      onTap: () => Navigator.push(context, slideUpRoute(const WeeklyReflectionScreen())),
+      onTap: () => showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => WeeklyReflectionCardStack(reflection: reflection),
+      ),
       child: Container(
         margin: const EdgeInsets.only(top: 12),
         padding: const EdgeInsets.all(16),
@@ -959,13 +979,13 @@ class HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 28),
 
-            // ── This Month's Spending Chart ───────────────────────────────
+            // ── Monthly Report Chart ──────────────────────────────────────
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  '${DateFormat('MMMM').format(DateTime.now())} Spending',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                const Text(
+                  'Monthly Report',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 TextButton(
                   onPressed: () {
@@ -996,9 +1016,19 @@ class HomeScreenState extends State<HomeScreen> {
                           );
                         }
                       },
-                    child: AdaptiveReportChart(
-                      mode: 'month',
-                      dailyBreakdown: _dailyBreakdown,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 3))],
+                      ),
+                      child: MonthStrip(
+                        year: DateTime.now().year,
+                        selectedMonth: DateTime.now().month,
+                        monthTotals: _yearMonthTotals,
+                        onSelect: (_) {},
+                      ),
                     ),
                   ),
 

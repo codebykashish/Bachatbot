@@ -287,12 +287,52 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             backgroundColor: Colors.white,
             elevation: 0.5,
             centerTitle: true,
+            // Streak now lives on the left (leading) on Home, instead of
+            // piling a third item onto the right alongside Goals and
+            // Notifications -- balances the bar instead of everything
+            // being right-oriented. Other tabs keep the back arrow there,
+            // same as before.
+            leadingWidth: _currentIndex > 0 ? null : 76,
             leading: _currentIndex > 0
                 ? IconButton(
                     icon: const Icon(Icons.arrow_back, color: Colors.black87),
                     onPressed: () => setState(() => _currentIndex = 0),
                   )
-                : null,
+                : Center(
+                    // The AppBar gives `leading` a fixed-size box
+                    // (leadingWidth x toolbar height); without Center,
+                    // the pill's Container stretched to fill that whole
+                    // box, painting its background edge-to-edge instead
+                    // of hugging the fire icon + number.
+                    child: GestureDetector(
+                      onTap: () => Navigator.push(context, slideUpRoute(const BehaviorScreen())),
+                      child: ValueListenableBuilder<int>(
+                        valueListenable: BehaviorPreviewService.loggingStreak,
+                        builder: (context, streak, child) => Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF3E8),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.local_fire_department, color: Color(0xFFE67E22), size: 18),
+                              const SizedBox(width: 3),
+                              Text(
+                                '$streak',
+                                style: const TextStyle(
+                                  color: Color(0xFFE67E22),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
             title: Text(
               _appBarTitle,
               style: TextStyle(
@@ -303,35 +343,6 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             ),
             iconTheme: const IconThemeData(color: Colors.black87),
             actions: [
-              GestureDetector(
-                onTap: () => Navigator.push(context, slideUpRoute(const BehaviorScreen())),
-                child: ValueListenableBuilder<int>(
-                  valueListenable: BehaviorPreviewService.loggingStreak,
-                  builder: (context, streak, child) => Container(
-                    margin: const EdgeInsets.only(right: 4),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFF3E8),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.local_fire_department, color: Color(0xFFE67E22), size: 18),
-                        const SizedBox(width: 3),
-                        Text(
-                          '$streak',
-                          style: const TextStyle(
-                            color: Color(0xFFE67E22),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
               IconButton(
                 icon: Container(
                   padding: const EdgeInsets.all(6),

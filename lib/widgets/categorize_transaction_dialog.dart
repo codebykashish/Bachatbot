@@ -42,6 +42,17 @@ Future<void> showCategorizeTransactionDialog(
             const Icon(Icons.receipt_long_rounded, color: Color(0xFF2B6CB0), size: 22),
             const SizedBox(width: 8),
             const Expanded(child: Text('Transaction Detected')),
+            // Postpone -- closes without confirming or discarding, so the
+            // pending transaction is still there to categorize later
+            // (from Activity Feed, or the usual chat yes/no flow).
+            InkWell(
+              onTap: isSaving ? null : () => Navigator.of(ctx).pop(),
+              borderRadius: BorderRadius.circular(16),
+              child: const Padding(
+                padding: EdgeInsets.all(4),
+                child: Icon(Icons.close, size: 20, color: Colors.grey),
+              ),
+            ),
           ],
         ),
         content: Column(
@@ -94,6 +105,27 @@ Future<void> showCategorizeTransactionDialog(
             onPressed: isSaving
                 ? null
                 : () async {
+                    final confirmed = await showDialog<bool>(
+                      context: ctx,
+                      builder: (confirmCtx) => AlertDialog(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        title: const Text('Discard this transaction?'),
+                        content: const Text("This can't be undone."),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(confirmCtx).pop(false),
+                            child: const Text('Cancel'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.of(confirmCtx).pop(true),
+                            style: TextButton.styleFrom(foregroundColor: Colors.red),
+                            child: const Text('Discard'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirmed != true) return;
+
                     setState(() => isSaving = true);
                     try {
                       await ApiService.post('/reject-transaction/$transactionId', {});

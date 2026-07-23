@@ -153,18 +153,42 @@ class ProfileScreenState extends State<ProfileScreen> {
 
       final token = await user.getIdToken(true);
 
-      // Step 1 — Upload image; backend handles Cloudinary
-      final uri = Uri.parse('${ApiService.baseUrl}/upload/profile-photo');
-      final request = http.MultipartRequest('POST', uri)
-        ..headers['Authorization'] = 'Bearer $token'
-        ..files.add(await http.MultipartFile.fromPath(
-          'file',
-          picked.path,
-          contentType: MediaType('image', 'jpeg'),
-        ));
+      // The picked file's real format (jpg/png/webp) -- previously
+      // hardcoded to image/jpeg regardless of what was actually picked
+      // (e.g. a PNG screenshot from the gallery), which could make the
+      // backend's content-type allow-list reject a perfectly valid image.
+      final ext = picked.path.split('.').last.toLowerCase();
+      final subtype = switch (ext) {
+        'png' => 'png',
+        'webp' => 'webp',
+        _ => 'jpeg',
+      };
 
-      final streamed = await request.send();
-      final uploadResponse = await http.Response.fromStream(streamed);
+      // Step 1 — Upload image; backend handles Cloudinary. Retried once
+      // on a network-level failure (ngrok's tunnel can occasionally drop
+      // an idle/reused connection mid-handshake) before giving up --
+      // a plain retry resolves the large majority of these transient
+      // failures without the user needing to notice anything happened.
+      Future<http.Response> attemptUpload() async {
+        final uri = Uri.parse('${ApiService.baseUrl}/upload/profile-photo');
+        final request = http.MultipartRequest('POST', uri)
+          ..headers['Authorization'] = 'Bearer $token'
+          ..files.add(await http.MultipartFile.fromPath(
+            'file',
+            picked.path,
+            contentType: MediaType('image', subtype),
+          ));
+        final streamed = await request.send();
+        return http.Response.fromStream(streamed);
+      }
+
+      http.Response uploadResponse;
+      try {
+        uploadResponse = await attemptUpload();
+      } catch (e) {
+        debugPrint('[ProfileScreen] Upload attempt 1 failed, retrying once: $e');
+        uploadResponse = await attemptUpload();
+      }
 
       if (uploadResponse.statusCode != 200) {
         final err = jsonDecode(uploadResponse.body);
@@ -203,7 +227,9 @@ class ProfileScreenState extends State<ProfileScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Photo upload failed: $e'),
+            content: Text(e.toString().toLowerCase().contains('handshake') || e.toString().toLowerCase().contains('socket')
+                ? "Couldn't connect. Check your internet connection and try again."
+                : 'Photo upload failed: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -412,6 +438,50 @@ class ProfileScreenState extends State<ProfileScreen> {
 
             const SizedBox(height: 20),
 
+            // ── Income / Expense ────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ActivityFeedScreen(initialFilter: 'transactions'),
+                        ),
+                      ),
+                      child: _statCard(
+                        icon: Icons.receipt_long_outlined,
+                        label: 'This Month Expense',
+                        value: 'Rs ${totalExpense.toStringAsFixed(0)}',
+                        color: Colors.red.shade50,
+                        valueColor: Colors.red.shade700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const IncomePage()),
+                      ).then((_) => loadProfile()),
+                      child: _statCard(
+                        icon: Icons.account_balance_wallet_outlined,
+                        label: 'My Income',
+                        value: 'Rs ${totalIncome.toStringAsFixed(0)}',
+                        color: const Color(0xFFEAFAF3),
+                        valueColor: _primary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
             // ── Achievements preview ──────────────────────────────────────────
             if (_milestones.isNotEmpty) ...[
               Padding(
@@ -511,49 +581,7 @@ class ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 20),
             ],
 
-            // ── Income / Expense ────────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const ActivityFeedScreen(initialFilter: 'transactions'),
-                        ),
-                      ),
-                      child: _statCard(
-                        icon: Icons.receipt_long_outlined,
-                        label: 'This Month Expense',
-                        value: 'Rs ${totalExpense.toStringAsFixed(0)}',
-                        color: Colors.red.shade50,
-                        valueColor: Colors.red.shade700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const IncomePage()),
-                      ).then((_) => loadProfile()),
-                      child: _statCard(
-                        icon: Icons.account_balance_wallet_outlined,
-                        label: 'My Income',
-                        value: 'Rs ${totalIncome.toStringAsFixed(0)}',
-                        color: const Color(0xFFEAFAF3),
-                        valueColor: _primary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -575,11 +603,17 @@ class ProfileScreenState extends State<ProfileScreen> {
   }) {
     return Column(
       children: [
-        Text(emoji, style: const TextStyle(fontSize: 20)),
-        const SizedBox(height: 6),
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
+          alignment: Alignment.center,
+          child: Text(emoji, style: const TextStyle(fontSize: 18)),
+        ),
+        const SizedBox(height: 8),
         Text(value, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: color), textAlign: TextAlign.center),
         const SizedBox(height: 2),
-        Text(label, style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500)),
+        Text(label, style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
       ],
     );
   }
@@ -591,11 +625,18 @@ class ProfileScreenState extends State<ProfileScreen> {
         color: theme.cardTint,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: theme.accent.withValues(alpha: 0.25)),
+        boxShadow: [BoxShadow(color: theme.accent.withValues(alpha: 0.12), blurRadius: 14, offset: const Offset(0, 6))],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.arrow_circle_right_outlined, color: theme.accent, size: 22),
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(color: theme.accent.withValues(alpha: 0.15), shape: BoxShape.circle),
+            alignment: Alignment.center,
+            child: Icon(Icons.lightbulb_outline_rounded, color: theme.accent, size: 20),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -630,8 +671,14 @@ class ProfileScreenState extends State<ProfileScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: valueColor, size: 22),
-          const SizedBox(height: 8),
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(color: valueColor.withValues(alpha: 0.14), shape: BoxShape.circle),
+            alignment: Alignment.center,
+            child: Icon(icon, color: valueColor, size: 18),
+          ),
+          const SizedBox(height: 10),
           Text(label,
               style: const TextStyle(
                   fontSize: 12, color: Colors.black54, height: 1.4)),
