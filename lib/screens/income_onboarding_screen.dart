@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../api_service.dart';
-import 'add_edit_goal_screen.dart';
 import 'category_budget_onboarding_screen.dart';
 import 'main_screen.dart';
 
@@ -83,18 +82,11 @@ class _IncomeOnboardingScreenState extends State<IncomeOnboardingScreen> {
 
   void _navigateToCategories(double inHand, double inBank, double online) {
     final totalIncome = inHand + inBank + online;
-    // Optional savings-goal step slots in here — skippable either way,
-    // then continues to category budgeting exactly as before.
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => AddEditGoalScreen(
-          showSkip: true,
-          onSkip: (ctx) => _goToCategoryBudgets(ctx, totalIncome),
-          onDone: (ctx) => _goToCategoryBudgets(ctx, totalIncome),
-        ),
-      ),
-    );
+    // The savings-goal step lives at the end of CategoryBudgetOnboarding-
+    // Screen's own flow (its "savings intro" step) -- it used to also show
+    // here, right after income, which meant the user saw it twice before
+    // ever reaching category budgeting. Go straight there now.
+    _goToCategoryBudgets(context, totalIncome);
   }
 
   void _goToCategoryBudgets(BuildContext ctx, double totalIncome) {
