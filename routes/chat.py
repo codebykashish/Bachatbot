@@ -897,7 +897,7 @@ async def chat(
         try:
             db.collection("users").document(uid).collection("alerts").document().set({
                 "type": "pending_transaction",
-                "message": f"Rs {int(amount)} {tx_type} detected from {source_app}. Tap to categorize.",
+                "message": f"Rs {int(amount)} {tx_type} detected from {source_app}. Tap to confirm." if tx_type == "income" else f"Rs {int(amount)} {tx_type} detected from {source_app}. Tap to categorize.",
                 "category": None,
                 "severity": "medium",
                 "isRead": False,
@@ -906,6 +906,7 @@ async def chat(
                 "relatedTransactionId": tx_ref.id,
                 "amount": float(amount),
                 "sourceApp": source_app,
+                "txType": tx_type,
                 "createdAt": SERVER_TIMESTAMP,
             })
         except Exception as _pa_err:

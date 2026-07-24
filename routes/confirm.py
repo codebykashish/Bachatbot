@@ -280,8 +280,34 @@ async def confirm_transaction(
         except Exception as pattern_err:
             print(f"[CONFIRM] [PATTERN] error (non-fatal): {pattern_err}")
 
-    # income → no budget update (intentional)
-
+    # income → update user doc income buckets and trigger recompute
+    if tx_type == "income":
+        try:
+            user_ref = db.collection("users").document(uid)
+            udoc = user_ref.get().to_dict() or {}
+            income_map = udoc.get("income") or {}
+            
+            # Simple heuristic based on sourceApp
+            source_app = tx.get("sourceApp", "").lower()
+            if "esewa" in source_app or "khalti" in source_app or "ime" in source_app:
+                bucket = "onlineBanking"
+            else:
+                bucket = "inBank"
+                
+            current_val = float(income_map.get(bucket, 0.0))
+            new_val = current_val + float(amount)
+            
+            user_ref.update({
+                f"income.{bucket}": new_val,
+                "income.updatedAt": SERVER_TIMESTAMP,
+                "updatedAt": SERVER_TIMESTAMP,
+            })
+            
+            from services.financial_engine import recompute as engine_recompute, RecomputeReason
+            engine_recompute(db, uid, month_key, reason=RecomputeReason.INCOME_UPDATED)
+            print(f"[CONFIRM] Incremented income.{bucket} by {amount}. New val: {new_val}")
+        except Exception as e:
+            print(f"[CONFIRM] Error updating income bucket: {e}")
     # ── 5b. Update the original "pending_transaction" alert in place ─────
     # Without this it stays stuck showing "Transaction Detected" forever —
     # tappable again, and a second confirm attempt fails silently since the
