@@ -167,6 +167,15 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     _tourFadeCtrl.dispose();
     _pulseCtrl.dispose();
     MonthEventService.eventNotifier.removeListener(_monthBannerListener);
+    // Tear down user-scoped Firestore listeners so they don't leak into
+    // the next account that logs in on the same app session.
+    // Without this, the singletons hold _initialized=true and
+    // init(newUid) is silently skipped, causing all three bugs:
+    //   1. Activity feed shows previous account's data
+    //   2. 80% budget popup never fires for new account
+    //   3. Budget transfer system notification never fires for new account
+    ActivityFeedService().dispose();
+    AlertPopupService().dispose();
     super.dispose();
   }
 
