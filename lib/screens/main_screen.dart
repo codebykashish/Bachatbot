@@ -316,7 +316,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                     child: GestureDetector(
                       onTap: () => Navigator.push(context, slideUpRoute(const BehaviorScreen())),
                       child: ValueListenableBuilder<int>(
-                        valueListenable: BehaviorPreviewService.loggingStreak,
+                        valueListenable: BehaviorPreviewService.healthySpendingStreak,
                         builder: (context, streak, child) => Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(

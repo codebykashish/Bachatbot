@@ -239,7 +239,7 @@ class ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  int get _loggingStreak => (_behaviorState?['logging']?['currentStreak'] as num?)?.toInt() ?? 0;
+  int get _healthySpendingStreak => (_behaviorState?['spending']?['currentHealthyStreak'] as num?)?.toInt() ?? 0;
 
   void _openSettings() {
     Navigator.push(
@@ -405,7 +405,7 @@ class ProfileScreenState extends State<ProfileScreen> {
                         child: _overviewStat(
                           emoji: '🔥',
                           label: 'Streak',
-                          value: '$_loggingStreak days',
+                          value: '$_healthySpendingStreak days',
                           color: const Color(0xFFE67E22),
                         ),
                       ),

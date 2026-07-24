@@ -45,7 +45,7 @@ class _BehaviorScreenState extends State<BehaviorScreen> {
   List<dynamic> _milestones = [];
 
   DateTime _calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
-  Set<int> _loggedDays = {};
+  Map<int, String> _dailyHealthColors = {};
   bool _calendarLoading = true;
 
   @override
@@ -87,17 +87,23 @@ class _BehaviorScreenState extends State<BehaviorScreen> {
       final snap = await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
-          .collection('transactions')
-          .where('monthKey', isEqualTo: monthKey)
+          .collection('snapshots')
+          .where('snapshotDate', isGreaterThanOrEqualTo: '$monthKey-01')
+          .where('snapshotDate', isLessThanOrEqualTo: '$monthKey-31')
           .get();
-      final days = <int>{};
+      final days = <int, String>{};
       for (final doc in snap.docs) {
         final data = doc.data();
-        if (data['isDeleted'] == true) continue;
-        final createdAt = data['createdAt'];
-        if (createdAt is Timestamp) days.add(createdAt.toDate().day);
+        final health = data['health']?['overallHealthStatus'] as String?;
+        if (health != null) {
+          final dateStr = doc.id; // YYYY-MM-DD
+          try {
+            final day = int.parse(dateStr.split('-')[2]);
+            days[day] = health;
+          } catch (_) {}
+        }
       }
-      if (mounted) setState(() => _loggedDays = days);
+      if (mounted) setState(() => _dailyHealthColors = days);
     } catch (e) {
       debugPrint('[BehaviorScreen] calendar fetch error: $e');
     } finally {
@@ -111,12 +117,12 @@ class _BehaviorScreenState extends State<BehaviorScreen> {
     _fetchCalendarMonth(next);
   }
 
-  int get _loggingStreak => (_state?['logging']?['currentStreak'] as num?)?.toInt() ?? 0;
-  int get _bestLoggingStreak => (_state?['logging']?['bestStreak'] as num?)?.toInt() ?? 0;
+  int get _healthyStreak => (_state?['spending']?['currentHealthyStreak'] as num?)?.toInt() ?? 0;
+  int get _bestHealthyStreak => (_state?['spending']?['bestHealthyStreak'] as num?)?.toInt() ?? 0;
 
   int get _nextCheckpoint {
     for (final c in _checkpoints) {
-      if (_loggingStreak < c) return c;
+      if (_healthyStreak < c) return c;
     }
     return _checkpoints.last;
   }
@@ -178,12 +184,12 @@ class _BehaviorScreenState extends State<BehaviorScreen> {
           Transform.translate(
             offset: const Offset(0, -18),
             child: Text(
-              '$_loggingStreak',
+              '$_healthyStreak',
               style: const TextStyle(fontSize: 36, fontWeight: FontWeight.w900, color: Colors.black87),
             ),
           ),
           Text(
-            'day streak!',
+            'days of healthy spending!',
             style: TextStyle(fontSize: 16, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
           ),
         ],
@@ -193,9 +199,9 @@ class _BehaviorScreenState extends State<BehaviorScreen> {
 
   Widget _buildStreakGoal() {
     final target = _nextCheckpoint;
-    final progress = (_loggingStreak / target).clamp(0.0, 1.0);
+    final progress = (_healthyStreak / target).clamp(0.0, 1.0);
     return HoldTooltip(
-      message: 'Log at least one expense every day to keep this going. Miss a day and it resets to 1.',
+      message: 'Spend healthily every day to keep this going. A red health status breaks the streak.',
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -209,7 +215,7 @@ class _BehaviorScreenState extends State<BehaviorScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('Next goal', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                Text('$_loggingStreak / $target days', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                Text('$_healthyStreak / $target days', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
               ],
             ),
             const SizedBox(height: 10),
@@ -223,7 +229,7 @@ class _BehaviorScreenState extends State<BehaviorScreen> {
               ),
             ),
             const SizedBox(height: 6),
-            Text('Best ever: $_bestLoggingStreak days', style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+            Text('Best ever: $_bestHealthyStreak days', style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
           ],
         ),
       ),
@@ -277,22 +283,29 @@ class _BehaviorScreenState extends State<BehaviorScreen> {
   }
 
   Widget _buildDayCell(int day, {required bool isToday}) {
-    final logged = _loggedDays.contains(day);
+    final status = _dailyHealthColors[day];
+    final hasStatus = status != null;
+    
+    Color cellColor = Colors.transparent;
+    if (status == 'green') cellColor = _primary;
+    if (status == 'yellow') cellColor = Colors.amber;
+    if (status == 'red') cellColor = Colors.red;
+
     return Padding(
       padding: const EdgeInsets.all(3),
       child: Container(
         decoration: BoxDecoration(
-          color: logged ? _flame : Colors.transparent,
+          color: cellColor,
           shape: BoxShape.circle,
-          border: isToday ? Border.all(color: _primary, width: 2) : null,
+          border: isToday ? Border.all(color: Colors.blueAccent, width: 2) : null,
         ),
         alignment: Alignment.center,
         child: Text(
           '$day',
           style: TextStyle(
             fontSize: 12,
-            fontWeight: logged || isToday ? FontWeight.bold : FontWeight.normal,
-            color: logged ? Colors.white : Colors.black87,
+            fontWeight: hasStatus || isToday ? FontWeight.bold : FontWeight.normal,
+            color: hasStatus ? Colors.white : Colors.black87,
           ),
         ),
       ),
@@ -328,17 +341,17 @@ class _BehaviorScreenState extends State<BehaviorScreen> {
   }
 
   Widget _buildOtherStreaks() {
-    final spending = _state?['spending'] as Map<String, dynamic>? ?? {};
+    final logging = _state?['logging'] as Map<String, dynamic>? ?? {};
     final saving = _state?['saving'] as Map<String, dynamic>? ?? {};
     final recovery = _state?['recovery'] as Map<String, dynamic>? ?? {};
 
     final rows = [
       (
-        icon: Icons.favorite,
-        color: _primary,
-        label: 'Healthy spending',
-        value: spending['currentHealthyStreak'] ?? 0,
-        tooltip: "Stay within a healthy spending pace each day to grow this. One overspent day resets it.",
+        icon: Icons.edit_document,
+        color: _flame,
+        label: 'Daily logging',
+        value: logging['currentStreak'] ?? 0,
+        tooltip: "Log at least one expense every day to grow this. Miss a day and it resets.",
       ),
       (
         icon: Icons.savings,
