@@ -11,6 +11,7 @@ Future<void> showCategorizeTransactionDialog(
   required String transactionId,
   required double amount,
   required String sourceApp,
+  String txType = 'expense',
 }) async {
   const primary = Color(0xFF2DBE7F);
   const categories = [
@@ -60,12 +61,15 @@ Future<void> showCategorizeTransactionDialog(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Rs ${amount.toInt()} detected from $sourceApp. Which category?',
+              txType == 'income'
+                  ? 'Rs ${amount.toInt()} income detected from $sourceApp. Keep this?'
+                  : 'Rs ${amount.toInt()} detected from $sourceApp. Which category?',
               style: const TextStyle(fontSize: 13),
             ),
             const SizedBox(height: 14),
-            Wrap(
-              spacing: 8,
+            if (txType != 'income')
+              Wrap(
+                spacing: 8,
               runSpacing: 8,
               children: categories.map((cat) {
                 final isSelected = selectedCategory == cat;
@@ -136,14 +140,14 @@ Future<void> showCategorizeTransactionDialog(
             child: const Text('Discard'),
           ),
           ElevatedButton(
-            onPressed: (isSaving || selectedCategory == null)
+            onPressed: (isSaving || (txType != 'income' && selectedCategory == null))
                 ? null
                 : () async {
                     setState(() => isSaving = true);
                     try {
                       final res = await ApiService.post(
                         '/confirm-transaction/$transactionId',
-                        {'category': selectedCategory},
+                        txType == 'income' ? {'category': 'Income'} : {'category': selectedCategory},
                       );
                       final pendingRebalance =
                           res['data']?['budgetUpdate']?['pendingRebalance'];

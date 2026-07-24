@@ -188,6 +188,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
           transactionId: transactionId,
           amount: (alert['amount'] as num?)?.toDouble() ?? 0,
           sourceApp: alert['sourceApp'] as String? ?? 'Unknown',
+          txType: alert['txType'] as String? ?? 'expense',
         );
       }
       return;

@@ -157,6 +157,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
           transactionId: transactionId,
           amount: (alert['amount'] as num?)?.toDouble() ?? 0,
           sourceApp: alert['sourceApp'] as String? ?? 'Unknown',
+          txType: alert['txType'] as String? ?? 'expense',
         );
         if (mounted) await _fetchAlerts();
       }

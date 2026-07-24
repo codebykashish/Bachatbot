@@ -41,46 +41,46 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyBqvmStcdC84niv_TNwxRqeg36WwGZZMCQ',
-    appId: '1:778584838320:android:f194d32be6ca82d3632b75',
-    messagingSenderId: '778584838320',
-    projectId: 'bachatbot2-64e23',
-    storageBucket: 'bachatbot2-64e23.firebasestorage.app',
+    apiKey: 'AIzaSyAUB7K0EloJgMkbuoJNL1Feluskb14Mjxs',
+    appId: '1:269626615168:android:41daaaf024a6e39c104d65',
+    messagingSenderId: '269626615168',
+    projectId: 'bachatbot3',
+    storageBucket: 'bachatbot3.firebasestorage.app',
   );
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyCOeSyiTn-zIAQ80qEsMYSel9S4HzyNuiM',
-    appId: '1:778584838320:web:e91be64b42500162632b75',
-    messagingSenderId: '778584838320',
-    projectId: 'bachatbot2-64e23',
-    authDomain: 'bachatbot2-64e23.firebaseapp.com',
-    storageBucket: 'bachatbot2-64e23.firebasestorage.app',
-    measurementId: 'G-M2M96DZ01C',
+    apiKey: 'AIzaSyBSfb8SEqwxgnQwGWTo9uLbX32eVBfoNao',
+    appId: '1:269626615168:web:7360f1492ae9380e104d65',
+    messagingSenderId: '269626615168',
+    projectId: 'bachatbot3',
+    authDomain: 'bachatbot3.firebaseapp.com',
+    storageBucket: 'bachatbot3.firebasestorage.app',
+    measurementId: 'G-PMC64E0DCT',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyCOeSyiTn-zIAQ80qEsMYSel9S4HzyNuiM',
-    appId: '1:778584838320:web:ea3a001e1ede7de1632b75',
-    messagingSenderId: '778584838320',
-    projectId: 'bachatbot2-64e23',
-    authDomain: 'bachatbot2-64e23.firebaseapp.com',
-    storageBucket: 'bachatbot2-64e23.firebasestorage.app',
-    measurementId: 'G-Q26S0G7N5P',
+    apiKey: 'AIzaSyBSfb8SEqwxgnQwGWTo9uLbX32eVBfoNao',
+    appId: '1:269626615168:web:48ffe4946a3d17aa104d65',
+    messagingSenderId: '269626615168',
+    projectId: 'bachatbot3',
+    authDomain: 'bachatbot3.firebaseapp.com',
+    storageBucket: 'bachatbot3.firebasestorage.app',
+    measurementId: 'G-JS6BBLYJ7F',
   );
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyCejo1mPRqvQZU1dadNq4X5zhdo1PUUnU8',
-    appId: '1:778584838320:ios:a63444fbfb849430632b75',
-    messagingSenderId: '778584838320',
-    projectId: 'bachatbot2-64e23',
-    storageBucket: 'bachatbot2-64e23.firebasestorage.app',
+    apiKey: 'AIzaSyD2v4wM_NNr6MAqHPB67zabTjrgpC00CsI',
+    appId: '1:269626615168:ios:d1fda03495c6b6b4104d65',
+    messagingSenderId: '269626615168',
+    projectId: 'bachatbot3',
+    storageBucket: 'bachatbot3.firebasestorage.app',
     iosBundleId: 'com.example.bachatbot',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyCejo1mPRqvQZU1dadNq4X5zhdo1PUUnU8',
-    appId: '1:778584838320:ios:a63444fbfb849430632b75',
-    messagingSenderId: '778584838320',
-    projectId: 'bachatbot2-64e23',
-    storageBucket: 'bachatbot2-64e23.firebasestorage.app',
+    apiKey: 'AIzaSyD2v4wM_NNr6MAqHPB67zabTjrgpC00CsI',
+    appId: '1:269626615168:ios:d1fda03495c6b6b4104d65',
+    messagingSenderId: '269626615168',
+    projectId: 'bachatbot3',
+    storageBucket: 'bachatbot3.firebasestorage.app',
     iosBundleId: 'com.example.bachatbot',
   );
 }
