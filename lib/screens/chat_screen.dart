@@ -4,6 +4,7 @@ import '../api_service.dart';
 import '../models/pending_transaction.dart';
 import '../services/month_event_service.dart';
 import '../widgets/rebalance_confirm_dialog.dart';
+import '../widgets/chat_visual_cards.dart';
 
 /// Callback signature for chat intent-based refresh.
 /// [refreshHome] and [refreshCategories] are flags indicating what to refresh.
@@ -315,6 +316,9 @@ class _ChatScreenState extends State<ChatScreen> {
         // needsConfirmation: backend stores this state; user types "ho"/"yes"
         // or "hudaina"/"no" to resolve. Never block the UI with a spinner.
         final needsConfirmation = data?['needsConfirmation'] == true;
+        
+        final visualData = data?['visual'] as Map<String, dynamic>?;
+        final visualPayload = visualData != null ? VisualPayload.fromJson(visualData) : null;
 
         final assistantId = 'bot_${DateTime.now().millisecondsSinceEpoch}';
 
@@ -331,6 +335,7 @@ class _ChatScreenState extends State<ChatScreen> {
             'needsConfirmation': needsConfirmation,
             'id': assistantId,
             'createdAt': DateTime.now().toUtc().toIso8601String(),
+            if (visualPayload != null) 'visual': visualPayload,
           });
           _isLoading = false;
           _isFirstMessage = false;
@@ -555,6 +560,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
       // After assistant messages, check if there's a pending card to render.
       if (msg['role'] == 'assistant') {
+        // Visual Card (Budget, Daily Spend, Chart, Alert)
+        final visual = msg['visual'] as VisualPayload?;
+        if (visual != null) {
+          items.add(ChatVisualCard(payload: visual, key: ValueKey('vis_$docId')));
+        }
+
         // Chat-initiated pending card
         final card = _pendingCards[docId];
         if (card != null) {
