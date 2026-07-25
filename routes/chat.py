@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from firebase_config import get_firestore
 from auth import get_current_user
-from gemini import process_chat_message, parse_notification_text
+from ai_service import process_chat_message, parse_notification_text
 from schemas.categories import EXPENSE_CATEGORIES, normalize_expense_category
 from utils import (
     get_current_month_key, serialize_doc,
@@ -431,13 +431,13 @@ async def chat(
         "createdAt": SERVER_TIMESTAMP,
     })
 
-    # ── Fetch Chat History (Sliding Window: last 20 messages) ───────────
+    # ── Fetch Chat History (Sliding Window: last 6 messages) ───────────
     history = []
     try:
         hist_docs = list(
             messages_ref
             .order_by("createdAt", direction="DESCENDING")
-            .limit(20)
+            .limit(6)
             .stream()
         )
         hist_docs.reverse() # Chronological order
