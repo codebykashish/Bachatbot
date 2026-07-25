@@ -2,14 +2,14 @@
 
 BachatBot is an intelligent, AI-powered personal finance and expense-tracking application built specifically for the Nepali context. Track expenses, set budgets, and achieve savings goals simply by chatting with an AI in Romanized Nepali (e.g., "500 momo ma khaye"). 
 
-Beyond just logging numbers, BachatBot acts as your personal **Financial Coach**, offering smart insights, recovery plans when you overspend, and personalized weekly reviews.
+Beyond just logging numbers, BachatBot acts as your personal **Smart Insights Engine**, offering smart insights, recovery plans when you overspend, and personalized weekly reviews.
 
 ---
 
 ## 🌟 Key Features
 
 - **Conversational Tracking**: Tell the bot what you spent in natural language (Nepali, Roman Nepali, or English) — e.g., "Momo 250", "spent 500 on food".
-- **Financial Coach (New!)**: A smart dashboard that tracks your spending pace, analyzes your pure savings, and warns you if you are at risk of overspending.
+- **Smart Insights Engine (New!)**: A smart dashboard that tracks your spending pace, analyzes your pure savings, and warns you if you are at risk of overspending.
 - **Dynamic Recovery Plans**: If you overspend, the AI calculates exactly how much you should limit your daily spending to get back on track by the end of the month.
 - **Weekly Reflections**: Every week, get a personalized, human-like summary of your money habits ("Your Week in Money") highlighting wins, unusual patterns, and next steps.
 - **Notification Sync**: Smartly reads bank and wallet SMS/notifications (eSewa, Khalti) to automate expense logging.
@@ -61,6 +61,7 @@ python -m venv venv
 # Activate (Windows): venv\Scripts\activate
 # Activate (Mac/Linux): source venv/bin/activate
 
+# Install required Python packages from requirements.txt
 pip install -r requirements.txt
 uvicorn main:app --reload
 ```
@@ -70,7 +71,10 @@ uvicorn main:app --reload
 Open a new terminal and navigate to the frontend folder:
 ```bash
 cd frontend
+
+# Download all required Flutter packages from pubspec.yaml
 flutter pub get
+
 flutter run
 ```
 *(Ensure you have a mobile emulator running or an Android phone plugged in via USB debugging).*
