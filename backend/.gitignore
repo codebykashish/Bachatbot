@@ -1,0 +1,16 @@
+# Secret files - never commit these
+serviceAccountKey.json
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.DS_Store
+.token

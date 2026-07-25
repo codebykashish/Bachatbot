@@ -1,0 +1,8 @@
+# ── NOTE: This is a Flutter frontend project. ─────────────────────────────────
+# The primary app dependencies are managed in `pubspec.yaml`.
+# This `requirements.txt` is only for python scripts/utilities in the frontend directory (e.g., `fix.py`).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Standard Python tools (if needed for scripts or testing)
+requests==2.34.0
+python-dotenv==1.0.1

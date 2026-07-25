@@ -1,0 +1,46 @@
+name: bachatbot_flutter
+description: BachatBot Flutter App
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.2
+  firebase_core: ^2.25.4
+  firebase_auth: ^4.17.8
+  firebase_messaging: ^14.7.20
+  http: ^1.1.0
+  fl_chart: ^0.69.0
+  cloud_firestore: ^4.17.5
+  notification_listener_service: ^0.3.5
+  another_telephony: ^0.4.1
+  flutter_local_notifications: ^17.2.3
+  shared_preferences: ^2.2.2
+  google_fonts: ^6.1.0
+  image_picker: ^1.0.7
+  http_parser: ^4.0.0
+  url_launcher: ^6.2.5
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/launcher_icon.png"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/bachatbot_logo.png
+    - assets/images/launcher_icon.png
+    - assets/images/expenseai_logo.png

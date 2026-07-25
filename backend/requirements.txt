@@ -1,0 +1,34 @@
+# ── Web Framework ─────────────────────────────────────────────────────────────
+fastapi==0.111.0
+uvicorn==0.29.0
+python-multipart==0.0.28        # multipart/form-data support
+
+# ── Firebase & Google Cloud ───────────────────────────────────────────────────
+firebase-admin==6.5.0
+google-cloud-firestore==2.27.0
+google-generativeai==0.7.2      # Gemini AI
+
+# ── Data Validation ───────────────────────────────────────────────────────────
+pydantic==2.7.1
+email-validator==2.3.0          # EmailStr support in Pydantic
+
+# ── Authentication & Security ─────────────────────────────────────────────────
+passlib[bcrypt]==1.7.4          # password hashing (bcrypt backend included)
+bcrypt==5.0.0
+PyJWT==2.12.1                   # JWT token handling
+
+# ── Scheduling ────────────────────────────────────────────────────────────────
+APScheduler==3.10.4             # background job scheduler
+
+# ── HTTP & Networking ─────────────────────────────────────────────────────────
+httpx==0.28.1
+requests==2.34.0
+
+# ── Environment & Config ──────────────────────────────────────────────────────
+python-dotenv==1.0.1
+
+# ── File Upload ───────────────────────────────────────────────────────────────
+cloudinary==1.44.2              # Cloudinary image uploads
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+pytz==2026.2                    # timezone handling

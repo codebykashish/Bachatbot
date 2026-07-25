@@ -1,0 +1,325 @@
+import os
+import random
+import smtplib
+import logging
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, EmailStr
+from firebase_config import get_firestore
+from typing import Optional
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+# ─── Request Schemas ────────────────────────────────────────────────────────
+
+class SendVerificationCodeRequest(BaseModel):
+    email: EmailStr
+    purpose: Optional[str] = "signup"  # signup, reset, etc.
+
+
+class VerifyCodeRequest(BaseModel):
+    email: EmailStr
+    code: str
+
+
+class EmailCheckRequest(BaseModel):
+    email: EmailStr
+
+
+class ContactFormRequest(BaseModel):
+    name: str
+    email: EmailStr
+    message: str
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+def _send_email(recipient: str, code: str) -> None:
+    """
+    Sends a 6-digit verification code to `recipient` via Gmail SMTP.
+    Reads SMTP_EMAIL / SMTP_PASSWORD from environment.
+    """
+    smtp_email = os.getenv("SMTP_EMAIL")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+
+    if not smtp_email or not smtp_password:
+        raise RuntimeError("SMTP_EMAIL or SMTP_PASSWORD not set in environment.")
+
+    subject = "BachatBot – Your Verification Code"
+    body_text = (
+        f"Your BachatBot verification code is: {code}\n\n"
+        f"This code will expire in 10 minutes.\n\n"
+        f"If you did not request this, please ignore this email."
+    )
+    body_html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;
+                border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+      <h2 style="color:#1e293b;margin-bottom:8px;">BachatBot Verification</h2>
+      <p style="color:#475569;font-size:15px;margin-bottom:24px;">
+        Use the code below to verify your email address. It expires in <strong>10 minutes</strong>.
+      </p>
+      <div style="background:#f1f5f9;border-radius:8px;padding:20px;text-align:center;">
+        <span style="font-size:36px;font-weight:700;letter-spacing:8px;color:#0ea5e9;">{code}</span>
+      </div>
+      <p style="color:#94a3b8;font-size:13px;margin-top:24px;">
+        If you did not request this, you can safely ignore this email.
+      </p>
+    </div>
+    """
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = smtp_email
+    msg["To"] = recipient
+    msg.attach(MIMEText(body_text, "plain"))
+    msg.attach(MIMEText(body_html, "html"))
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(smtp_email, smtp_password)
+        refused = server.sendmail(smtp_email, recipient, msg.as_string())
+        if refused:
+            # sendmail returns a dict of {address: (code, reason)} for refused recipients
+            raise RuntimeError(f"Recipient refused by SMTP server: {refused}")
+
+
+# ─── Endpoints ───────────────────────────────────────────────────────────────
+
+@router.post("/check-email")
+async def check_email(body: EmailCheckRequest):
+    """
+    Look up the email in the Firestore users collection.
+    Enforces @gmail.com domain for signup checks.
+    """
+    email = body.email.lower().strip()
+    
+    # ── Domain Validation ──
+    domain = email.split("@")[-1]
+    if domain != "gmail.com":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "INVALID_EMAIL_DOMAIN",
+                "message": "Please use a Gmail address ending with @gmail.com."
+            }
+        )
+
+    db = get_firestore()
+    
+    # Check if a user with this email exists in Firestore
+    query = db.collection("users").where("email", "==", email).limit(1).get()
+    exists = len(query) > 0
+    
+    return {
+        "email": email,
+        "exists": exists
+    }
+
+
+@router.post("/send-verification-code")
+async def send_verification_code(body: SendVerificationCodeRequest):
+    """
+    Generates a random 6-digit OTP, stores it in Firestore under
+    verification_codes/{email}, and sends it via Gmail SMTP.
+    No authentication required (pre-signup flow).
+    """
+    email = body.email.lower().strip()
+    purpose = body.purpose.lower() if body.purpose else "signup"
+    
+    # ── Domain Validation (Only for Signup) ──
+    if purpose == "signup":
+        domain = email.split("@")[-1]
+        if domain != "gmail.com":
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "INVALID_EMAIL_DOMAIN",
+                    "message": "Please use a Gmail address ending with @gmail.com."
+                }
+            )
+
+    db = get_firestore()
+
+    # ── Early check for email uniqueness (signup) or existence (reset) ─────
+    user_query = db.collection("users").where("email", "==", email).limit(1).get()
+    email_exists = len(user_query) > 0
+
+    if purpose == "signup":
+        if email_exists:
+            logger.warning(f"[VERIFICATION] Signup attempt for already registered email: {email}")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "EMAIL_ALREADY_IN_USE",
+                    "message": "An account with this email already exists."
+                }
+            )
+    elif purpose == "reset":
+        if not email_exists:
+            logger.warning(f"[VERIFICATION] Reset attempt for non-existent email: {email}")
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "EMAIL_NOT_FOUND",
+                    "message": "No account found with this email address."
+                }
+            )
+
+    # Generate 6-digit code (zero-padded so "001234" stays as string)
+    code = str(random.randint(100000, 999999))
+
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(minutes=10)
+
+    # Upsert verification_codes/{email}
+    doc_ref = db.collection("verification_codes").document(email)
+    doc_ref.set({
+        "code": code,
+        "createdAt": now,
+        "expiresAt": expires_at,
+    })
+
+    # Send email — surface errors as 500 so client can retry
+    try:
+        _send_email(email, code)
+    except Exception as exc:
+        logger.error(f"[VERIFICATION] Failed to send email to {email}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "EMAIL_SEND_FAILED",
+                "message": "Failed to send verification email. Please try again.",
+            },
+        )
+
+    logger.info(f"[VERIFICATION] Code sent to {email}")
+    return {"success": True, "message": "Verification code sent to your email."}
+
+
+@router.post("/verify-code")
+async def verify_code(body: VerifyCodeRequest):
+    """
+    Validates a 6-digit OTP against the Firestore verification_codes/{email} doc.
+    On success the document is deleted so the code cannot be reused.
+    No authentication required (pre-signup flow).
+    """
+    email = body.email.lower().strip()
+    code = body.code.strip()
+    db = get_firestore()
+
+    doc_ref = db.collection("verification_codes").document(email)
+    doc = doc_ref.get()
+
+    if not doc.exists:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "INVALID_CODE",
+                "message": "Invalid or expired verification code.",
+            },
+        )
+
+    data = doc.to_dict()
+    stored_code: str = data.get("code", "")
+    expires_at: datetime = data.get("expiresAt")
+
+    # Normalise timezone — Firestore returns UTC-aware datetimes
+    now = datetime.now(timezone.utc)
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    # Check expiry first (timing-safe: no code comparison if already expired)
+    if expires_at and now > expires_at:
+        doc_ref.delete()  # clean up stale document
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "CODE_EXPIRED",
+                "message": "Verification code has expired. Please request a new one.",
+            },
+        )
+
+    # Check code match
+    if code != stored_code:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "INVALID_CODE",
+                "message": "Verification code is incorrect.",
+            },
+        )
+
+    # Success — delete doc so the code cannot be reused
+    doc_ref.delete()
+    logger.info(f"[VERIFICATION] Email verified: {email}")
+
+    return {"success": True, "verified": True, "message": "Email verified successfully."}
+
+
+@router.post("/contact")
+async def contact_us(body: ContactFormRequest):
+    """
+    Contact Us form — sends the user's message to the support inbox via SMTP.
+    No authentication required.
+    """
+    smtp_email = os.getenv("SMTP_EMAIL")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    support_email = os.getenv("SUPPORT_EMAIL", smtp_email)  # fallback to sender
+
+    if not smtp_email or not smtp_password:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "SERVICE_UNAVAILABLE", "message": "Contact service is not configured."},
+        )
+
+    subject = f"BachatBot Contact: Message from {body.name}"
+    body_text = (
+        f"New contact form submission:\n\n"
+        f"Name:    {body.name}\n"
+        f"Email:   {body.email}\n"
+        f"Message:\n{body.message}\n"
+    )
+    body_html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px;
+                border:1px solid #e5e7eb;border-radius:12px;">
+      <h2 style="color:#1e293b;">BachatBot — New Contact Message</h2>
+      <p><strong>Name:</strong> {body.name}</p>
+      <p><strong>Email:</strong> <a href="mailto:{body.email}">{body.email}</a></p>
+      <hr/>
+      <p><strong>Message:</strong></p>
+      <p style="white-space:pre-wrap;color:#475569;">{body.message}</p>
+    </div>
+    """
+
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    import smtplib
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = smtp_email
+    msg["To"] = support_email
+    msg["Reply-To"] = body.email
+    msg.attach(MIMEText(body_text, "plain"))
+    msg.attach(MIMEText(body_html, "html"))
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(smtp_email, smtp_password)
+            refused = server.sendmail(smtp_email, support_email, msg.as_string())
+            if refused:
+                raise RuntimeError(f"Recipient refused: {refused}")
+    except Exception as exc:
+        logger.error(f"[CONTACT] Failed to send contact email: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "EMAIL_SEND_FAILED", "message": "Failed to send your message. Please try again."},
+        )
+
+    logger.info(f"[CONTACT] Message from {body.email} ({body.name}) delivered to support")
+    return {"success": True, "message": "Your message has been sent. We'll get back to you soon!"}
