@@ -40,6 +40,15 @@ async def weekly_reflection(current_user: dict = Depends(get_current_user)):
     try:
         reflection = generate_weekly_reflection(db, uid, week_start, week_end)
     except WeeklyReflectionError:
-        return {"success": True, "data": None}
+        # Account Existence Boundary: account is too new for a completed past week.
+        # Fall back to the current (in-progress) week so new accounts still see the card.
+        from datetime import date, timedelta
+        today = date.today()
+        this_monday = today - timedelta(days=today.weekday())
+        this_week_end = this_monday + timedelta(days=6)
+        try:
+            reflection = generate_weekly_reflection(db, uid, this_monday, this_week_end)
+        except WeeklyReflectionError:
+            return {"success": True, "data": None}
 
     return {"success": True, "data": reflection}

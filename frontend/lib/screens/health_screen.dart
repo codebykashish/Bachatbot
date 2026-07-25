@@ -286,7 +286,7 @@ class _HealthScreenState extends State<HealthScreen> {
     final theme = HealthTheme.forStatus('amber');
 
     final message = recoveryPossible
-        ? 'Try Rs $dailyTarget/day for the next $durationDays days to finish the month comfortably.'
+        ? 'As per now, if we distribute your remaining budget, you can spend Rs $dailyTarget/day comfortably.'
         : "This month can't be fully recovered, but spending less now still helps.";
 
     return Container(
