@@ -16,6 +16,7 @@ async def process_chat_message(
     overall_health_status: str | None = None,
     top_risk_category: str | None = None,
     at_risk_goal: dict | None = None,
+    financial_context: dict | None = None,
 ) -> dict:
     """
     Orchestrates the chat message processing.
@@ -38,7 +39,8 @@ async def process_chat_message(
             history=history,
             overall_health_status=overall_health_status,
             top_risk_category=top_risk_category,
-            at_risk_goal=at_risk_goal
+            at_risk_goal=at_risk_goal,
+            financial_context=financial_context,
         )
         logger.info("[AI] Gemini request succeeded")
         provider_used = "Gemini"
@@ -58,7 +60,8 @@ async def process_chat_message(
                 history=history,
                 overall_health_status=overall_health_status,
                 top_risk_category=top_risk_category,
-                at_risk_goal=at_risk_goal
+                at_risk_goal=at_risk_goal,
+                financial_context=financial_context,
             )
             logger.info("[AI] Ollama request succeeded")
             provider_used = "Ollama"
@@ -81,7 +84,8 @@ async def process_chat_message(
                 history=history,
                 overall_health_status=overall_health_status,
                 top_risk_category=top_risk_category,
-                at_risk_goal=at_risk_goal
+                at_risk_goal=at_risk_goal,
+                financial_context=financial_context,
             )
             provider_used = "Ollama"
         except Exception:
@@ -99,7 +103,8 @@ async def process_chat_message(
                 history=history,
                 overall_health_status=overall_health_status,
                 top_risk_category=top_risk_category,
-                at_risk_goal=at_risk_goal
+                at_risk_goal=at_risk_goal,
+                financial_context=financial_context,
             )
             provider_used = "Ollama"
         except Exception:

@@ -51,6 +51,158 @@ def _chat_context_facts(db, uid, month_key):
     return top_risk_category, at_risk_goal
 
 
+def _build_financial_context(db, uid: str, month_key: str) -> dict:
+    """
+    Builds the rich FinancialContext dict that is injected into the AI system
+    prompt every turn. All figures come from the Engine summary — never
+    independently re-calculated here (Ground Truth Principle).
+    """
+    from services.financial_engine import get_summary
+    import calendar
+    from datetime import date, datetime
+
+    ctx = {}
+    try:
+        summary = get_summary(db, uid, month_key)
+        category_remaining = summary.get("categoryRemaining") or {}
+
+        # Budget rows — sorted by percent used descending (tightest first)
+        budgets = []
+        for cat, data in category_remaining.items():
+            limit = data.get("limit", 0)
+            spent = data.get("spent", 0)
+            remaining = data.get("remaining", max(0, limit - spent))
+            pct = round((spent / limit * 100), 1) if limit > 0 else 0.0
+            budgets.append({
+                "category": cat,
+                "limit": limit,
+                "spent": spent,
+                "remaining": remaining,
+                "percentUsed": pct,
+            })
+        budgets.sort(key=lambda b: -b["percentUsed"])
+
+        # Income breakdown
+        profile = db.collection("users").document(uid).get().to_dict() or {}
+        income_map = profile.get("income", {}) or {}
+        in_hand = float(income_map.get("inHand", 0))
+        in_bank = float(income_map.get("inBank", 0))
+        online = float(income_map.get("onlineBanking", 0))
+        total_income = in_hand + in_bank + online
+
+        # Unallocated = total income - sum of all budget limits
+        total_budget_limits = sum(b["limit"] for b in budgets)
+        unallocated = max(0, total_income - total_budget_limits)
+
+        # Days remaining in month
+        today = date.today()
+        y, m = int(month_key[:4]), int(month_key[5:7])
+        last_day = calendar.monthrange(y, m)[1]
+        month_end = date(y, m, last_day)
+        days_remaining = max(0, (month_end - today).days + 1)
+
+        # Remaining total budget across all categories
+        total_remaining_budget = sum(b["remaining"] for b in budgets)
+        daily_spend = round(total_remaining_budget / days_remaining, 0) if days_remaining > 0 else 0
+
+        ctx = {
+            "monthKey": month_key,
+            "totalIncome": total_income,
+            "inHand": in_hand,
+            "inBank": in_bank,
+            "onlineBanking": online,
+            "totalSpent": summary.get("totalSpent", 0),
+            "unallocated": unallocated,
+            "totalBudgetLimits": total_budget_limits,
+            "totalRemainingBudget": total_remaining_budget,
+            "daysRemaining": days_remaining,
+            "recommendedDailySpend": daily_spend,
+            "budgets": budgets,
+        }
+    except Exception as e:
+        print(f"[CHAT] _build_financial_context failed (non-critical): {e}")
+    return ctx
+
+
+def _build_visual_payload(visual_type: str | None, financial_context: dict, month_key: str) -> dict | None:
+    """
+    Builds the structured visual payload that Flutter renders as a rich card.
+    The backend — not Gemini — owns this data so it's always accurate.
+    Returns None if no visual is needed.
+    """
+    if not visual_type or not financial_context:
+        return None
+
+    fc = financial_context
+
+    if visual_type == "budget_summary":
+        budgets = fc.get("budgets", [])
+        # Find tightest category
+        insight = None
+        if budgets:
+            tightest = budgets[0]  # already sorted by % desc
+            pct = tightest.get("percentUsed", 0)
+            cat = tightest.get("category", "")
+            remaining = int(tightest.get("remaining", 0))
+            if pct >= 90:
+                insight = f"⚠️ {cat} is critically low — Rs {remaining} remaining."
+            elif pct >= 75:
+                insight = f"⚠️ {cat} is running low at {pct}%."
+            else:
+                insight = None
+        return {
+            "type": "budget_summary",
+            "budgets": budgets,
+            "totalSpent": int(fc.get("totalSpent", 0)),
+            "totalIncome": int(fc.get("totalIncome", 0)),
+            "unallocated": int(fc.get("unallocated", 0)),
+            "daysRemaining": fc.get("daysRemaining", 0),
+            "monthKey": fc.get("monthKey", month_key),
+            "insight": insight,
+        }
+
+    if visual_type == "daily_spend":
+        budgets = fc.get("budgets", [])
+        tightest = budgets[0] if budgets else {}
+        return {
+            "type": "daily_spend",
+            "recommendedDailySpend": int(fc.get("recommendedDailySpend", 0)),
+            "daysRemaining": fc.get("daysRemaining", 0),
+            "totalRemainingBudget": int(fc.get("totalRemainingBudget", 0)),
+            "tightestCategory": tightest.get("category"),
+            "tightestRemaining": int(tightest.get("remaining", 0)),
+            "monthKey": fc.get("monthKey", month_key),
+        }
+
+    if visual_type == "spending_chart":
+        budgets = fc.get("budgets", [])
+        # Chart data: only categories with actual spending
+        chart_data = [
+            {"category": b["category"], "spent": int(b["spent"]), "percentUsed": b["percentUsed"]}
+            for b in budgets if b.get("spent", 0) > 0
+        ]
+        chart_data.sort(key=lambda x: -x["spent"])
+        biggest = chart_data[0] if chart_data else {}
+        return {
+            "type": "spending_chart",
+            "data": chart_data,
+            "totalSpent": int(fc.get("totalSpent", 0)),
+            "biggestCategory": biggest.get("category"),
+            "biggestAmount": biggest.get("spent", 0),
+            "monthKey": fc.get("monthKey", month_key),
+        }
+
+    if visual_type == "budget_alert":
+        return {
+            "type": "budget_alert",
+            "unallocated": int(fc.get("unallocated", 0)),
+            "totalIncome": int(fc.get("totalIncome", 0)),
+            "monthKey": fc.get("monthKey", month_key),
+        }
+
+    return None
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers — one function per action type
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1052,6 +1204,9 @@ async def chat(
     # above: a failure here falls back to no extra facts, never blocks chat.
     top_risk_category, at_risk_goal = _chat_context_facts(db, uid, curr_month)
 
+    # Rich FinancialContext — all real budget/income/daily-spend data for AI
+    financial_context = _build_financial_context(db, uid, curr_month)
+
     # ── Call Gemini ──────────────────────────────────────────────────────
     try:
         gemini_result = await process_chat_message(
@@ -1063,6 +1218,7 @@ async def chat(
             overall_health_status=overall_health_status,
             top_risk_category=top_risk_category,
             at_risk_goal=at_risk_goal,
+            financial_context=financial_context,
         )
         gemini_reply = gemini_result["reply"]
         actions = gemini_result["actions"]
@@ -1095,6 +1251,17 @@ async def chat(
         }
 
     print(f"[CHAT] uid={uid} actions={[a.get('intent') for a in actions]}")
+
+    # ── Extract visual_type from AI actions ─────────────────────────────
+    # The AI sets visual_type in the DATA block to signal which rich card
+    # Flutter should render. Backend then builds the actual structured data.
+    _visual_type = None
+    for _a in actions:
+        _vt = _a.get("visual_type")
+        if _vt:
+            _visual_type = _vt
+            break
+    _visual_payload = _build_visual_payload(_visual_type, financial_context, curr_month)
 
     # ── Rent category fallback ───────────────────────────────────────────
     # If Gemini returned "Other" but the user clearly mentioned rent,
@@ -1384,6 +1551,10 @@ async def chat(
             if alt:
                 alerts_created.append(alt)
             reply_parts.append(rp)
+            try:
+                engine_recompute(db, uid, month_key, reason=RecomputeReason.BUDGET_UPDATED)
+            except Exception as e:
+                logger.error(f"[CHAT] Engine recompute failed after budget set: {e}")
 
         # ── QUERY MONTH TOTAL ────────────────────────────────────────────
         elif intent == "query_month_total":
@@ -1527,18 +1698,29 @@ async def chat(
         # mutable counter (Ground Truth Principle, spec Section 8), which
         # can drift from reality. Reads categoryRemaining instead, which
         # the Engine derives fresh from confirmed transactions every time.
-        elif intent == "query_budget_status" and action.get("category"):
-            cat = action["category"]
-            b = (get_summary(db, uid, month_key).get("categoryRemaining", {}) or {}).get(cat)
-            if b:
-                bl = b.get("limit", 0)
-                bs = b.get("spent", 0)
-                br = b.get("remaining", max(0, bl - bs))
-                bp = round((bs / bl * 100), 1) if bl > 0 else 0
-                reply_parts.append(f"{cat} budget Rs {int(bl)}, spent Rs {int(bs)}, baki Rs {int(br)} ({bp}%)")
+        elif intent == "query_budget_status":
+            cat = action.get("category")
+            if cat:
+                # Single category budget status
+                b = (get_summary(db, uid, month_key).get("categoryRemaining", {}) or {}).get(cat)
+                if b:
+                    bl = b.get("limit", 0)
+                    bs = b.get("spent", 0)
+                    br = b.get("remaining", max(0, bl - bs))
+                    bp = round((bs / bl * 100), 1) if bl > 0 else 0
+                    reply_parts.append(f"{cat} budget Rs {int(bl)}, spent Rs {int(bs)}, baki Rs {int(br)} ({bp}%)")
+                else:
+                    reply_parts.append(f"{cat} ko lagi budget set gareko chaina yo mahina")
+                print(f"[CHAT] query_budget_status: {cat}")
             else:
-                reply_parts.append(f"{cat} ko lagi budget set gareko chaina yo mahina")
-            print(f"[CHAT] query_budget_status: {cat}")
+                # All budgets — visual card handles the full table display
+                # The reply_parts text is kept minimal; Flutter shows the card
+                budgets_fc = financial_context.get("budgets", []) if financial_context else []
+                if budgets_fc:
+                    reply_parts.append("Yo mahina ko budget:")
+                else:
+                    reply_parts.append("Yo mahina ko lagi kuni pani budget set gareko chaina.")
+                print("[CHAT] query_budget_status: all categories")
 
         # ── QUERY PAST REPORT ─────────────────────────────────────────────
         elif intent == "query_past_report":
@@ -2071,6 +2253,7 @@ async def chat(
             "transaction": last_transaction,
             "budgetUpdate": last_budget_update,
             "alerts": alerts_created,
+            "visual": _visual_payload,
         },
     }
 
@@ -2434,6 +2617,10 @@ async def chat_sync(
                     if alt:
                         alerts_created.append(alt)
                     reply_parts.append(rp)
+                    try:
+                        engine_recompute(db, uid, month_key, reason=RecomputeReason.BUDGET_UPDATED)
+                    except Exception as e:
+                        logger.error(f"[CHAT] Engine recompute failed after budget set: {e}")
 
                 # ── QUERY MONTH TOTAL ────────────────────────────────────
                 elif intent == "query_month_total":

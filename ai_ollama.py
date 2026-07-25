@@ -15,6 +15,7 @@ def call_ollama_chat(
     overall_health_status: str | None = None,
     top_risk_category: str | None = None,
     at_risk_goal: dict | None = None,
+    financial_context: dict | None = None,
 ) -> str:
     """
     Calls Ollama API with the given context and returns the raw response text.
@@ -43,7 +44,34 @@ def call_ollama_chat(
         f"AtRiskGoal: {at_risk_goal_line}\n"
         f"--- END CONTEXT ---\n"
     )
-    instruction = f"{SYSTEM_PROMPT}\n{context_block}"
+
+    # Build FinancialContext block
+    fin_block = ""
+    if financial_context:
+        fc = financial_context
+        budgets = fc.get("budgets", [])
+        budget_lines = []
+        for b in budgets:
+            cat = b.get("category", "")
+            limit = int(b.get("limit", 0))
+            spent = int(b.get("spent", 0))
+            remaining = int(b.get("remaining", 0))
+            pct = round(b.get("percentUsed", 0), 1)
+            budget_lines.append(f"  {cat}: limit Rs {limit} | spent Rs {spent} | remaining Rs {remaining} | {pct}%")
+        budgets_str = "\n".join(budget_lines) if budget_lines else "  (no budgets set)"
+        fin_block = (
+            f"\n--- FINANCIAL CONTEXT (month: {fc.get('monthKey', '?')}) ---\n"
+            f"Income: Rs {int(fc.get('totalIncome', 0))} "
+            f"(InHand: {int(fc.get('inHand', 0))} | InBank: {int(fc.get('inBank', 0))} | Online: {int(fc.get('onlineBanking', 0))})\n"
+            f"Unallocated Income: Rs {int(fc.get('unallocated', 0))}\n"
+            f"Total Spent This Month: Rs {int(fc.get('totalSpent', 0))}\n"
+            f"Days Remaining: {fc.get('daysRemaining', '?')}\n"
+            f"Recommended Daily Spend: Rs {int(fc.get('recommendedDailySpend', 0))}\n"
+            f"Budgets:\n{budgets_str}\n"
+            f"--- END FINANCIAL CONTEXT ---\n"
+        )
+
+    instruction = f"{SYSTEM_PROMPT}\n{context_block}{fin_block}"
 
     messages = [
         {"role": "system", "content": instruction}
